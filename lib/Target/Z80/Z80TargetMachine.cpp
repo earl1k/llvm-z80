@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Z80.h"
 #include "Z80TargetMachine.h"
+#include "Z80.h"
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
 
@@ -23,5 +23,6 @@ extern "C" void LLVMInitializeZ80Target() {
 Z80TargetMachine::Z80TargetMachine(const Target &T, StringRef TT, StringRef CPU,
   StringRef FS, const TargetOptions &Options, Reloc::Model RM,
   CodeModel::Model CM, CodeGenOpt::Level OL)
-  : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL)
+  : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+  DL("e-p:16:8:8-i8:8:8-i16:8:8-n8:16")
 {}
