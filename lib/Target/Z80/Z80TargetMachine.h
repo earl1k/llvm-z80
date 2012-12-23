@@ -14,8 +14,8 @@
 #ifndef Z80TARGETMACHINE_H
 #define Z80TARGETMACHINE_H
 
+#include "Z80.h"
 #include "llvm/DataLayout.h"
-#include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
   class Z80TargetMachine : public LLVMTargetMachine {

@@ -27,5 +27,5 @@ parent = Target
 type = Library
 name = Z80CodeGen
 parent = Z80
-required_libraries = AsmPrinter CodeGen Core MC SelectionDAG Z80Desc Z80Info
+required_libraries = AsmPrinter CodeGen Core MC SelectionDAG Support Target Z80Desc Z80Info
 add_to_library_groups = Z80
