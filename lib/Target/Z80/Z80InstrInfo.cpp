@@ -1,4 +1,4 @@
-//===-- Z80MCTargetDesc.h - Z80 Target Descriptions -------------*- C++ -*-===//
+//===-- Z80InstrInfo.cpp - Z80 Instruction Information --------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,23 +7,18 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file provides Z80 specific target descriptions.
+// This file contains the Z80 implementation of the TargetInstrInfo class.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef Z80MCTARGETDESC_H
-#define Z80MCTARGETDESC_H
+#include "Z80InstrInfo.h"
+#include "Z80.h"
 
-namespace llvm {
-  class Target;
-
-  extern Target TheZ80Target;
-} // end namespace llvm
-
-#define GET_REGINFO_ENUM
-#include "Z80GenRegisterInfo.inc"
-
-#define GET_INSTRINFO_ENUM
+#define GET_INSTRINFO_CTOR
 #include "Z80GenInstrInfo.inc"
 
-#endif
+using namespace llvm;
+
+Z80InstrInfo::Z80InstrInfo(Z80TargetMachine &tm)
+  : RI(tm, *this), TM(tm)
+{}

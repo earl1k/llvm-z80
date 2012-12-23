@@ -26,6 +26,17 @@ namespace llvm {
     const TargetInstrInfo &TII;
   public:
     Z80RegisterInfo(Z80TargetMachine &tm, const TargetInstrInfo &tii);
+
+    // Code Generation virtual methods...
+    const uint16_t *getCalleeSavedRegs(const MachineFunction *MF = 0) const;
+
+    BitVector getReservedRegs(const MachineFunction &MF) const;
+
+    void eliminateFrameIndex(MachineBasicBlock::iterator I,
+      int SPAdj, RegScavenger *RS = NULL) const;
+
+    // Debug information queries
+    unsigned getFrameRegister(const MachineFunction &MF) const;
   }; // end class Z80RegisterInfo
 } // end namespace llvm
 

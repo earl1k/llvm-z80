@@ -22,8 +22,17 @@ include "llvm/Target/Target.td"
 include "Z80RegisterInfo.td"
 
 //===----------------------------------------------------------------------===//
+// Instruction Descriptions
+//===----------------------------------------------------------------------===//
+
+include "Z80InstrInfo.td"
+
+def Z80InstrInfo : InstrInfo;
+
+//===----------------------------------------------------------------------===//
 // Target Declaration
 //===----------------------------------------------------------------------===//
 
 def Z80 : Target {
+  let InstructionSet = Z80InstrInfo;
 }

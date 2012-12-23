@@ -15,16 +15,19 @@
 #define Z80TARGETMACHINE_H
 
 #include "Z80.h"
+#include "Z80InstrInfo.h"
 #include "llvm/DataLayout.h"
 
 namespace llvm {
   class Z80TargetMachine : public LLVMTargetMachine {
     const DataLayout DL;  // Calculates type size & alignment
+    Z80InstrInfo InstrInfo;
   public:
     Z80TargetMachine(const Target &T, StringRef TT, StringRef CPU,
       StringRef FS, const TargetOptions &Options, Reloc::Model RM,
       CodeModel::Model CM, CodeGenOpt::Level OL);
     virtual const DataLayout *getDataLayout() const { return &DL; }
+    virtual const Z80InstrInfo *getInstrInfo() const { return &InstrInfo; }
   }; // end class Z80TargetMachine
 } // end namespace llvm
 
