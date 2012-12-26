@@ -46,6 +46,7 @@ namespace llvm {
     virtual const Z80TargetLowering *getTargetLowering() const {
       return &TLInfo;
     }
+    virtual TargetPassConfig *createPassConfig(PassManagerBase &PM);
   }; // end class Z80TargetMachine
 } // end namespace llvm
 

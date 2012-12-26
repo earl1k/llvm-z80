@@ -18,12 +18,19 @@
 include "Z80InstrFormats.td"
 
 //===----------------------------------------------------------------------===//
+// Z80 Specific Node Definitions.
+//===----------------------------------------------------------------------===//
+def Z80ret : SDNode<"Z80ISD::RET", SDTNone, [SDNPHasChain, SDNPOptInGlue]>;
+
+//===----------------------------------------------------------------------===//
 // Instruction list.
 //===----------------------------------------------------------------------===//
 
-def NOP : Instruction {
+def RET : Instruction {
   let Namespace = "Z80";
 
   dag OutOperandList = (outs);
   dag InOperandList = (ins);
+
+  let Pattern = [(Z80ret)];
 }

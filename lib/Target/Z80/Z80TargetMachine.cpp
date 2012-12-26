@@ -13,6 +13,7 @@
 
 #include "Z80TargetMachine.h"
 #include "Z80.h"
+#include "llvm/CodeGen/Passes.h"
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
 
@@ -28,3 +29,24 @@ Z80TargetMachine::Z80TargetMachine(const Target &T, StringRef TT, StringRef CPU,
   DL("e-p:16:8:8-i8:8:8-i16:8:8-n8:16"),
   InstrInfo(*this), TSInfo(*this), TLInfo(*this)
 {}
+
+namespace {
+  class Z80PassConfig : public TargetPassConfig {
+  public:
+    Z80PassConfig(Z80TargetMachine *TM, PassManagerBase &PM)
+      : TargetPassConfig(TM, PM) {}
+    Z80TargetMachine &getZ80TargetMachine() const {
+      return getTM<Z80TargetMachine>();
+    }
+    virtual bool addInstSelector();
+  }; // end class Z80PassConfig
+} // end namespace
+
+TargetPassConfig *Z80TargetMachine::createPassConfig(PassManagerBase &PM) {
+  return new Z80PassConfig(this, PM);
+}
+
+bool Z80PassConfig::addInstSelector() {
+  addPass(createZ80ISelDAG(getZ80TargetMachine(), getOptLevel()));
+  return false;
+}
