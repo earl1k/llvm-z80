@@ -19,6 +19,7 @@
 #include "Z80ISelLowering.h"
 #include "Z80InstrInfo.h"
 #include "Z80SelectionDAGInfo.h"
+#include "Z80Subtarget.h"
 #include "llvm/DataLayout.h"
 
 namespace llvm {
@@ -27,6 +28,7 @@ namespace llvm {
     Z80FrameLowering FrameLowering;
     Z80InstrInfo InstrInfo;
     Z80SelectionDAGInfo TSInfo;
+    Z80Subtarget Subtarget;
     Z80TargetLowering TLInfo;
   public:
     Z80TargetMachine(const Target &T, StringRef TT, StringRef CPU,
@@ -43,6 +45,7 @@ namespace llvm {
     virtual const Z80SelectionDAGInfo *getSelectionDAGInfo() const {
       return &TSInfo;
     }
+    virtual const Z80Subtarget *getSubtargetImpl() const { return &Subtarget; }
     virtual const Z80TargetLowering *getTargetLowering() const {
       return &TLInfo;
     }

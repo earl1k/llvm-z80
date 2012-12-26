@@ -26,4 +26,7 @@ namespace llvm {
 #define GET_INSTRINFO_ENUM
 #include "Z80GenInstrInfo.inc"
 
+#define GET_SUBTARGETINFO_ENUM
+#include "Z80GenSubtargetInfo.inc"
+
 #endif

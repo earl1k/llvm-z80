@@ -27,7 +27,8 @@ Z80TargetMachine::Z80TargetMachine(const Target &T, StringRef TT, StringRef CPU,
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
   FrameLowering(*this),
   DL("e-p:16:8:8-i8:8:8-i16:8:8-n8:16"),
-  InstrInfo(*this), TSInfo(*this), TLInfo(*this)
+  InstrInfo(*this), TSInfo(*this), TLInfo(*this),
+  Subtarget(TT, CPU, FS)
 {}
 
 namespace {
