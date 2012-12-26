@@ -15,12 +15,14 @@
 #define Z80TARGETMACHINE_H
 
 #include "Z80.h"
+#include "Z80FrameLowering.h"
 #include "Z80InstrInfo.h"
 #include "llvm/DataLayout.h"
 
 namespace llvm {
   class Z80TargetMachine : public LLVMTargetMachine {
     const DataLayout DL;  // Calculates type size & alignment
+    Z80FrameLowering FrameLowering;
     Z80InstrInfo InstrInfo;
   public:
     Z80TargetMachine(const Target &T, StringRef TT, StringRef CPU,
