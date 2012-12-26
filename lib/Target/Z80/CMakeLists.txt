@@ -8,6 +8,7 @@ add_llvm_target(Z80CodeGen
   Z80FrameLowering.cpp
   Z80InstrInfo.cpp
   Z80RegisterInfo.cpp
+  Z80SelectionDAGInfo.cpp
   Z80TargetMachine.cpp
 )
 

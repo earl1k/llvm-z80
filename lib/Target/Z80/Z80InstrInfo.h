@@ -27,6 +27,8 @@ namespace llvm {
     Z80TargetMachine &TM;
   public:
     explicit Z80InstrInfo(Z80TargetMachine &tm);
+
+    virtual const Z80RegisterInfo &getRegisterInfo() const { return RI; }
   }; // end class Z80InstrInfo
 } // end namespace llvm
 
