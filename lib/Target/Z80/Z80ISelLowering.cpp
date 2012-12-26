@@ -22,3 +22,21 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
   : TargetLowering(TM, new TargetLoweringObjectFileELF())
 {
 }
+
+SDValue Z80TargetLowering::LowerFormalArguments(SDValue Chain,
+  CallingConv::ID CallConv, bool isVarArg,
+  const SmallVectorImpl<ISD::InputArg> &Ins,
+  DebugLoc dl, SelectionDAG &DAG,
+  SmallVectorImpl<SDValue> &InVals) const
+{
+  return Chain;
+}
+
+SDValue Z80TargetLowering::LowerReturn(SDValue Chain,
+  CallingConv::ID CallConv, bool isVarArg,
+  const SmallVectorImpl<ISD::OutputArg> &Outs,
+  const SmallVectorImpl<SDValue> &OutVals,
+  DebugLoc dl, SelectionDAG &DAG) const
+{
+  return Chain;
+}
