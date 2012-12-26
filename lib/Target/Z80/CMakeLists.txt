@@ -6,6 +6,7 @@ add_public_tablegen_target(Z80CommonTableGen)
 
 add_llvm_target(Z80CodeGen
   Z80FrameLowering.cpp
+  Z80ISelLowering.cpp
   Z80InstrInfo.cpp
   Z80RegisterInfo.cpp
   Z80SelectionDAGInfo.cpp
