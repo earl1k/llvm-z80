@@ -1,4 +1,4 @@
-//===- Z80.td - Describe the Z80 Target Machine ---------------*- tblgen -*-==//
+//===-- Z80CallingConv.td - Z80 Calling Conventions --------*- tablegen -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -6,29 +6,15 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-// This is the top level entry point for the Z80 target.
+//
+// This describes the calling conventions for the Z80 architectures.
+//
 //===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
-// Target-independent interfaces
+// Z80 Return Value Calling Convention
 //===----------------------------------------------------------------------===//
 
-include "llvm/Target/Target.td"
-
 //===----------------------------------------------------------------------===//
-// Descriptions
+// Z80 Argument Calling Conventions
 //===----------------------------------------------------------------------===//
-
-include "Z80RegisterInfo.td"
-include "Z80InstrInfo.td"
-include "Z80CallingConv.td"
-
-def Z80InstrInfo : InstrInfo;
-
-//===----------------------------------------------------------------------===//
-// Target Declaration
-//===----------------------------------------------------------------------===//
-
-def Z80 : Target {
-  let InstructionSet = Z80InstrInfo;
-}
