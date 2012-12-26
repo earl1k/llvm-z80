@@ -30,7 +30,49 @@
 
 using namespace llvm;
 
+static MCInstrInfo *createZ80MCInstrInfo() {
+  MCInstrInfo *X = new MCInstrInfo();
+  InitZ80MCInstrInfo(X);
+  return X;
+}
+
+static MCRegisterInfo *createZ80MCRegisterInfo(StringRef TT) {
+  MCRegisterInfo *X = new MCRegisterInfo();
+  InitZ80MCRegisterInfo(X, Z80::PC);
+  return X;
+}
+
+static MCSubtargetInfo *createZ80MCSubtargetInfo(StringRef TT, StringRef CPU,
+  StringRef FS) {
+    MCSubtargetInfo *X = new MCSubtargetInfo();
+    InitZ80MCSubtargetInfo(X, TT, CPU, FS);
+    return X;
+}
+
+static MCCodeGenInfo *createZ80MCCodeGenInfo(StringRef TT, Reloc::Model RM,
+  CodeModel::Model CM, CodeGenOpt::Level OL) {
+    MCCodeGenInfo *X = new MCCodeGenInfo();
+    X->InitMCCodeGenInfo(RM, CM, OL);
+    return X;
+}
+
 extern "C" void LLVMInitializeZ80TargetMC() {
   // Register the MC asm info
   RegisterMCAsmInfo<Z80MCAsmInfo> X(TheZ80Target);
+
+  // Register the MC codegen info
+  TargetRegistry::RegisterMCCodeGenInfo(TheZ80Target,
+    createZ80MCCodeGenInfo);
+
+  // Register the MC instruction info
+  TargetRegistry::RegisterMCInstrInfo(TheZ80Target,
+    createZ80MCInstrInfo);
+
+  // Register the MC register info
+  TargetRegistry::RegisterMCRegInfo(TheZ80Target,
+    createZ80MCRegisterInfo);
+
+  // Register the MC subtarget info
+  TargetRegistry::RegisterMCSubtargetInfo(TheZ80Target,
+    createZ80MCSubtargetInfo);
 }
