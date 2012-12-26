@@ -16,7 +16,7 @@
 using namespace llvm;
 
 Z80FrameLowering::Z80FrameLowering(const Z80TargetMachine &tm)
-  : TargetFrameLowering(TargetFrameLowering::StackGrowsDown, 1, 2), TM(tm)
+  : TargetFrameLowering(TargetFrameLowering::StackGrowsDown, 1, -2), TM(tm)
 {}
 
 bool Z80FrameLowering::hasFP(const MachineFunction &MF) const
