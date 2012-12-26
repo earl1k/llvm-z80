@@ -22,6 +22,7 @@ subdirectories = MCTargetDesc TargetInfo
 type = TargetGroup
 name = Z80
 parent = Target
+has_asmprinter = 1
 
 [component_1]
 type = Library
