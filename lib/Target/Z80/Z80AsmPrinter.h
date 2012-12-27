@@ -24,6 +24,11 @@ namespace llvm {
     virtual const char *getPassName() const {
       return "Z80 Assembly Printer";
     }
+    virtual void EmitInstruction(const MachineInstr *MI);
+
+    // tblgen function declaration
+    void printInstruction(const MachineInstr *MI, raw_ostream &OS);
+    static const char *getRegisterName(unsigned RegNo);
   }; // end class Z80AsmPrinter
 } // end namespace llvm
 

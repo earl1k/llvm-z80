@@ -14,8 +14,22 @@
 
 #include "Z80AsmPrinter.h"
 #include "Z80.h"
+#include "Z80TargetMachine.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/MC/MCStreamer.h"
+#include "llvm/Support/raw_os_ostream.h"
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
+
+void Z80AsmPrinter::EmitInstruction(const MachineInstr *MI)
+{
+  SmallString<128> Str;
+  raw_svector_ostream OS(Str);
+  printInstruction(MI, OS);
+  OutStreamer.EmitRawText(OS.str());
+}
+
+#include "Z80GenAsmWriter.inc"
 
 //===----------------------------------------------------------------------===//
 // Target Registry Stuff

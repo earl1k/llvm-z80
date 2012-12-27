@@ -33,4 +33,9 @@ def RET : Instruction {
   dag InOperandList = (ins);
 
   let Pattern = [(Z80ret)];
+  let AsmString = "ret";
+
+  let isReturn = 1;
+  let isTerminator = 1;
+  let isBarrier = 1;
 }

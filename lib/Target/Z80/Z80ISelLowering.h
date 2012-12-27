@@ -15,6 +15,7 @@
 #ifndef Z80ISELLOWERING_H
 #define Z80ISELLOWERING_H
 
+#include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Target/TargetLowering.h"
 
 namespace llvm {

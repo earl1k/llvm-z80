@@ -38,5 +38,5 @@ SDValue Z80TargetLowering::LowerReturn(SDValue Chain,
   const SmallVectorImpl<SDValue> &OutVals,
   DebugLoc dl, SelectionDAG &DAG) const
 {
-  return Chain;
+  return DAG.getNode(Z80ISD::RET, dl, MVT::Other, Chain);
 }
