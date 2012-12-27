@@ -38,6 +38,12 @@ def Z80InstrInfo : InstrInfo;
 // Target Declaration
 //===----------------------------------------------------------------------===//
 
+def Z80AsmWriter : AsmWriter {
+  string AsmWriterClassName = "InstPrinter";
+  bit isMCAsmWriter = 1;
+}
+
 def Z80 : Target {
   let InstructionSet = Z80InstrInfo;
+  let AssemblyWriters = [Z80AsmWriter];
 }

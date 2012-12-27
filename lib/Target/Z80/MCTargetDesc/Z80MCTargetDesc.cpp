@@ -13,6 +13,7 @@
 
 #include "Z80MCTargetDesc.h"
 #include "Z80MCAsmInfo.h"
+#include "InstPrinter/Z80InstPrinter.h"
 #include "llvm/MC/MCCodeGenInfo.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -56,6 +57,13 @@ static MCCodeGenInfo *createZ80MCCodeGenInfo(StringRef TT, Reloc::Model RM,
     return X;
 }
 
+static MCInstPrinter *createZ80MCInstPrinter(const Target &T,
+  unsigned SyntaxVariant, const MCAsmInfo &MAI, const MCInstrInfo &MII,
+  const MCRegisterInfo &MRI, const MCSubtargetInfo &STI)
+{
+  return new Z80InstPrinter(MAI, MII, MRI);
+}
+
 extern "C" void LLVMInitializeZ80TargetMC() {
   // Register the MC asm info
   RegisterMCAsmInfo<Z80MCAsmInfo> X(TheZ80Target);
@@ -75,4 +83,8 @@ extern "C" void LLVMInitializeZ80TargetMC() {
   // Register the MC subtarget info
   TargetRegistry::RegisterMCSubtargetInfo(TheZ80Target,
     createZ80MCSubtargetInfo);
+
+  // Register the MCInstPrinter
+  TargetRegistry::RegisterMCInstPrinter(TheZ80Target,
+    createZ80MCInstPrinter);
 }

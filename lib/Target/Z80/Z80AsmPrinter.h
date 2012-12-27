@@ -14,6 +14,7 @@
 #ifndef Z80ASMPRINTER_H
 #define Z80ASMPRINTER_H
 
+#include "Z80TargetMachine.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 
 namespace llvm {
@@ -25,10 +26,6 @@ namespace llvm {
       return "Z80 Assembly Printer";
     }
     virtual void EmitInstruction(const MachineInstr *MI);
-
-    // tblgen function declaration
-    void printInstruction(const MachineInstr *MI, raw_ostream &OS);
-    static const char *getRegisterName(unsigned RegNo);
   }; // end class Z80AsmPrinter
 } // end namespace llvm
 
