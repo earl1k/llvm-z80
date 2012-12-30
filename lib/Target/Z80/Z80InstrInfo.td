@@ -27,6 +27,8 @@ def Z80ret : SDNode<"Z80ISD::RET", SDTNone, [SDNPHasChain, SDNPOptInGlue]>;
 //===----------------------------------------------------------------------===//
 
 def RET : Instruction {
+  field bits<32> Inst;
+
   let Namespace = "Z80";
 
   dag OutOperandList = (outs);
@@ -35,7 +37,9 @@ def RET : Instruction {
   let Pattern = [(Z80ret)];
   let AsmString = "ret";
 
+  let Inst{7-0} = 0xC9;
   let isReturn = 1;
   let isTerminator = 1;
   let isBarrier = 1;
+  let Size = 1;
 }

@@ -87,4 +87,8 @@ extern "C" void LLVMInitializeZ80TargetMC() {
   // Register the MCInstPrinter
   TargetRegistry::RegisterMCInstPrinter(TheZ80Target,
     createZ80MCInstPrinter);
+
+  // Register the MCCodeEmitter
+  TargetRegistry::RegisterMCCodeEmitter(TheZ80Target,
+    createZ80MCCodeEmitter);
 }

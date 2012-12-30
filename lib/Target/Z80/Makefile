@@ -14,7 +14,7 @@ TARGET = Z80
 # Make sure that tblgen is run, first thing.
 BUILT_SOURCES = Z80GenInstrInfo.inc Z80GenRegisterInfo.inc \
                 Z80GenAsmWriter.inc Z80GenCallingConv.inc \
-                Z80GenSubtargetInfo.inc
+                Z80GenSubtargetInfo.inc Z80GenMCCodeEmitter.inc
 
 DIRS = InstPrinter MCTargetDesc TargetInfo
 

@@ -15,9 +15,17 @@
 #define Z80MCTARGETDESC_H
 
 namespace llvm {
+  class MCCodeEmitter;
+  class MCContext;
+  class MCInstrInfo;
+  class MCRegisterInfo;
+  class MCSubtargetInfo;
   class Target;
 
   extern Target TheZ80Target;
+
+  MCCodeEmitter *createZ80MCCodeEmitter(const MCInstrInfo &MCII,
+    const MCRegisterInfo &MRI, const MCSubtargetInfo &STI, MCContext &Ctx);
 } // end namespace llvm
 
 #define GET_REGINFO_ENUM
