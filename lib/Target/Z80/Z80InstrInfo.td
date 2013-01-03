@@ -29,5 +29,5 @@ def Z80ret : SDNode<"Z80ISD::RET", SDTNone, [SDNPHasChain, SDNPOptInGlue]>;
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RET : I<0xC9, (outs), (ins), "ret", [(Z80ret)]>;
 
-def LD8ri : I<0x06, (outs GR8:$dst), (ins i8imm:$src),
+def LD8ri : IRyI8<0x06, (outs GR8:$dst), (ins i8imm:$src),
   "ld\t{$dst, $src}", [(set GR8:$dst, imm:$src)]>;

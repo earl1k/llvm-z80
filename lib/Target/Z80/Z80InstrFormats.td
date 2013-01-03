@@ -6,9 +6,32 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
+//
+// Naming of opcode bits encoding is borrowed from this page:
+// http://z80.info/decoding.htm
+// 7 6 5 4 3 2 1 0
+// x x y y y z z z
+//     p p q
+//
+//===-------------------- --------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
 // Z80 Instruction Format Definitions.
+//===----------------------------------------------------------------------===//
+//
+// I - Instruction with no operands.
+// I<xx> - Instruction with operands.
+//
+// Operands:
+//  R<x> - Register from record x (example Rz, Ry, Rp)
+//  I<n> - Immediate with n-bits (example I8, I16)
+//
+// Examples:
+// II8   - Instruction with i8 immediate data.
+// IRyRz - Instruction with Register-Register operands, which encoding from
+//         y and z record.
+// IRyI8 - Instruction with Register from y record and i8 immediate data.
+//
 //===----------------------------------------------------------------------===//
 
 class Z80Inst<dag outs, dag ins, string asmstr>
@@ -28,4 +51,17 @@ class I<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{7-0} = opc;
   let Size = 1;
   let Pattern = pattern;
+}
+
+class IRy<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+  : I<opc, outs, ins, asmstr, pattern> {
+  bits<3> Ry;
+  let Inst{5-3} = Ry;
+}
+
+class IRyI8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+  : IRy<opc, outs, ins, asmstr, pattern> {
+  bits<8> imm;
+  let Inst{15-8} = imm;
+  let Size = 2;
 }

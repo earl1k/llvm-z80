@@ -36,9 +36,8 @@ namespace llvm {
       OS << Byte;
     }
     void EmitInstruction(uint64_t Code, unsigned Size, raw_ostream &OS) const {
-      unsigned ShiftValue = (Size * 8) - 8;
       for (unsigned i = 0; i < Size; i++) {
-        EmitByte(Code >> ShiftValue, OS);
+        EmitByte(Code, OS);
         Code >>= 8;
       }
     }
@@ -46,6 +45,10 @@ namespace llvm {
     // getBinaryCodeForInstr - tblgen generated function for getting the
     // binary encoding for an instruction.
     uint64_t getBinaryCodeForInstr(const MCInst &MI,
+      SmallVectorImpl<MCFixup> &Fixups) const;
+
+    // getMachineOpValue - Return binary encoding of operand.
+    unsigned getMachineOpValue(const MCInst &MI, const MCOperand &MO,
       SmallVectorImpl<MCFixup> &Fixups) const;
   }; // end class Z80MCCodeEmitter
 } // end namespace llvm
@@ -65,6 +68,21 @@ void Z80MCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
   uint64_t Bits = getBinaryCodeForInstr(MI, Fixups);
 
   EmitInstruction(Bits, Size, OS);
+}
+
+unsigned Z80MCCodeEmitter::getMachineOpValue(const MCInst &MI,
+  const MCOperand &MO, SmallVectorImpl<MCFixup> &Fixups) const
+{
+  if (MO.isReg())
+  {
+    unsigned Reg = MO.getReg();
+    unsigned RegNo = Ctx.getRegisterInfo().getEncodingValue(Reg);
+    return RegNo;
+  }
+  else if (MO.isImm())
+  {
+    return static_cast<unsigned>(MO.getImm());
+  }
 }
 
 #include "Z80GenMCCodeEmitter.inc"
