@@ -44,9 +44,12 @@
 using namespace llvm;
 using namespace sys;
 
-unsigned
-Process::GetPageSize()
-{
+
+process::id_type self_process::get_id() {
+  return getpid();
+}
+
+static unsigned getPageSize() {
 #if defined(__CYGWIN__)
   // On Cygwin, getpagesize() returns 64k but the page size for the purposes of
   // memory protection and mmap() is 4k.
@@ -61,6 +64,12 @@ Process::GetPageSize()
 #endif
   return static_cast<unsigned>(page_size);
 }
+
+// This constructor guaranteed to be run exactly once on a single thread, and
+// sets up various process invariants that can be queried cheaply from then on.
+self_process::self_process() : PageSize(getPageSize()) {
+}
+
 
 size_t Process::GetMallocUsage() {
 #if defined(HAVE_MALLINFO)
@@ -82,26 +91,6 @@ size_t Process::GetMallocUsage() {
     return 0;
 #else
 #warning Cannot get malloc info on this platform
-  return 0;
-#endif
-}
-
-size_t
-Process::GetTotalMemoryUsage()
-{
-#if defined(HAVE_MALLINFO)
-  struct mallinfo mi = ::mallinfo();
-  return mi.uordblks + mi.hblkhd;
-#elif defined(HAVE_MALLOC_ZONE_STATISTICS) && defined(HAVE_MALLOC_MALLOC_H)
-  malloc_statistics_t Stats;
-  malloc_zone_statistics(malloc_default_zone(), &Stats);
-  return Stats.size_allocated;   // darwin
-#elif defined(HAVE_GETRUSAGE) && !defined(__HAIKU__)
-  struct rusage usage;
-  ::getrusage(RUSAGE_SELF, &usage);
-  return usage.ru_maxrss;
-#else
-#warning Cannot get total memory size on this platform
   return 0;
 #endif
 }
@@ -318,7 +307,7 @@ static unsigned GetRandomNumberSeed() {
 
   // Otherwise, swizzle the current time and the process ID to form a reasonable
   // seed.
-  TimeValue Now = llvm::TimeValue::now();
+  TimeValue Now = TimeValue::now();
   return hash_combine(Now.seconds(), Now.nanoseconds(), ::getpid());
 }
 #endif

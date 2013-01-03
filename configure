@@ -9,7 +9,7 @@
 # This configure script is free software; the Free Software Foundation
 # gives unlimited permission to copy, distribute and modify it.
 #
-# Copyright (c) 2003-2012 University of Illinois at Urbana-Champaign.
+# Copyright (c) 2003-2013 University of Illinois at Urbana-Champaign.
 ## --------------------- ##
 ## M4sh Initialization.  ##
 ## --------------------- ##
@@ -565,7 +565,7 @@ PACKAGE_VERSION='3.3svn'
 PACKAGE_STRING='LLVM 3.3svn'
 PACKAGE_BUGREPORT='http://llvm.org/bugs/'
 
-ac_unique_file="lib/VMCore/Module.cpp"
+ac_unique_file="lib/IR/Module.cpp"
 # Factoring default headers for most tests.
 ac_includes_default="\
 #include <stdio.h>
@@ -1556,7 +1556,7 @@ Copyright (C) 1992, 1993, 1994, 1995, 1996, 1998, 1999, 2000, 2001,
 This configure script is free software; the Free Software Foundation
 gives unlimited permission to copy, distribute and modify it.
 
-Copyright (c) 2003-2012 University of Illinois at Urbana-Champaign.
+Copyright (c) 2003-2013 University of Illinois at Urbana-Champaign.
 _ACEOF
   exit
 fi
@@ -1928,7 +1928,7 @@ cat >>confdefs.h <<\_ACEOF
 _ACEOF
 
 
-LLVM_COPYRIGHT="Copyright (c) 2003-2012 University of Illinois at Urbana-Champaign."
+LLVM_COPYRIGHT="Copyright (c) 2003-2013 University of Illinois at Urbana-Champaign."
 
 
 
@@ -5107,12 +5107,12 @@ case "$enableval" in
   yes) ENABLE_CLANG_REWRITER=1
  ;;
   no)
-    if test clang_arcmt != "no" ; then
+    if test ${clang_arcmt} != "no" ; then
       { { echo "$as_me:$LINENO: error: Cannot enable clang ARC Migration Tool while disabling rewriter." >&5
 echo "$as_me: error: Cannot enable clang ARC Migration Tool while disabling rewriter." >&2;}
    { (exit 1); exit 1; }; }
     fi
-    if test clang_static_analyzer != "no" ; then
+    if test ${clang_static_analyzer} != "no" ; then
       { { echo "$as_me:$LINENO: error: Cannot enable clang static analyzer while disabling rewriter." >&5
 echo "$as_me: error: Cannot enable clang static analyzer while disabling rewriter." >&2;}
    { (exit 1); exit 1; }; }

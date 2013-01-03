@@ -813,7 +813,9 @@ namespace llvm {
     SDValue LowerUINT_TO_FP_i32(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerUINT_TO_FP_vec(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerTRUNCATE(SDValue Op, SelectionDAG &DAG) const;
-    SDValue lowerZERO_EXTEND(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerZERO_EXTEND(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerSIGN_EXTEND(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerANY_EXTEND(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFP_TO_SINT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFP_TO_UINT(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerFP_EXTEND(SDValue Op, SelectionDAG &DAG) const;
@@ -971,6 +973,9 @@ namespace llvm {
 
     virtual unsigned getCastInstrCost(unsigned Opcode, Type *Dst,
                                       Type *Src) const;
+
+    unsigned getShuffleCost(ShuffleKind Kind,
+                            Type *Tp, int Index, Type *SubTp) const;
   };
 }
 

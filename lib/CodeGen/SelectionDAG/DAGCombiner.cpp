@@ -23,10 +23,10 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/DataLayout.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/LLVMContext.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -1183,7 +1183,7 @@ SDValue DAGCombiner::combine(SDNode *N) {
 
       // Expose the DAG combiner to the target combiner impls.
       TargetLowering::DAGCombinerInfo
-        DagCombineInfo(DAG, !LegalTypes, !LegalOperations, false, this);
+        DagCombineInfo(DAG, Level, false, this);
 
       RV = TLI.PerformDAGCombine(N, DagCombineInfo);
     }
@@ -7751,8 +7751,9 @@ bool DAGCombiner::MergeConsecutiveStores(StoreSDNode* St) {
 
     // We only use vectors if the constant is known to be zero and the
     // function is not marked with the noimplicitfloat attribute.
-    if (NonZero || (DAG.getMachineFunction().getFunction()->getFnAttributes().
-                    hasAttribute(Attribute::NoImplicitFloat)))
+    if (NonZero || (DAG.getMachineFunction().getFunction()->getAttributes().
+                    hasAttribute(AttributeSet::FunctionIndex,
+                                 Attribute::NoImplicitFloat)))
       LastLegalVectorType = 0;
 
     // Check if we found a legal integer type to store.
@@ -8624,11 +8625,8 @@ SDValue DAGCombiner::reduceBuildVecConvertToConvertBuildVec(SDNode *N) {
     if (Opcode == ISD::DELETED_NODE &&
         (Opc == ISD::UINT_TO_FP || Opc == ISD::SINT_TO_FP)) {
       Opcode = Opc;
-      // If not supported by target, bail out.
-      if (TLI.getOperationAction(Opcode, VT) != TargetLowering::Legal &&
-          TLI.getOperationAction(Opcode, VT) != TargetLowering::Custom)
-        return SDValue();
     }
+
     if (Opc != Opcode)
       return SDValue();
 
@@ -8653,6 +8651,10 @@ SDValue DAGCombiner::reduceBuildVecConvertToConvertBuildVec(SDNode *N) {
   assert(SrcVT != MVT::Other && "Cannot determine source type!");
 
   EVT NVT = EVT::getVectorVT(*DAG.getContext(), SrcVT, NumInScalars);
+
+  if (!TLI.isOperationLegalOrCustom(Opcode, NVT))
+    return SDValue();
+
   SmallVector<SDValue, 8> Opnds;
   for (unsigned i = 0; i != NumInScalars; ++i) {
     SDValue In = N->getOperand(i);
@@ -9647,7 +9649,7 @@ SDValue DAGCombiner::SimplifySetCC(EVT VT, SDValue N0,
                                    SDValue N1, ISD::CondCode Cond,
                                    DebugLoc DL, bool foldBooleans) {
   TargetLowering::DAGCombinerInfo
-    DagCombineInfo(DAG, !LegalTypes, !LegalOperations, false, this);
+    DagCombineInfo(DAG, Level, false, this);
   return TLI.SimplifySetCC(VT, N0, N1, Cond, foldBooleans, DagCombineInfo, DL);
 }
 

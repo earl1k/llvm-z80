@@ -49,10 +49,10 @@
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/DataLayout.h"
-#include "llvm/IRBuilder.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/Module.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetLibraryInfo.h"
@@ -669,12 +669,14 @@ bool LoopIdiomRecognize::runOnCountableLoop() {
   if (!getDataLayout())
     return false;
 
-  getDominatorTree();
+  // set DT 
+  (void)getDominatorTree();
 
   LoopInfo &LI = getAnalysis<LoopInfo>();
   TLI = &getAnalysis<TargetLibraryInfo>();
 
-  getTargetLibraryInfo();
+  // set TLI 
+  (void)getTargetLibraryInfo();
 
   SmallVector<BasicBlock*, 8> ExitBlocks;
   CurLoop->getUniqueExitBlocks(ExitBlocks);

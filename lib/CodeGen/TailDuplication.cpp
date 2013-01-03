@@ -25,7 +25,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineSSAUpdater.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
-#include "llvm/Function.h"
+#include "llvm/IR/Function.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -551,8 +551,8 @@ TailDuplicatePass::shouldTailDuplicate(const MachineFunction &MF,
   // compensate for the duplication.
   unsigned MaxDuplicateCount;
   if (TailDuplicateSize.getNumOccurrences() == 0 &&
-      MF.getFunction()->getFnAttributes().
-        hasAttribute(Attribute::OptimizeForSize))
+      MF.getFunction()->getAttributes().
+        hasAttribute(AttributeSet::FunctionIndex, Attribute::OptimizeForSize))
     MaxDuplicateCount = 1;
   else
     MaxDuplicateCount = TailDuplicateSize;

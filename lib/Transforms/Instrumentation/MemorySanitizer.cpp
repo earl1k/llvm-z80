@@ -43,6 +43,29 @@
 /// parameters and return values may be passed via registers, we have a
 /// specialized thread-local shadow for return values
 /// (__msan_retval_tls) and parameters (__msan_param_tls).
+///
+///                           Origin tracking.
+///
+/// MemorySanitizer can track origins (allocation points) of all uninitialized
+/// values. This behavior is controlled with a flag (msan-track-origins) and is
+/// disabled by default.
+///
+/// Origins are 4-byte values created and interpreted by the runtime library.
+/// They are stored in a second shadow mapping, one 4-byte value for 4 bytes
+/// of application memory. Propagation of origins is basically a bunch of
+/// "select" instructions that pick the origin of a dirty argument, if an
+/// instruction has one.
+///
+/// Every 4 aligned, consecutive bytes of application memory have one origin
+/// value associated with them. If these bytes contain uninitialized data
+/// coming from 2 different allocations, the last store wins. Because of this,
+/// MemorySanitizer reports can show unrelated origins, but this is unlikely in
+/// practice.
+///
+/// Origins are meaningless for fully initialized values, so MemorySanitizer
+/// avoids storing origin to memory when a fully initialized value is stored.
+/// This way it avoids needless overwritting origin of the 4-byte region on
+/// a short (i.e. 1 byte) clean store, and it is also good for performance.
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "msan"
@@ -53,15 +76,16 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/ValueMap.h"
-#include "llvm/DataLayout.h"
-#include "llvm/Function.h"
-#include "llvm/IRBuilder.h"
-#include "llvm/InlineAsm.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/MDBuilder.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
 #include "llvm/InstVisitor.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/MDBuilder.h"
-#include "llvm/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
@@ -69,7 +93,6 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
-#include "llvm/Type.h"
 
 using namespace llvm;
 
@@ -77,13 +100,13 @@ static const uint64_t kShadowMask32 = 1ULL << 31;
 static const uint64_t kShadowMask64 = 1ULL << 46;
 static const uint64_t kOriginOffset32 = 1ULL << 30;
 static const uint64_t kOriginOffset64 = 1ULL << 45;
-static const uint64_t kShadowTLSAlignment = 8;
+static const unsigned kMinOriginAlignment = 4;
+static const unsigned kShadowTLSAlignment = 8;
 
-// This is an important flag that makes the reports much more
-// informative at the cost of greater slowdown. Not fully implemented
-// yet.
-// FIXME: this should be a top-level clang flag, e.g.
-// -fmemory-sanitizer-full.
+/// \brief Track origins of uninitialized values.
+///
+/// Adds a section to MemorySanitizer report that points to the allocation
+/// (stack or heap) the uninitialized bits came from originally.
 static cl::opt<bool> ClTrackOrigins("msan-track-origins",
        cl::desc("Track origins (allocation sites) of poisoned memory"),
        cl::Hidden, cl::init(false));
@@ -122,7 +145,7 @@ static cl::opt<bool> ClDumpStrictInstructions("msan-dump-strict-instructions",
        cl::desc("print out instructions with default strict semantics"),
        cl::Hidden, cl::init(false));
 
-static cl::opt<std::string>  ClBlackListFile("msan-blacklist",
+static cl::opt<std::string>  ClBlacklistFile("msan-blacklist",
        cl::desc("File containing the list of functions where MemorySanitizer "
                 "should not report bugs"), cl::Hidden);
 
@@ -135,11 +158,14 @@ namespace {
 /// uninitialized reads.
 class MemorySanitizer : public FunctionPass {
  public:
-  MemorySanitizer(bool TrackOrigins = false)
+  MemorySanitizer(bool TrackOrigins = false,
+                  StringRef BlacklistFile = StringRef())
     : FunctionPass(ID),
       TrackOrigins(TrackOrigins || ClTrackOrigins),
       TD(0),
-      WarningFn(0) { }
+      WarningFn(0),
+      BlacklistFile(BlacklistFile.empty() ? ClBlacklistFile
+                                          : BlacklistFile) { }
   const char *getPassName() const { return "MemorySanitizer"; }
   bool runOnFunction(Function &F);
   bool doInitialization(Module &M);
@@ -195,6 +221,8 @@ class MemorySanitizer : public FunctionPass {
   MDNode *ColdCallWeights;
   /// \brief Branch weights for origin store.
   MDNode *OriginStoreWeights;
+  /// \bried Path to blacklist file.
+  SmallString<64> BlacklistFile;
   /// \brief The blacklist.
   OwningPtr<BlackList> BL;
   /// \brief An empty volatile inline asm that prevents callback merge.
@@ -210,8 +238,9 @@ INITIALIZE_PASS(MemorySanitizer, "msan",
                 "MemorySanitizer: detects uninitialized reads.",
                 false, false)
 
-FunctionPass *llvm::createMemorySanitizerPass(bool TrackOrigins) {
-  return new MemorySanitizer(TrackOrigins);
+FunctionPass *llvm::createMemorySanitizerPass(bool TrackOrigins,
+                                              StringRef BlacklistFile) {
+  return new MemorySanitizer(TrackOrigins, BlacklistFile);
 }
 
 /// \brief Create a non-const global initialized with the given string.
@@ -301,7 +330,7 @@ bool MemorySanitizer::doInitialization(Module &M) {
   TD = getAnalysisIfAvailable<DataLayout>();
   if (!TD)
     return false;
-  BL.reset(new BlackList(ClBlackListFile));
+  BL.reset(new BlackList(BlacklistFile));
   C = &(M.getContext());
   unsigned PtrSize = TD->getPointerSizeInBits(/* AddressSpace */0);
   switch (PtrSize) {
@@ -429,8 +458,10 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
         insertCheck(Addr, &I);
 
       if (MS.TrackOrigins) {
+        unsigned Alignment = std::max(kMinOriginAlignment, I.getAlignment());
         if (ClStoreCleanOrigin || isa<StructType>(Shadow->getType())) {
-          IRB.CreateStore(getOrigin(Val), getOriginPtr(Addr, IRB));
+          IRB.CreateAlignedStore(getOrigin(Val), getOriginPtr(Addr, IRB),
+                                 Alignment);
         } else {
           Value *ConvertedShadow = convertToShadowTyNoVec(Shadow, IRB);
 
@@ -447,7 +478,8 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
             SplitBlockAndInsertIfThen(cast<Instruction>(Cmp), false,
                                       MS.OriginStoreWeights);
           IRBuilder<> IRBNew(CheckTerm);
-          IRBNew.CreateStore(getOrigin(Val), getOriginPtr(Addr, IRBNew));
+          IRBNew.CreateAlignedStore(getOrigin(Val), getOriginPtr(Addr, IRBNew),
+                                    Alignment);
         }
       }
     }
@@ -805,8 +837,10 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     if (ClCheckAccessAddress)
       insertCheck(I.getPointerOperand(), &I);
 
-    if (MS.TrackOrigins)
-      setOrigin(&I, IRB.CreateLoad(getOriginPtr(Addr, IRB)));
+    if (MS.TrackOrigins) {
+      unsigned Alignment = std::max(kMinOriginAlignment, I.getAlignment());
+      setOrigin(&I, IRB.CreateAlignedLoad(getOriginPtr(Addr, IRB), Alignment));
+    }
   }
 
   /// \brief Instrument StoreInst
@@ -1244,7 +1278,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     const int UnknownModRefBehavior = IK_WritesMemory;
 #define GET_INTRINSIC_MODREF_BEHAVIOR
 #define ModRefBehavior IntrinsicKind
-#include "llvm/Intrinsics.gen"
+#include "llvm/IR/Intrinsics.gen"
 #undef ModRefBehavior
 #undef GET_INTRINSIC_MODREF_BEHAVIOR
   }

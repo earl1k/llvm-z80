@@ -43,8 +43,8 @@
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
-#include "llvm/DataLayout.h"
-#include "llvm/IntrinsicInst.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Support/CFG.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -1309,17 +1309,15 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
   /// into a gep of the original struct.  This is important for SROA and alias
   /// analysis of unions.  If "A" is also a bitcast, wait for A/X to be merged.
   if (BitCastInst *BCI = dyn_cast<BitCastInst>(PtrOp)) {
+    APInt Offset(TD ? TD->getPointerSizeInBits() : 1, 0);
     if (TD &&
-        !isa<BitCastInst>(BCI->getOperand(0)) && GEP.hasAllConstantIndices() &&
+        !isa<BitCastInst>(BCI->getOperand(0)) &&
+        GEP.accumulateConstantOffset(*TD, Offset) &&
         StrippedPtrTy->getAddressSpace() == GEP.getPointerAddressSpace()) {
-
-      // Determine how much the GEP moves the pointer.
-      SmallVector<Value*, 8> Ops(GEP.idx_begin(), GEP.idx_end());
-      int64_t Offset = TD->getIndexedOffset(GEP.getPointerOperandType(), Ops);
 
       // If this GEP instruction doesn't move the pointer, just replace the GEP
       // with a bitcast of the real input to the dest type.
-      if (Offset == 0) {
+      if (!Offset) {
         // If the bitcast is of an allocation, and the allocation will be
         // converted to match the type of the cast, don't touch this.
         if (isa<AllocaInst>(BCI->getOperand(0)) ||
@@ -1343,7 +1341,7 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
       SmallVector<Value*, 8> NewIndices;
       Type *InTy =
         cast<PointerType>(BCI->getOperand(0)->getType())->getElementType();
-      if (FindElementAtOffset(InTy, Offset, NewIndices)) {
+      if (FindElementAtOffset(InTy, Offset.getSExtValue(), NewIndices)) {
         Value *NGEP = GEP.isInBounds() ?
           Builder->CreateInBoundsGEP(BCI->getOperand(0), NewIndices) :
           Builder->CreateGEP(BCI->getOperand(0), NewIndices);

@@ -23,8 +23,8 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/DataLayout.h"
-#include "llvm/Function.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/CommandLine.h"
@@ -691,7 +691,8 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
   // pointer, calls, or dynamic alloca then we do not need to adjust the
   // stack pointer (we fit in the Red Zone). We also check that we don't
   // push and pop from the stack.
-  if (Is64Bit && !Fn->getFnAttributes().hasAttribute(Attribute::NoRedZone) &&
+  if (Is64Bit && !Fn->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                                   Attribute::NoRedZone) &&
       !RegInfo->needsStackRealignment(MF) &&
       !MFI->hasVarSizedObjects() &&                     // No dynamic alloca.
       !MFI->adjustsStack() &&                           // No calls.

@@ -24,8 +24,8 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/LLVMContext.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/Support/CommandLine.h"
@@ -467,9 +467,7 @@ X86InstrInfo::X86InstrInfo(X86TargetMachine &tm)
     { X86::RSQRTSSr,        X86::RSQRTSSm,            0 },
     { X86::RSQRTSSr_Int,    X86::RSQRTSSm_Int,        0 },
     { X86::SQRTPDr,         X86::SQRTPDm,             TB_ALIGN_16 },
-    { X86::SQRTPDr_Int,     X86::SQRTPDm_Int,         TB_ALIGN_16 },
     { X86::SQRTPSr,         X86::SQRTPSm,             TB_ALIGN_16 },
-    { X86::SQRTPSr_Int,     X86::SQRTPSm_Int,         TB_ALIGN_16 },
     { X86::SQRTSDr,         X86::SQRTSDm,             0 },
     { X86::SQRTSDr_Int,     X86::SQRTSDm_Int,         0 },
     { X86::SQRTSSr,         X86::SQRTSSm,             0 },
@@ -528,9 +526,7 @@ X86InstrInfo::X86InstrInfo(X86TargetMachine &tm)
     { X86::VRSQRTPSr,       X86::VRSQRTPSm,           0 },
     { X86::VRSQRTPSr_Int,   X86::VRSQRTPSm_Int,       0 },
     { X86::VSQRTPDr,        X86::VSQRTPDm,            0 },
-    { X86::VSQRTPDr_Int,    X86::VSQRTPDm_Int,        0 },
     { X86::VSQRTPSr,        X86::VSQRTPSm,            0 },
-    { X86::VSQRTPSr_Int,    X86::VSQRTPSm_Int,        0 },
     { X86::VUCOMISDrr,      X86::VUCOMISDrm,          0 },
     { X86::VUCOMISSrr,      X86::VUCOMISSrm,          0 },
     { X86::VBROADCASTSSrr,  X86::VBROADCASTSSrm,      TB_NO_REVERSE },
@@ -554,11 +550,8 @@ X86InstrInfo::X86InstrInfo(X86TargetMachine &tm)
     { X86::VRCPPSYr,        X86::VRCPPSYm,            0 },
     { X86::VRCPPSYr_Int,    X86::VRCPPSYm_Int,        0 },
     { X86::VRSQRTPSYr,      X86::VRSQRTPSYm,          0 },
-    { X86::VRSQRTPSYr_Int,  X86::VRSQRTPSYm_Int,      0 },
     { X86::VSQRTPDYr,       X86::VSQRTPDYm,           0 },
-    { X86::VSQRTPDYr_Int,   X86::VSQRTPDYm_Int,       0 },
     { X86::VSQRTPSYr,       X86::VSQRTPSYm,           0 },
-    { X86::VSQRTPSYr_Int,   X86::VSQRTPSYm_Int,       0 },
     { X86::VBROADCASTSSYrr, X86::VBROADCASTSSYrm,     TB_NO_REVERSE },
     { X86::VBROADCASTSDYrr, X86::VBROADCASTSDYrm,     TB_NO_REVERSE },
 
@@ -710,21 +703,13 @@ X86InstrInfo::X86InstrInfo(X86TargetMachine &tm)
     { X86::Int_CVTSI2SSrr,  X86::Int_CVTSI2SSrm,      0 },
     { X86::Int_CVTSS2SDrr,  X86::Int_CVTSS2SDrm,      0 },
     { X86::MAXPDrr,         X86::MAXPDrm,       TB_ALIGN_16 },
-    { X86::MAXPDrr_Int,     X86::MAXPDrm_Int,   TB_ALIGN_16 },
     { X86::MAXPSrr,         X86::MAXPSrm,       TB_ALIGN_16 },
-    { X86::MAXPSrr_Int,     X86::MAXPSrm_Int,   TB_ALIGN_16 },
     { X86::MAXSDrr,         X86::MAXSDrm,       0 },
-    { X86::MAXSDrr_Int,     X86::MAXSDrm_Int,   0 },
     { X86::MAXSSrr,         X86::MAXSSrm,       0 },
-    { X86::MAXSSrr_Int,     X86::MAXSSrm_Int,   0 },
     { X86::MINPDrr,         X86::MINPDrm,       TB_ALIGN_16 },
-    { X86::MINPDrr_Int,     X86::MINPDrm_Int,   TB_ALIGN_16 },
     { X86::MINPSrr,         X86::MINPSrm,       TB_ALIGN_16 },
-    { X86::MINPSrr_Int,     X86::MINPSrm_Int,   TB_ALIGN_16 },
     { X86::MINSDrr,         X86::MINSDrm,       0 },
-    { X86::MINSDrr_Int,     X86::MINSDrm_Int,   0 },
     { X86::MINSSrr,         X86::MINSSrm,       0 },
-    { X86::MINSSrr_Int,     X86::MINSSrm_Int,   0 },
     { X86::MPSADBWrri,      X86::MPSADBWrmi,    TB_ALIGN_16 },
     { X86::MULPDrr,         X86::MULPDrm,       TB_ALIGN_16 },
     { X86::MULPSrr,         X86::MULPSrm,       TB_ALIGN_16 },
@@ -896,21 +881,13 @@ X86InstrInfo::X86InstrInfo(X86TargetMachine &tm)
     { X86::Int_VCMPSDrr,      X86::Int_VCMPSDrm,       0 },
     { X86::Int_VCMPSSrr,      X86::Int_VCMPSSrm,       0 },
     { X86::VMAXPDrr,          X86::VMAXPDrm,           0 },
-    { X86::VMAXPDrr_Int,      X86::VMAXPDrm_Int,       0 },
     { X86::VMAXPSrr,          X86::VMAXPSrm,           0 },
-    { X86::VMAXPSrr_Int,      X86::VMAXPSrm_Int,       0 },
     { X86::VMAXSDrr,          X86::VMAXSDrm,           0 },
-    { X86::VMAXSDrr_Int,      X86::VMAXSDrm_Int,       0 },
     { X86::VMAXSSrr,          X86::VMAXSSrm,           0 },
-    { X86::VMAXSSrr_Int,      X86::VMAXSSrm_Int,       0 },
     { X86::VMINPDrr,          X86::VMINPDrm,           0 },
-    { X86::VMINPDrr_Int,      X86::VMINPDrm_Int,       0 },
     { X86::VMINPSrr,          X86::VMINPSrm,           0 },
-    { X86::VMINPSrr_Int,      X86::VMINPSrm_Int,       0 },
     { X86::VMINSDrr,          X86::VMINSDrm,           0 },
-    { X86::VMINSDrr_Int,      X86::VMINSDrm_Int,       0 },
     { X86::VMINSSrr,          X86::VMINSSrm,           0 },
-    { X86::VMINSSrr_Int,      X86::VMINSSrm_Int,       0 },
     { X86::VMPSADBWrri,       X86::VMPSADBWrmi,        0 },
     { X86::VMULPDrr,          X86::VMULPDrm,           0 },
     { X86::VMULPSrr,          X86::VMULPSrm,           0 },
@@ -1037,13 +1014,9 @@ X86InstrInfo::X86InstrInfo(X86TargetMachine &tm)
     { X86::VHSUBPSYrr,        X86::VHSUBPSYrm,         0 },
     { X86::VINSERTF128rr,     X86::VINSERTF128rm,      0 },
     { X86::VMAXPDYrr,         X86::VMAXPDYrm,          0 },
-    { X86::VMAXPDYrr_Int,     X86::VMAXPDYrm_Int,      0 },
     { X86::VMAXPSYrr,         X86::VMAXPSYrm,          0 },
-    { X86::VMAXPSYrr_Int,     X86::VMAXPSYrm_Int,      0 },
     { X86::VMINPDYrr,         X86::VMINPDYrm,          0 },
-    { X86::VMINPDYrr_Int,     X86::VMINPDYrm_Int,      0 },
     { X86::VMINPSYrr,         X86::VMINPSYrm,          0 },
-    { X86::VMINPSYrr_Int,     X86::VMINPSYrm_Int,      0 },
     { X86::VMULPDYrr,         X86::VMULPDYrm,          0 },
     { X86::VMULPSYrr,         X86::VMULPSYrm,          0 },
     { X86::VORPDYrr,          X86::VORPDYrm,           0 },
@@ -3891,8 +3864,8 @@ MachineInstr* X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
 
   // Unless optimizing for size, don't fold to avoid partial
   // register update stalls
-  if (!MF.getFunction()->getFnAttributes().
-        hasAttribute(Attribute::OptimizeForSize) &&
+  if (!MF.getFunction()->getAttributes().
+        hasAttribute(AttributeSet::FunctionIndex, Attribute::OptimizeForSize) &&
       hasPartialRegUpdate(MI->getOpcode()))
     return 0;
 
@@ -3933,8 +3906,8 @@ MachineInstr* X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
 
   // Unless optimizing for size, don't fold to avoid partial
   // register update stalls
-  if (!MF.getFunction()->getFnAttributes().
-        hasAttribute(Attribute::OptimizeForSize) &&
+  if (!MF.getFunction()->getAttributes().
+        hasAttribute(AttributeSet::FunctionIndex, Attribute::OptimizeForSize) &&
       hasPartialRegUpdate(MI->getOpcode()))
     return 0;
 
@@ -4690,13 +4663,9 @@ bool X86InstrInfo::isHighLatencyDef(int opc) const {
   case X86::DIVSSrr:
   case X86::DIVSSrr_Int:
   case X86::SQRTPDm:
-  case X86::SQRTPDm_Int:
   case X86::SQRTPDr:
-  case X86::SQRTPDr_Int:
   case X86::SQRTPSm:
-  case X86::SQRTPSm_Int:
   case X86::SQRTPSr:
-  case X86::SQRTPSr_Int:
   case X86::SQRTSDm:
   case X86::SQRTSDm_Int:
   case X86::SQRTSDr:
@@ -4715,13 +4684,9 @@ bool X86InstrInfo::isHighLatencyDef(int opc) const {
   case X86::VDIVSSrr:
   case X86::VDIVSSrr_Int:
   case X86::VSQRTPDm:
-  case X86::VSQRTPDm_Int:
   case X86::VSQRTPDr:
-  case X86::VSQRTPDr_Int:
   case X86::VSQRTPSm:
-  case X86::VSQRTPSm_Int:
   case X86::VSQRTPSr:
-  case X86::VSQRTPSr_Int:
   case X86::VSQRTSDm:
   case X86::VSQRTSDm_Int:
   case X86::VSQRTSDr:

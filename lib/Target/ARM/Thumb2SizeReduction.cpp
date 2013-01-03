@@ -19,10 +19,10 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/IR/Function.h"        // To access Function attributes
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Function.h"        // To access Function attributes
 using namespace llvm;
 
 STATISTIC(NumNarrows,  "Number of 32-bit instrs reduced to 16-bit ones");
@@ -961,9 +961,11 @@ bool Thumb2SizeReduce::runOnMachineFunction(MachineFunction &MF) {
   STI = &TM.getSubtarget<ARMSubtarget>();
 
   // Optimizing / minimizing size?
-  Attribute FnAttrs = MF.getFunction()->getFnAttributes();
-  OptimizeSize = FnAttrs.hasAttribute(Attribute::OptimizeForSize);
-  MinimizeSize = FnAttrs.hasAttribute(Attribute::MinSize);
+  AttributeSet FnAttrs = MF.getFunction()->getAttributes();
+  OptimizeSize = FnAttrs.hasAttribute(AttributeSet::FunctionIndex,
+                                      Attribute::OptimizeForSize);
+  MinimizeSize = FnAttrs.hasAttribute(AttributeSet::FunctionIndex,
+                                      Attribute::MinSize);
 
   bool Modified = false;
   for (MachineFunction::iterator I = MF.begin(), E = MF.end(); I != E; ++I)

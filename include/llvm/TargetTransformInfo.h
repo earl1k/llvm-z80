@@ -23,10 +23,10 @@
 #define LLVM_TRANSFORMS_TARGET_TRANSFORM_INTERFACE
 
 #include "llvm/AddressingMode.h"
-#include "llvm/Intrinsics.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/DataTypes.h"
-#include "llvm/Type.h"
 
 namespace llvm {
 
@@ -78,7 +78,7 @@ class ScalarTargetTransformInfo {
 public:
   /// PopcntHwSupport - Hardware support for population count. Compared to the
   /// SW implementation, HW support is supposed to significantly boost the
-  /// performance when the population is dense, and it may or not may degrade
+  /// performance when the population is dense, and it may or may not degrade
   /// performance if the population is sparse. A HW support is considered as
   /// "Fast" if it can outperform, or is on a par with, SW implementaion when
   /// the population is sparse; otherwise, it is considered as "Slow".
@@ -170,10 +170,10 @@ public:
   }
 
   /// Returns the cost of a shuffle instruction of kind Kind and of type Tp.
-  /// The index parameter is used by some of the shuffle kinds to add
-  /// additional information.
+  /// The index and subtype parameters are used by the subvector insertion and
+  /// extraction shuffle kinds.
   virtual unsigned getShuffleCost(ShuffleKind Kind, Type *Tp,
-                                  int Index) const {
+                                  int Index = 0, Type *SubTp = 0) const {
     return 1;
   }
 

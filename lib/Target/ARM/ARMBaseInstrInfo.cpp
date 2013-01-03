@@ -27,9 +27,9 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
-#include "llvm/Constants.h"
-#include "llvm/Function.h"
-#include "llvm/GlobalValue.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/CommandLine.h"
@@ -3329,8 +3329,9 @@ ARMBaseInstrInfo::getOperandLatency(const InstrItineraryData *ItinData,
     // instructions).
     if (Latency > 0 && Subtarget.isThumb2()) {
       const MachineFunction *MF = DefMI->getParent()->getParent();
-      if (MF->getFunction()->getFnAttributes().
-            hasAttribute(Attribute::OptimizeForSize))
+      if (MF->getFunction()->getAttributes().
+            hasAttribute(AttributeSet::FunctionIndex,
+                         Attribute::OptimizeForSize))
         --Latency;
     }
     return Latency;

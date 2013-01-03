@@ -31,6 +31,7 @@
 #define DEBUG_TYPE "objc-arc"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
@@ -134,8 +135,8 @@ namespace {
 
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/Intrinsics.h"
-#include "llvm/Module.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Transforms/Utils/Local.h"
 
@@ -885,26 +886,34 @@ bool ObjCARCExpand::runOnFunction(Function &F) {
 
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
     Instruction *Inst = &*I;
-
+    
+    DEBUG(dbgs() << "ObjCARCExpand: Visiting: " << *Inst << "\n");
+    
     switch (GetBasicInstructionClass(Inst)) {
     case IC_Retain:
     case IC_RetainRV:
     case IC_Autorelease:
     case IC_AutoreleaseRV:
     case IC_FusedRetainAutorelease:
-    case IC_FusedRetainAutoreleaseRV:
+    case IC_FusedRetainAutoreleaseRV: {
       // These calls return their argument verbatim, as a low-level
       // optimization. However, this makes high-level optimizations
       // harder. Undo any uses of this optimization that the front-end
       // emitted here. We'll redo them in the contract pass.
       Changed = true;
-      Inst->replaceAllUsesWith(cast<CallInst>(Inst)->getArgOperand(0));
+      Value *Value = cast<CallInst>(Inst)->getArgOperand(0);
+      DEBUG(dbgs() << "ObjCARCExpand: Old = " << *Inst << "\n"
+                      "               New = " << *Value << "\n");
+      Inst->replaceAllUsesWith(Value);
       break;
+    }
     default:
       break;
     }
   }
-
+  
+  DEBUG(dbgs() << "ObjCARCExpand: Finished Queue.\n\n");
+  
   return Changed;
 }
 
@@ -913,7 +922,7 @@ bool ObjCARCExpand::runOnFunction(Function &F) {
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Constants.h"
+#include "llvm/IR/Constants.h"
 
 namespace {
   /// ObjCARCAPElim - Autorelease pool elimination.
@@ -1095,7 +1104,7 @@ bool ObjCARCAPElim::runOnModule(Module &M) {
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/LLVMContext.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/CFG.h"
 
 STATISTIC(NumNoops,       "Number of no-op objc calls eliminated");
@@ -2273,6 +2282,10 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
   // Visit all objc_* calls in F.
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ) {
     Instruction *Inst = &*I++;
+
+    DEBUG(dbgs() << "ObjCARCOpt: OptimizeIndividualCalls: Visiting: " <<
+          *Inst << "\n");
+
     InstructionClass Class = GetBasicInstructionClass(Inst);
 
     switch (Class) {
@@ -2486,6 +2499,9 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
         }
       }
     } while (!Worklist.empty());
+
+    DEBUG(dbgs() << "ObjCARCOpt: Finished Individual Call Queue.\n\n");
+
   }
 }
 
@@ -3389,6 +3405,10 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
   // queries instead.
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ) {
     Instruction *Inst = &*I++;
+
+    DEBUG(dbgs() << "ObjCARCOpt: OptimizeWeakCalls: Visiting: " << *Inst <<
+          "\n");
+
     InstructionClass Class = GetBasicInstructionClass(Inst);
     if (Class != IC_LoadWeak && Class != IC_LoadWeakRetained)
       continue;
@@ -3534,6 +3554,9 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
     done:;
     }
   }
+  
+  DEBUG(dbgs() << "ObjCARCOpt: Finished visiting weak calls.\n\n");
+  
 }
 
 /// OptimizeSequences - Identify program paths which execute sequences of
@@ -3582,6 +3605,9 @@ void ObjCARCOpt::OptimizeReturns(Function &F) {
   for (Function::iterator FI = F.begin(), FE = F.end(); FI != FE; ++FI) {
     BasicBlock *BB = FI;
     ReturnInst *Ret = dyn_cast<ReturnInst>(&BB->back());
+
+    DEBUG(dbgs() << "ObjCARCOpt: OptimizeReturns: Visiting: " << *Ret << "\n");
+
     if (!Ret) continue;
 
     const Value *Arg = StripPointerCastsAndObjCCalls(Ret->getOperand(0));
@@ -3665,6 +3691,9 @@ void ObjCARCOpt::OptimizeReturns(Function &F) {
     DependingInstructions.clear();
     Visited.clear();
   }
+  
+  DEBUG(dbgs() << "ObjCARCOpt: OptimizeReturns: Finished visiting returns.\n\n");
+  
 }
 
 bool ObjCARCOpt::doInitialization(Module &M) {
@@ -3757,8 +3786,8 @@ void ObjCARCOpt::releaseMemory() {
 // dominated by single calls.
 
 #include "llvm/Analysis/Dominators.h"
-#include "llvm/InlineAsm.h"
-#include "llvm/Operator.h"
+#include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/Operator.h"
 
 STATISTIC(NumStoreStrongs, "Number objc_storeStrong calls formed");
 
@@ -4078,7 +4107,9 @@ bool ObjCARCContract::runOnFunction(Function &F) {
   SmallPtrSet<const BasicBlock *, 4> Visited;
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ) {
     Instruction *Inst = &*I++;
-
+    
+    DEBUG(dbgs() << "ObjCARCContract: Visiting: " << *Inst << "\n");
+    
     // Only these library routines return their argument. In particular,
     // objc_retainBlock does not necessarily return its argument.
     InstructionClass Class = GetBasicInstructionClass(Inst);
@@ -4153,6 +4184,8 @@ bool ObjCARCContract::runOnFunction(Function &F) {
     default:
       continue;
     }
+
+    DEBUG(dbgs() << "ObjCARCContract: Finished Queue.\n\n");
 
     // Don't use GetObjCArg because we don't want to look through bitcasts
     // and such; to do the replacement, the argument must have type i8*.

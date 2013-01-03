@@ -17,8 +17,8 @@
 #include "llvm/Analysis/CodeMetrics.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolution.h"
-#include "llvm/DataLayout.h"
-#include "llvm/IntrinsicInst.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -146,8 +146,9 @@ bool LoopUnroll::runOnLoop(Loop *L, LPPassManager &LPM) {
   // not user specified.
   unsigned Threshold = CurrentThreshold;
   if (!UserThreshold &&
-      Header->getParent()->getFnAttributes().
-        hasAttribute(Attribute::OptimizeForSize))
+      Header->getParent()->getAttributes().
+        hasAttribute(AttributeSet::FunctionIndex,
+                     Attribute::OptimizeForSize))
     Threshold = OptSizeUnrollThreshold;
 
   // Find trip count and trip multiple if count is not available

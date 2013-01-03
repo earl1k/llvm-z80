@@ -20,7 +20,7 @@
 #include "Z80InstrInfo.h"
 #include "Z80SelectionDAGInfo.h"
 #include "Z80Subtarget.h"
-#include "llvm/DataLayout.h"
+#include "llvm/IR/DataLayout.h"
 
 namespace llvm {
   class Z80TargetMachine : public LLVMTargetMachine {

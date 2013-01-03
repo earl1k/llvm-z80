@@ -19,19 +19,19 @@
 #include "X86RegisterInfo.h"
 #include "X86Subtarget.h"
 #include "X86TargetMachine.h"
-#include "llvm/CallingConv.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/GlobalAlias.h"
-#include "llvm/GlobalVariable.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/Operator.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/GlobalAlias.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
@@ -740,8 +740,7 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
 
   if (Ret->getNumOperands() > 0) {
     SmallVector<ISD::OutputArg, 4> Outs;
-    GetReturnInfo(F.getReturnType(), F.getAttributes().getRetAttributes(),
-                  Outs, TLI);
+    GetReturnInfo(F.getReturnType(), F.getAttributes(), Outs, TLI);
 
     // Analyze operands of the call, assigning locations to each operand.
     SmallVector<CCValAssign, 16> ValLocs;
@@ -1585,8 +1584,7 @@ bool X86FastISel::DoSelectCall(const Instruction *I, const char *MemIntName) {
 
   // Check whether the function can return without sret-demotion.
   SmallVector<ISD::OutputArg, 4> Outs;
-  GetReturnInfo(I->getType(), CS.getAttributes().getRetAttributes(),
-                Outs, TLI);
+  GetReturnInfo(I->getType(), CS.getAttributes(), Outs, TLI);
   bool CanLowerReturn = TLI.CanLowerReturn(CS.getCallingConv(),
                                            *FuncInfo.MF, FTy->isVarArg(),
                                            Outs, FTy->getContext());

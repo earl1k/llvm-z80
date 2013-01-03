@@ -64,7 +64,7 @@ int VectorTargetTransformImpl::InstructionOpcodeToISD(unsigned Opcode) const {
   enum InstructionOpcodes {
 #define HANDLE_INST(NUM, OPCODE, CLASS) OPCODE = NUM,
 #define LAST_OTHER_INST(NUM) InstructionOpcodesCount = NUM
-#include "llvm/Instruction.def"
+#include "llvm/IR/Instruction.def"
   };
   switch (static_cast<InstructionOpcodes>(Opcode)) {
   case Ret:            return 0;
@@ -209,8 +209,7 @@ unsigned VectorTargetTransformImpl::getArithmeticInstrCost(unsigned Opcode,
 }
 
 unsigned VectorTargetTransformImpl::getShuffleCost(ShuffleKind Kind,
-                                                   Type *Tp,
-                                                   int Index) const {
+                                  Type *Tp, int Index, Type *SubTp) const {
   return 1;
 }
 

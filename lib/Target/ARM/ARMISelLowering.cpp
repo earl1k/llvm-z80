@@ -25,7 +25,6 @@
 #include "MCTargetDesc/ARMAddressingModes.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/CallingConv.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/IntrinsicLowering.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -35,19 +34,20 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
-#include "llvm/Constants.h"
-#include "llvm/Function.h"
-#include "llvm/GlobalValue.h"
-#include "llvm/Instruction.h"
-#include "llvm/Instructions.h"
-#include "llvm/Intrinsics.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/Type.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/Type.h"
 using namespace llvm;
 
 STATISTIC(NumTailCalls, "Number of tail calls");
@@ -1616,8 +1616,8 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   // FIXME: handle tail calls differently.
   unsigned CallOpc;
-  bool HasMinSizeAttr = MF.getFunction()->getFnAttributes().
-    hasAttribute(Attribute::MinSize);
+  bool HasMinSizeAttr = MF.getFunction()->getAttributes().
+    hasAttribute(AttributeSet::FunctionIndex, Attribute::MinSize);
   if (Subtarget->isThumb()) {
     if ((!isDirect || isARMFunc) && !Subtarget->hasV5TOps())
       CallOpc = ARMISD::CALL_NOLINK;
@@ -6689,8 +6689,9 @@ EmitStructByval(MachineInstr *MI, MachineBasicBlock *BB) const {
     UnitSize = 2;
   } else {
     // Check whether we can use NEON instructions.
-    if (!MF->getFunction()->getFnAttributes().
-          hasAttribute(Attribute::NoImplicitFloat) &&
+    if (!MF->getFunction()->getAttributes().
+          hasAttribute(AttributeSet::FunctionIndex,
+                       Attribute::NoImplicitFloat) &&
         Subtarget->hasNEON()) {
       if ((Align % 16 == 0) && SizeVal >= 16) {
         ldrOpc = ARM::VLD1q32wb_fixed;
@@ -9458,7 +9459,8 @@ EVT ARMTargetLowering::getOptimalMemOpType(uint64_t Size,
   // See if we can use NEON instructions for this...
   if ((!IsMemset || ZeroMemset) &&
       Subtarget->hasNEON() &&
-      !F->getFnAttributes().hasAttribute(Attribute::NoImplicitFloat)) {
+      !F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                       Attribute::NoImplicitFloat)) {
     bool Fast;
     if (Size >= 16 &&
         (memOpAlign(SrcAlign, DstAlign, 16) ||

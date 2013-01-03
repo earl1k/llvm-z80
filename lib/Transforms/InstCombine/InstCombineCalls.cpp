@@ -14,7 +14,7 @@
 #include "InstCombine.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
-#include "llvm/DataLayout.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/PatternMatch.h"
 #include "llvm/Transforms/Utils/BuildLibCalls.h"
@@ -1153,11 +1153,8 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
 
   // If we are removing arguments to the function, emit an obnoxious warning.
   if (FT->getNumParams() < NumActualArgs) {
-    if (!FT->isVarArg()) {
-      FT->getContext().emitWarning("while resolving call to function '" +
-                                   Callee->getName() +
-                                   "' arguments were dropped");
-    } else {
+    // TODO: if (!FT->isVarArg()) this call may be unreachable. PR14722
+    if (FT->isVarArg()) {
       // Add all of the arguments in their promoted form to the arg list.
       for (unsigned i = FT->getNumParams(); i != NumActualArgs; ++i, ++AI) {
         Type *PTy = getPromotedType((*AI)->getType());
@@ -1251,9 +1248,8 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
 
   // If the call already has the 'nest' attribute somewhere then give up -
   // otherwise 'nest' would occur twice after splicing in the chain.
-  for (unsigned I = 0, E = Attrs.getNumAttrs(); I != E; ++I)
-    if (Attrs.getAttributesAtIndex(I).hasAttribute(Attribute::Nest))
-      return 0;
+  if (Attrs.hasAttrSomewhere(Attribute::Nest))
+    return 0;
 
   assert(Tramp &&
          "transformCallThroughTrampoline called with incorrect CallSite.");

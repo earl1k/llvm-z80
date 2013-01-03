@@ -17,7 +17,6 @@
 #include "PPCPerfectShuffle.h"
 #include "PPCTargetMachine.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/CallingConv.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -25,10 +24,11 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/Intrinsics.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
@@ -6822,8 +6822,8 @@ SDValue PPCTargetLowering::LowerFRAMEADDR(SDValue Op,
   bool is31 = (getTargetMachine().Options.DisableFramePointerElim(MF) ||
                MFI->hasVarSizedObjects()) &&
                   MFI->getStackSize() &&
-                  !MF.getFunction()->getFnAttributes().
-                    hasAttribute(Attribute::Naked);
+                  !MF.getFunction()->getAttributes().
+                    hasAttribute(AttributeSet::FunctionIndex, Attribute::Naked);
   unsigned FrameReg = isPPC64 ? (is31 ? PPC::X31 : PPC::X1) :
                                 (is31 ? PPC::R31 : PPC::R1);
   SDValue FrameAddr = DAG.getCopyFromReg(DAG.getEntryNode(), dl, FrameReg,

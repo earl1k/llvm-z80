@@ -25,9 +25,9 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/DataLayout.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/Function.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/Support/Debug.h"
@@ -60,13 +60,15 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
   MFInfo = 0;
   FrameInfo = new (Allocator) MachineFrameInfo(*TM.getFrameLowering(),
                                                TM.Options.RealignStack);
-  if (Fn->getFnAttributes().hasAttribute(Attribute::StackAlignment))
+  if (Fn->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                       Attribute::StackAlignment))
     FrameInfo->ensureMaxAlignment(Fn->getAttributes().
-                                  getFnAttributes().getStackAlignment());
+                                getStackAlignment(AttributeSet::FunctionIndex));
   ConstantPool = new (Allocator) MachineConstantPool(TM.getDataLayout());
   Alignment = TM.getTargetLowering()->getMinFunctionAlignment();
   // FIXME: Shouldn't use pref alignment if explicit alignment is set on Fn.
-  if (!Fn->getFnAttributes().hasAttribute(Attribute::OptimizeForSize))
+  if (!Fn->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                        Attribute::OptimizeForSize))
     Alignment = std::max(Alignment,
                          TM.getTargetLowering()->getPrefFunctionAlignment());
   FunctionNumber = FunctionNum;

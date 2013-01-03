@@ -37,15 +37,15 @@ AC_DEFINE([LLVM_VERSION_MINOR], [3], [Minor version of the LLVM API])
 
 dnl Provide a copyright substitution and ensure the copyright notice is included
 dnl in the output of --version option of the generated configure script.
-AC_SUBST(LLVM_COPYRIGHT,["Copyright (c) 2003-2012 University of Illinois at Urbana-Champaign."])
-AC_COPYRIGHT([Copyright (c) 2003-2012 University of Illinois at Urbana-Champaign.])
+AC_SUBST(LLVM_COPYRIGHT,["Copyright (c) 2003-2013 University of Illinois at Urbana-Champaign."])
+AC_COPYRIGHT([Copyright (c) 2003-2013 University of Illinois at Urbana-Champaign.])
 
 dnl Indicate that we require autoconf 2.60 or later.
 AC_PREREQ(2.60)
 
 dnl Verify that the source directory is valid. This makes sure that we are
 dnl configuring LLVM and not some other package (it validates --srcdir argument)
-AC_CONFIG_SRCDIR([lib/VMCore/Module.cpp])
+AC_CONFIG_SRCDIR([lib/IR/Module.cpp])
 
 dnl Place all of the extra autoconf files into the config subdirectory. Tell
 dnl various tools where the m4 autoconf macros are.
@@ -511,10 +511,10 @@ AC_ARG_ENABLE(clang-rewriter,
 case "$enableval" in
   yes) AC_SUBST(ENABLE_CLANG_REWRITER,[1]) ;;
   no)  
-    if test clang_arcmt != "no" ; then
+    if test ${clang_arcmt} != "no" ; then
       AC_MSG_ERROR([Cannot enable clang ARC Migration Tool while disabling rewriter.])
     fi
-    if test clang_static_analyzer != "no" ; then
+    if test ${clang_static_analyzer} != "no" ; then
       AC_MSG_ERROR([Cannot enable clang static analyzer while disabling rewriter.])
     fi
     AC_SUBST(ENABLE_CLANG_REWRITER,[0]) 

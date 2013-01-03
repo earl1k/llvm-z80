@@ -47,11 +47,6 @@ Program::Program() : Data_(0) {}
 
 Program::~Program() {}
 
-unsigned Program::GetPid() const {
-  uint64_t pid = reinterpret_cast<uint64_t>(Data_);
-  return static_cast<unsigned>(pid);
-}
-
 // This function just uses the PATH environment variable to find the program.
 Path
 Program::FindProgramByName(const std::string& progName) {
@@ -392,24 +387,6 @@ Program::Wait(const sys::Path &path,
     *ErrMsg = "Program::Wait is not implemented on this platform yet!";
   return -1;
 #endif
-}
-
-bool
-Program::Kill(std::string* ErrMsg) {
-  if (Data_ == 0) {
-    MakeErrMsg(ErrMsg, "Process not started!");
-    return true;
-  }
-
-  uint64_t pid64 = reinterpret_cast<uint64_t>(Data_);
-  pid_t pid = static_cast<pid_t>(pid64);
-
-  if (kill(pid, SIGKILL) != 0) {
-    MakeErrMsg(ErrMsg, "The process couldn't be killed!");
-    return true;
-  }
-
-  return false;
 }
 
 error_code Program::ChangeStdinToBinary(){

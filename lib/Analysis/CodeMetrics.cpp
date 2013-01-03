@@ -12,9 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/CodeMetrics.h"
-#include "llvm/DataLayout.h"
-#include "llvm/Function.h"
-#include "llvm/IntrinsicInst.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Support/CallSite.h"
 
 using namespace llvm;
@@ -203,7 +203,8 @@ void CodeMetrics::analyzeFunction(Function *F, const DataLayout *TD) {
   // as volatile if they are live across a setjmp call, and they probably
   // won't do this in callers.
   exposesReturnsTwice = F->callsFunctionThatReturnsTwice() &&
-    !F->getFnAttributes().hasAttribute(Attribute::ReturnsTwice);
+    !F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                     Attribute::ReturnsTwice);
 
   // Look at the size of the callee.
   for (Function::const_iterator BB = F->begin(), E = F->end(); BB != E; ++BB)

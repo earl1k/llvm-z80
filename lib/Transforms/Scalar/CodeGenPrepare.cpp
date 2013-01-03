@@ -23,14 +23,14 @@
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/ProfileInfo.h"
 #include "llvm/Assembly/Writer.h"
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/IRBuilder.h"
-#include "llvm/InlineAsm.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/CommandLine.h"
@@ -150,7 +150,8 @@ bool CodeGenPrepare::runOnFunction(Function &F) {
   TLInfo = &getAnalysis<TargetLibraryInfo>();
   DT = getAnalysisIfAvailable<DominatorTree>();
   PFI = getAnalysisIfAvailable<ProfileInfo>();
-  OptSize = F.getFnAttributes().hasAttribute(Attribute::OptimizeForSize);
+  OptSize = F.getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                           Attribute::OptimizeForSize);
 
   /// This optimization identifies DIV instructions that can be
   /// profitably bypassed and carried out with a shorter, faster divide.

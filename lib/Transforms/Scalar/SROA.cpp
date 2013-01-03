@@ -33,19 +33,19 @@
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/PtrUseVisitor.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/Constants.h"
 #include "llvm/DIBuilder.h"
-#include "llvm/DataLayout.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/IRBuilder.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/InstVisitor.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/Module.h"
-#include "llvm/Operator.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -1642,44 +1642,6 @@ private:
 };
 }
 
-/// \brief Accumulate the constant offsets in a GEP into a single APInt offset.
-///
-/// If the provided GEP is all-constant, the total byte offset formed by the
-/// GEP is computed and Offset is set to it. If the GEP has any non-constant
-/// operands, the function returns false and the value of Offset is unmodified.
-static bool accumulateGEPOffsets(const DataLayout &TD, GEPOperator &GEP,
-                                 APInt &Offset) {
-  APInt GEPOffset(Offset.getBitWidth(), 0);
-  for (gep_type_iterator GTI = gep_type_begin(GEP), GTE = gep_type_end(GEP);
-       GTI != GTE; ++GTI) {
-    ConstantInt *OpC = dyn_cast<ConstantInt>(GTI.getOperand());
-    if (!OpC)
-      return false;
-    if (OpC->isZero()) continue;
-
-    // Handle a struct index, which adds its field offset to the pointer.
-    if (StructType *STy = dyn_cast<StructType>(*GTI)) {
-      unsigned ElementIdx = OpC->getZExtValue();
-      const StructLayout *SL = TD.getStructLayout(STy);
-      GEPOffset += APInt(Offset.getBitWidth(),
-                         SL->getElementOffset(ElementIdx));
-      continue;
-    }
-
-    APInt TypeSize(Offset.getBitWidth(),
-                   TD.getTypeAllocSize(GTI.getIndexedType()));
-    if (VectorType *VTy = dyn_cast<VectorType>(*GTI)) {
-      assert((TD.getTypeSizeInBits(VTy->getScalarType()) % 8) == 0 &&
-             "vector element size is not a multiple of 8, cannot GEP over it");
-      TypeSize = TD.getTypeSizeInBits(VTy->getScalarType()) / 8;
-    }
-
-    GEPOffset += OpC->getValue().sextOrTrunc(Offset.getBitWidth()) * TypeSize;
-  }
-  Offset = GEPOffset;
-  return true;
-}
-
 /// \brief Build a GEP out of a base pointer and indices.
 ///
 /// This will return the BasePtr if that is valid, or build a new GEP
@@ -1882,7 +1844,7 @@ static Value *getAdjustedPtr(IRBuilder<> &IRB, const DataLayout &TD,
     // First fold any existing GEPs into the offset.
     while (GEPOperator *GEP = dyn_cast<GEPOperator>(Ptr)) {
       APInt GEPOffset(Offset.getBitWidth(), 0);
-      if (!accumulateGEPOffsets(TD, *GEP, GEPOffset))
+      if (!GEP->accumulateConstantOffset(TD, GEPOffset))
         break;
       Offset += GEPOffset;
       Ptr = GEP->getPointerOperand();
@@ -2009,15 +1971,14 @@ static bool isVectorPromotionViable(const DataLayout &TD,
   if (!Ty)
     return false;
 
-  uint64_t VecSize = TD.getTypeSizeInBits(Ty);
   uint64_t ElementSize = TD.getTypeSizeInBits(Ty->getScalarType());
 
   // While the definition of LLVM vectors is bitpacked, we don't support sizes
   // that aren't byte sized.
   if (ElementSize % 8)
     return false;
-  assert((VecSize % 8) == 0 && "vector size not a multiple of element size?");
-  VecSize /= 8;
+  assert((TD.getTypeSizeInBits(Ty) % 8) == 0 &&
+         "vector size not a multiple of element size?");
   ElementSize /= 8;
 
   for (; I != E; ++I) {
@@ -2699,18 +2660,7 @@ private:
 
   /// \brief Compute a vector splat for a given element value.
   Value *getVectorSplat(IRBuilder<> &IRB, Value *V, unsigned NumElements) {
-    assert(NumElements > 0 && "Cannot splat to an empty vector.");
-
-    // First insert it into a one-element vector so we can shuffle it. It is
-    // really silly that LLVM's IR requires this in order to form a splat.
-    Value *Undef = UndefValue::get(VectorType::get(V->getType(), 1));
-    V = IRB.CreateInsertElement(Undef, V, IRB.getInt32(0),
-                                getName(".splatinsert"));
-
-    // Shuffle the value across the desired number of elements.
-    SmallVector<Constant*, 8> Mask(NumElements, IRB.getInt32(0));
-    V = IRB.CreateShuffleVector(V, Undef, ConstantVector::get(Mask),
-                                getName(".splat"));
+    V = IRB.CreateVectorSplat(NumElements, V, NamePrefix);
     DEBUG(dbgs() << "       splat: " << *V << "\n");
     return V;
   }
@@ -2762,8 +2712,7 @@ private:
     // a sensible representation for the alloca type. This is essentially
     // splatting the byte to a sufficiently wide integer, splatting it across
     // any desired vector width, and bitcasting to the final type.
-    uint64_t Size = EndOffset - BeginOffset;
-    Value *V = getIntegerSplat(IRB, II.getValue(), Size);
+    Value *V;
 
     if (VecTy) {
       // If this is a memset of a vectorized alloca, insert it.
@@ -2789,6 +2738,7 @@ private:
       // set integer.
       assert(!II.isVolatile());
 
+      uint64_t Size = EndOffset - BeginOffset;
       V = getIntegerSplat(IRB, II.getValue(), Size);
 
       if (IntTy && (BeginOffset != NewAllocaBeginOffset ||

@@ -14,16 +14,16 @@
 #include "LLParser.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/AutoUpgrade.h"
-#include "llvm/CallingConv.h"
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/InlineAsm.h"
-#include "llvm/Instructions.h"
-#include "llvm/Module.h"
-#include "llvm/Operator.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
+#include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/ValueSymbolTable.h"
 using namespace llvm;
 
 static std::string getTypeString(Type *T) {
@@ -2834,8 +2834,7 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
 
   AttributeSet PAL = AttributeSet::get(Context, Attrs);
 
-  if (PAL.getParamAttributes(1).hasAttribute(Attribute::StructRet) &&
-      !RetType->isVoidTy())
+  if (PAL.hasAttribute(1, Attribute::StructRet) && !RetType->isVoidTy())
     return Error(RetTypeLoc, "functions with 'sret' argument must return void");
 
   FunctionType *FT =

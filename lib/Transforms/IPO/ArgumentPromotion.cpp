@@ -37,11 +37,11 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/CallGraphSCCPass.h"
-#include "llvm/Constants.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Instructions.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/Module.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/CFG.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/Debug.h"
@@ -153,8 +153,8 @@ CallGraphNode *ArgPromotion::PromoteArguments(CallGraphNode *CGN) {
   SmallPtrSet<Argument*, 8> ArgsToPromote;
   SmallPtrSet<Argument*, 8> ByValArgsToTransform;
   for (unsigned i = 0; i != PointerArgs.size(); ++i) {
-    bool isByVal=F->getParamAttributes(PointerArgs[i].second+1).
-      hasAttribute(Attribute::ByVal);
+    bool isByVal=F->getAttributes().
+      hasAttribute(PointerArgs[i].second+1, Attribute::ByVal);
     Argument *PtrArg = PointerArgs[i].first;
     Type *AgTy = cast<PointerType>(PtrArg->getType())->getElementType();
 

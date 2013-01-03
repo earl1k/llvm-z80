@@ -20,7 +20,6 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/CallingConv.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
@@ -33,18 +32,19 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
 #include "llvm/DebugInfo.h"
-#include "llvm/DerivedTypes.h"
-#include "llvm/Function.h"
-#include "llvm/GlobalVariable.h"
-#include "llvm/InlineAsm.h"
-#include "llvm/Instructions.h"
-#include "llvm/IntrinsicInst.h"
-#include "llvm/Intrinsics.h"
-#include "llvm/LLVMContext.h"
-#include "llvm/Module.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -973,7 +973,7 @@ void SelectionDAGBuilder::visit(unsigned Opcode, const User &I) {
     // Build the switch statement using the Instruction.def file.
 #define HANDLE_INST(NUM, OPCODE, CLASS) \
     case Instruction::OPCODE: visit##OPCODE((const CLASS&)I); break;
-#include "llvm/Instruction.def"
+#include "llvm/IR/Instruction.def"
   }
 
   // Assign the ordering to the freshly created DAG nodes.
@@ -1233,9 +1233,11 @@ void SelectionDAGBuilder::visitRet(const ReturnInst &I) {
         ISD::NodeType ExtendKind = ISD::ANY_EXTEND;
 
         const Function *F = I.getParent()->getParent();
-        if (F->getRetAttributes().hasAttribute(Attribute::SExt))
+        if (F->getAttributes().hasAttribute(AttributeSet::ReturnIndex,
+                                            Attribute::SExt))
           ExtendKind = ISD::SIGN_EXTEND;
-        else if (F->getRetAttributes().hasAttribute(Attribute::ZExt))
+        else if (F->getAttributes().hasAttribute(AttributeSet::ReturnIndex,
+                                                 Attribute::ZExt))
           ExtendKind = ISD::ZERO_EXTEND;
 
         if (ExtendKind != ISD::ANY_EXTEND && VT.isInteger())
@@ -1250,7 +1252,8 @@ void SelectionDAGBuilder::visitRet(const ReturnInst &I) {
 
         // 'inreg' on function refers to return value
         ISD::ArgFlagsTy Flags = ISD::ArgFlagsTy();
-        if (F->getRetAttributes().hasAttribute(Attribute::InReg))
+        if (F->getAttributes().hasAttribute(AttributeSet::ReturnIndex,
+                                            Attribute::InReg))
           Flags.setInReg();
 
         // Propagate extension type if any
@@ -4296,7 +4299,8 @@ static SDValue ExpandPowI(DebugLoc DL, SDValue LHS, SDValue RHS,
       return DAG.getConstantFP(1.0, LHS.getValueType());
 
     const Function *F = DAG.getMachineFunction().getFunction();
-    if (!F->getFnAttributes().hasAttribute(Attribute::OptimizeForSize) ||
+    if (!F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                         Attribute::OptimizeForSize) ||
         // If optimizing for size, don't insert too many multiplies.  This
         // inserts up to 5 multiplies.
         CountPopulation_32(Val)+Log2_32(Val) < 7) {
@@ -5193,8 +5197,7 @@ void SelectionDAGBuilder::LowerCallTo(ImmutableCallSite CS, SDValue Callee,
 
   // Check whether the function can return without sret-demotion.
   SmallVector<ISD::OutputArg, 4> Outs;
-  GetReturnInfo(RetTy, CS.getAttributes().getRetAttributes(),
-                Outs, TLI);
+  GetReturnInfo(RetTy, CS.getAttributes(), Outs, TLI);
 
   bool CanLowerReturn = TLI.CanLowerReturn(CS.getCallingConv(),
                                            DAG.getMachineFunction(),
@@ -6583,8 +6586,7 @@ void SelectionDAGISel::LowerArguments(const BasicBlock *LLVMBB) {
 
   // Check whether the function can return without sret-demotion.
   SmallVector<ISD::OutputArg, 4> Outs;
-  GetReturnInfo(F.getReturnType(), F.getAttributes().getRetAttributes(),
-                Outs, TLI);
+  GetReturnInfo(F.getReturnType(), F.getAttributes(), Outs, TLI);
 
   if (!FuncInfo->CanLowerReturn) {
     // Put in an sret pointer parameter before all the other parameters.
@@ -6615,15 +6617,15 @@ void SelectionDAGISel::LowerArguments(const BasicBlock *LLVMBB) {
       unsigned OriginalAlignment =
         TD->getABITypeAlignment(ArgTy);
 
-      if (F.getParamAttributes(Idx).hasAttribute(Attribute::ZExt))
+      if (F.getAttributes().hasAttribute(Idx, Attribute::ZExt))
         Flags.setZExt();
-      if (F.getParamAttributes(Idx).hasAttribute(Attribute::SExt))
+      if (F.getAttributes().hasAttribute(Idx, Attribute::SExt))
         Flags.setSExt();
-      if (F.getParamAttributes(Idx).hasAttribute(Attribute::InReg))
+      if (F.getAttributes().hasAttribute(Idx, Attribute::InReg))
         Flags.setInReg();
-      if (F.getParamAttributes(Idx).hasAttribute(Attribute::StructRet))
+      if (F.getAttributes().hasAttribute(Idx, Attribute::StructRet))
         Flags.setSRet();
-      if (F.getParamAttributes(Idx).hasAttribute(Attribute::ByVal)) {
+      if (F.getAttributes().hasAttribute(Idx, Attribute::ByVal)) {
         Flags.setByVal();
         PointerType *Ty = cast<PointerType>(I->getType());
         Type *ElementTy = Ty->getElementType();
@@ -6637,7 +6639,7 @@ void SelectionDAGISel::LowerArguments(const BasicBlock *LLVMBB) {
           FrameAlign = TLI.getByValTypeAlignment(ElementTy);
         Flags.setByValAlign(FrameAlign);
       }
-      if (F.getParamAttributes(Idx).hasAttribute(Attribute::Nest))
+      if (F.getAttributes().hasAttribute(Idx, Attribute::Nest))
         Flags.setNest();
       Flags.setOrigAlign(OriginalAlignment);
 
@@ -6725,9 +6727,9 @@ void SelectionDAGISel::LowerArguments(const BasicBlock *LLVMBB) {
 
       if (!I->use_empty()) {
         ISD::NodeType AssertOp = ISD::DELETED_NODE;
-        if (F.getParamAttributes(Idx).hasAttribute(Attribute::SExt))
+        if (F.getAttributes().hasAttribute(Idx, Attribute::SExt))
           AssertOp = ISD::AssertSext;
-        else if (F.getParamAttributes(Idx).hasAttribute(Attribute::ZExt))
+        else if (F.getAttributes().hasAttribute(Idx, Attribute::ZExt))
           AssertOp = ISD::AssertZext;
 
         ArgValues.push_back(getCopyFromParts(DAG, dl, &InVals[i],
