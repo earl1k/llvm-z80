@@ -26,3 +26,21 @@ void Z80InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
   printInstruction(MI, O);
   printAnnotation(O, Annot);
 }
+
+void Z80InstPrinter::printOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O)
+{
+  const MCOperand &Op = MI->getOperand(OpNo);
+
+  if (Op.isReg())
+  {
+    O << getRegisterName(Op.getReg());
+  }
+  else if (Op.isImm())
+  {
+    O << Op.getImm();
+  }
+  else
+  {
+    assert(0 && "unknown operand kind in printOperand");
+  }
+}
