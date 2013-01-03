@@ -11,9 +11,10 @@
 // Declaration that describes the Z80 register file
 //===----------------------------------------------------------------------===//
 
-class Z80Reg<string n>
+class Z80Reg<string n, bits<16> Enc = 0>
   : Register<n> {
   let Namespace = "Z80";
+  let HWEncoding = Enc;
 }
 
 class Z80SubRegIndex : SubRegIndex {
@@ -23,11 +24,11 @@ class Z80SubRegIndex : SubRegIndex {
 def subreg_hi : Z80SubRegIndex;
 def subreg_lo : Z80SubRegIndex;
 
-class Z80RegWithSubRegs<string n, list<Register> subregs>
-  : RegisterWithSubRegs<n, subregs> {
+class Z80RegWithSubRegs<string n, bits<16> Enc = 0, list<Register> subregs = []>
+  : Z80Reg<n, Enc> {
+  let SubRegs = subregs;
   let SubRegIndices = [subreg_hi, subreg_lo];
   let CoveredBySubRegs = 1;
-  let Namespace = "Z80";
 }
 
 class Z80Reg8Class<dag reglist>
@@ -43,22 +44,22 @@ class Z80Reg16Class<dag reglist>
 //===----------------------------------------------------------------------===//
 
 // 8 bit registers
-def A : Z80Reg<"a">;
-def B : Z80Reg<"b">;
-def C : Z80Reg<"c">;
-def D : Z80Reg<"d">;
-def E : Z80Reg<"e">;
-def H : Z80Reg<"h">;
-def L : Z80Reg<"l">;
+def A : Z80Reg<"a", 7>;
+def B : Z80Reg<"b", 0>;
+def C : Z80Reg<"c", 1>;
+def D : Z80Reg<"d", 2>;
+def E : Z80Reg<"e", 3>;
+def H : Z80Reg<"h", 4>;
+def L : Z80Reg<"l", 5>;
 
 // Flags register
 def FLAGS : Z80Reg<"f">;
 
 // 16 bit registers
-def BC : Z80RegWithSubRegs<"bc", [B, C]>;
-def DE : Z80RegWithSubRegs<"de", [D, E]>;
-def HL : Z80RegWithSubRegs<"hl", [H, L]>;
-def AF : Z80RegWithSubRegs<"af", [A, FLAGS]>;
+def BC : Z80RegWithSubRegs<"bc", 0, [B, C]>;
+def DE : Z80RegWithSubRegs<"de", 1, [D, E]>;
+def HL : Z80RegWithSubRegs<"hl", 2, [H, L]>;
+def AF : Z80RegWithSubRegs<"af", 3, [A, FLAGS]>;
 
 def SP : Z80Reg<"sp">;
 def PC : Z80Reg<"pc">;
