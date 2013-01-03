@@ -44,3 +44,12 @@ SDValue Z80TargetLowering::LowerReturn(SDValue Chain,
 {
   return DAG.getNode(Z80ISD::RET, dl, MVT::Other, Chain);
 }
+
+const char *Z80TargetLowering::getTargetNodeName(unsigned Opcode) const
+{
+  switch (Opcode)
+  {
+  default: return NULL;
+  case Z80ISD::RET: return "Z80ISD::RET";
+  }
+}

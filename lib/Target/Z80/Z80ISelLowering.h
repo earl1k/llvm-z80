@@ -31,6 +31,10 @@ namespace llvm {
   class Z80TargetLowering : public TargetLowering {
   public:
     explicit Z80TargetLowering(Z80TargetMachine &TM);
+
+    // getTargetNodeName - This method returns the name of a target specific
+    // DAG node.
+    virtual const char *getTargetNodeName(unsigned Opcode) const;
   private:
     virtual SDValue
       LowerFormalArguments(SDValue Chain,
