@@ -46,22 +46,33 @@ class Z80Inst<dag outs, dag ins, string asmstr>
   let AsmString = asmstr;
 }
 
-class I<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
-  : Z80Inst<outs, ins, asmstr> {
+//===----------------------------------------------------------------------===//
+// Simple Instruction
+//===----------------------------------------------------------------------===//
+
+class I<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern,
+  int size = 1> : Z80Inst<outs, ins, asmstr> {
   let Inst{7-0} = opc;
-  let Size = 1;
+  let Size = size;
   let Pattern = pattern;
 }
 
-class IRy<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
-  : I<opc, outs, ins, asmstr, pattern> {
+//===----------------------------------------------------------------------===//
+// Simple Instruction with R[y]
+//===----------------------------------------------------------------------===//
+
+class IRy<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern,
+  int size = 1> : I<opc, outs, ins, asmstr, pattern, size> {
   bits<3> Ry;
   let Inst{5-3} = Ry;
 }
 
+//===----------------------------------------------------------------------===//
+// Simple Instruction with R[y], I[8]
+//===----------------------------------------------------------------------===//
+
 class IRyI8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
-  : IRy<opc, outs, ins, asmstr, pattern> {
+  : IRy<opc, outs, ins, asmstr, pattern, 2> {
   bits<8> imm;
   let Inst{15-8} = imm;
-  let Size = 2;
 }
