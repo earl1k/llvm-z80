@@ -45,3 +45,52 @@ let isReMaterializable = 1, isAsCheapAsAMove = 1 in {
   def LD16ri : IRpI16<0x01, (outs GR16:$dst), (ins i16imm:$src),
     "ld\t{$dst, $src}", [(set GR16:$dst, imm:$src)]>;
 }
+
+//===----------------------------------------------------------------------===//
+// Arithmetic Instructions
+//===----------------------------------------------------------------------===//
+
+class ALUOpType<bits<3> val> {
+  field bits<3> Value = val;
+}
+
+def ALU_ADD : ALUOpType<0>;
+def ALU_ADC : ALUOpType<1>;
+def ALU_SUB : ALUOpType<2>;
+def ALU_SBC : ALUOpType<3>;
+def ALU_AND : ALUOpType<4>;
+def ALU_XOR : ALUOpType<5>;
+def ALU_OR  : ALUOpType<6>;
+def ALU_CP  : ALUOpType<7>;
+
+class ALUIr<ALUOpType alu, string asmstr, SDNode ops>
+  : IRz<0x80, (outs), (ins GR8:$src), asmstr, [(set A, (ops A, GR8:$src))]> {
+  ALUOpType aluType = alu;
+  let Inst{5-3} = aluType.Value;
+}
+class ALUIi<ALUOpType alu, string asmstr, SDNode ops>
+  : II8<0xC6, (outs), (ins i8imm:$src), asmstr, [(set A, (ops A, imm:$src))]> {
+  ALUOpType aluType = alu;
+  let Inst{5-3} = aluType.Value;
+}
+
+multiclass ALUI<ALUOpType alu, string asmstr, SDNode ops> {
+  def r : ALUIr<alu, asmstr, ops>;
+  def i : ALUIi<alu, asmstr, ops>;
+}
+
+let Uses = [A], Defs = [A, FLAGS] in {
+  defm ADD8 : ALUI<ALU_ADD, "add\t{a, $src}", add>;
+  defm ADC8 : ALUI<ALU_ADC, "adc\t{a, $src}", adde>;
+  defm SBC8 : ALUI<ALU_SBC, "sbc\t{a, $src}", sube>;
+  defm SUB8 : ALUI<ALU_SUB, "sub\t{$src}", sub>;
+  defm AND8 : ALUI<ALU_AND, "and\t{$src}", and>;
+  defm XOR8 : ALUI<ALU_XOR, "xor\t{$src}", xor>;
+  defm OR8  : ALUI<ALU_OR,  "or\t{$src}",  or>;
+}
+
+def : Pat<(addc A, GR8:$src), (ADD8r GR8:$src)>;
+def : Pat<(addc A, imm:$src), (ADD8r imm:$src)>;
+
+def : Pat<(subc A, GR8:$src), (SUB8r GR8:$src)>;
+def : Pat<(subc A, imm:$src), (SUB8r imm:$src)>;
