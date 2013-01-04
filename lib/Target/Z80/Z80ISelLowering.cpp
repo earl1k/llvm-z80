@@ -17,6 +17,7 @@
 #include "Z80TargetMachine.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
 Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
@@ -40,6 +41,57 @@ SDValue Z80TargetLowering::LowerFormalArguments(SDValue Chain,
   DebugLoc dl, SelectionDAG &DAG,
   SmallVectorImpl<SDValue> &InVals) const
 {
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+
+  // CCValAssign - represent the assignment of
+  // the arguments to a location
+  SmallVector<CCValAssign, 16> ArgLocs;
+
+  // CCState - info about the registers and stack slot.
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(),
+    getTargetMachine(), ArgLocs, *DAG.getContext());
+
+  // Analyze Formal Arguments
+  CCInfo.AnalyzeFormalArguments(Ins, CC_Z80);
+
+  assert(!isVarArg && "Varargs not supported yet!");
+
+  for (unsigned i = 0, e = ArgLocs.size(); i != e; i++)
+  {
+    SDValue ArgValue;
+    unsigned VReg;
+
+    CCValAssign &VA = ArgLocs[i];
+    if (VA.isRegLoc())
+    { // Argument passed in registers
+      EVT RegVT = VA.getLocVT();
+      switch (RegVT.getSimpleVT().SimpleTy)
+      {
+      default:
+        {
+#ifndef NDEBUG
+          errs() << "LowerFormalArguments Unhandled argument type: "
+            << RegVT.getSimpleVT().SimpleTy << "\n";
+#endif
+          llvm_unreachable(0);
+        }
+      case MVT::i8:
+        VReg = MRI.createVirtualRegister(&Z80::GR8RegClass);
+        MRI.addLiveIn(VA.getLocReg(), VReg);
+        ArgValue = DAG.getCopyFromReg(Chain, dl, VReg, RegVT);
+        InVals.push_back(ArgValue);
+        break;
+      case MVT::i16:
+        VReg = MRI.createVirtualRegister(&Z80::GR16RegClass);
+        MRI.addLiveIn(VA.getLocReg(), VReg);
+        ArgValue = DAG.getCopyFromReg(Chain, dl, VReg, RegVT);
+        InVals.push_back(ArgValue);
+        break;
+      }
+    }
+    else assert(0 && "Not implemented yet!");
+  }
   return Chain;
 }
 
