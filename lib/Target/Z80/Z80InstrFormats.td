@@ -86,3 +86,23 @@ class IRyRz<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   bits<3> Rz;
   let Inst{2-0} = Rz;
 }
+
+//===----------------------------------------------------------------------===//
+// Simple Instruction with R[p]
+//===----------------------------------------------------------------------===//
+
+class IRp<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern,
+  int size = 1> : I<opc, outs, ins, asmstr, pattern, size> {
+  bits<2> Rp;
+  let Inst{5-4} = Rp;
+}
+
+//===----------------------------------------------------------------------===//
+// Simple Instruction with R[p], I[16]
+//===----------------------------------------------------------------------===//
+
+class IRpI16<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+  : IRp<opc, outs, ins, asmstr, pattern, 3> {
+  bits<16> imm;
+  let Inst{23-8} = imm;
+}
