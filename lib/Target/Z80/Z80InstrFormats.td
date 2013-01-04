@@ -76,3 +76,13 @@ class IRyI8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   bits<8> imm;
   let Inst{15-8} = imm;
 }
+
+//===----------------------------------------------------------------------===//
+// Simple Instruction with R[y], R[z]
+//===----------------------------------------------------------------------===//
+
+class IRyRz<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+  : IRy<opc, outs, ins, asmstr, pattern> {
+  bits<3> Rz;
+  let Inst{2-0} = Rz;
+}
