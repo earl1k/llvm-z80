@@ -33,6 +33,9 @@ namespace llvm {
     virtual void copyPhysReg(MachineBasicBlock &MBB,
       MachineBasicBlock::iterator I, DebugLoc DL,
       unsigned DestReg, unsigned SrcReg, bool KillSrc) const;
+
+    virtual MachineInstr* commuteInstruction(MachineInstr *MI,
+      bool NewMI = false) const;
   }; // end class Z80InstrInfo
 } // end namespace llvm
 

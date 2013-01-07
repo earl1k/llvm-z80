@@ -80,13 +80,15 @@ multiclass ALUI<ALUOpType alu, string asmstr, SDNode ops> {
 }
 
 let Uses = [A], Defs = [A, FLAGS] in {
-  defm ADD8 : ALUI<ALU_ADD, "add\t{a, $src}", add>;
-  defm ADC8 : ALUI<ALU_ADC, "adc\t{a, $src}", adde>;
-  defm SBC8 : ALUI<ALU_SBC, "sbc\t{a, $src}", sube>;
+  let isCommutable = 1 in {
+    defm ADD8 : ALUI<ALU_ADD, "add\t{a, $src}", add>;
+    defm ADC8 : ALUI<ALU_ADC, "adc\t{a, $src}", adde>;
+    defm AND8 : ALUI<ALU_AND, "and\t{$src}", and>;
+    defm XOR8 : ALUI<ALU_XOR, "xor\t{$src}", xor>;
+    defm OR8  : ALUI<ALU_OR,  "or\t{$src}",  or>;
+  }
   defm SUB8 : ALUI<ALU_SUB, "sub\t{$src}", sub>;
-  defm AND8 : ALUI<ALU_AND, "and\t{$src}", and>;
-  defm XOR8 : ALUI<ALU_XOR, "xor\t{$src}", xor>;
-  defm OR8  : ALUI<ALU_OR,  "or\t{$src}",  or>;
+  defm SBC8 : ALUI<ALU_SBC, "sbc\t{a, $src}", sube>;
 }
 
 def : Pat<(addc A, GR8:$src), (ADD8r GR8:$src)>;
