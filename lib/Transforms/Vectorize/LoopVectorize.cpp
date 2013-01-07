@@ -6,7 +6,51 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-#include "LoopVectorize.h"
+//
+// This is the LLVM loop vectorizer. This pass modifies 'vectorizable' loops
+// and generates target-independent LLVM-IR. Legalization of the IR is done
+// in the codegen. However, the vectorizes uses (will use) the codegen
+// interfaces to generate IR that is likely to result in an optimal binary.
+//
+// The loop vectorizer combines consecutive loop iteration into a single
+// 'wide' iteration. After this transformation the index is incremented
+// by the SIMD vector width, and not by one.
+//
+// This pass has three parts:
+// 1. The main loop pass that drives the different parts.
+// 2. LoopVectorizationLegality - A unit that checks for the legality
+//    of the vectorization.
+// 3. InnerLoopVectorizer - A unit that performs the actual
+//    widening of instructions.
+// 4. LoopVectorizationCostModel - A unit that checks for the profitability
+//    of vectorization. It decides on the optimal vector width, which
+//    can be one, if vectorization is not profitable.
+//
+//===----------------------------------------------------------------------===//
+//
+// The reduction-variable vectorization is based on the paper:
+//  D. Nuzman and R. Henderson. Multi-platform Auto-vectorization.
+//
+// Variable uniformity checks are inspired by:
+// Karrenberg, R. and Hack, S. Whole Function Vectorization.
+//
+// Other ideas/concepts are from:
+//  A. Zaks and D. Nuzman. Autovectorization in GCC-two years later.
+//
+//  S. Maleki, Y. Gao, M. Garzaran, T. Wong and D. Padua.  An Evaluation of
+//  Vectorizing Compilers.
+//
+//===----------------------------------------------------------------------===//
+
+#define LV_NAME "loop-vectorize"
+#define DEBUG_TYPE LV_NAME
+
+#include "llvm/Transforms/Vectorize.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AliasSetTracker.h"
@@ -14,14 +58,17 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopIterator.h"
 #include "llvm/Analysis/LoopPass.h"
+#include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Analysis/Verifier.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
@@ -32,18 +79,20 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/TargetTransformInfo.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
-#include "llvm/Transforms/Vectorize.h"
+#include <algorithm>
+#include <map>
+
+using namespace llvm;
 
 static cl::opt<unsigned>
 VectorizationFactor("force-vector-width", cl::init(0), cl::Hidden,
                     cl::desc("Sets the SIMD width. Zero is autoselect."));
 
 static cl::opt<unsigned>
-VectorizationUnroll("force-vector-unroll", cl::init(1), cl::Hidden,
+VectorizationUnroll("force-vector-unroll", cl::init(0), cl::Hidden,
                     cl::desc("Sets the vectorization unroll count. "
                              "Zero is autoselect."));
 
@@ -51,7 +100,475 @@ static cl::opt<bool>
 EnableIfConversion("enable-if-conversion", cl::init(true), cl::Hidden,
                    cl::desc("Enable if-conversion during vectorization."));
 
+/// We don't vectorize loops with a known constant trip count below this number.
+static const unsigned TinyTripCountThreshold = 16;
+
+/// When performing a runtime memory check, do not check more than this
+/// number of pointers. Notice that the check is quadratic!
+static const unsigned RuntimeMemoryCheckThreshold = 4;
+
+/// This is the highest vector width that we try to generate.
+static const unsigned MaxVectorSize = 8;
+
+/// This is the highest Unroll Factor.
+static const unsigned MaxUnrollSize = 4;
+
 namespace {
+
+// Forward declarations.
+class LoopVectorizationLegality;
+class LoopVectorizationCostModel;
+
+/// InnerLoopVectorizer vectorizes loops which contain only one basic
+/// block to a specified vectorization factor (VF).
+/// This class performs the widening of scalars into vectors, or multiple
+/// scalars. This class also implements the following features:
+/// * It inserts an epilogue loop for handling loops that don't have iteration
+///   counts that are known to be a multiple of the vectorization factor.
+/// * It handles the code generation for reduction variables.
+/// * Scalarization (implementation using scalars) of un-vectorizable
+///   instructions.
+/// InnerLoopVectorizer does not perform any vectorization-legality
+/// checks, and relies on the caller to check for the different legality
+/// aspects. The InnerLoopVectorizer relies on the
+/// LoopVectorizationLegality class to provide information about the induction
+/// and reduction variables that were found to a given vectorization factor.
+class InnerLoopVectorizer {
+public:
+  InnerLoopVectorizer(Loop *OrigLoop, ScalarEvolution *SE, LoopInfo *LI,
+                      DominatorTree *DT, DataLayout *DL, unsigned VecWidth,
+                      unsigned UnrollFactor)
+      : OrigLoop(OrigLoop), SE(SE), LI(LI), DT(DT), DL(DL), VF(VecWidth),
+        UF(UnrollFactor), Builder(SE->getContext()), Induction(0),
+        OldInduction(0), WidenMap(UnrollFactor) {}
+
+  // Perform the actual loop widening (vectorization).
+  void vectorize(LoopVectorizationLegality *Legal) {
+    // Create a new empty loop. Unlink the old loop and connect the new one.
+    createEmptyLoop(Legal);
+    // Widen each instruction in the old loop to a new one in the new loop.
+    // Use the Legality module to find the induction and reduction variables.
+    vectorizeLoop(Legal);
+    // Register the new loop and update the analysis passes.
+    updateAnalysis();
+  }
+
+private:
+  /// A small list of PHINodes.
+  typedef SmallVector<PHINode*, 4> PhiVector;
+  /// When we unroll loops we have multiple vector values for each scalar.
+  /// This data structure holds the unrolled and vectorized values that
+  /// originated from one scalar instruction.
+  typedef SmallVector<Value*, 2> VectorParts;
+
+  /// Add code that checks at runtime if the accessed arrays overlap.
+  /// Returns the comparator value or NULL if no check is needed.
+  Value *addRuntimeCheck(LoopVectorizationLegality *Legal,
+                         Instruction *Loc);
+  /// Create an empty loop, based on the loop ranges of the old loop.
+  void createEmptyLoop(LoopVectorizationLegality *Legal);
+  /// Copy and widen the instructions from the old loop.
+  void vectorizeLoop(LoopVectorizationLegality *Legal);
+
+  /// A helper function that computes the predicate of the block BB, assuming
+  /// that the header block of the loop is set to True. It returns the *entry*
+  /// mask for the block BB.
+  VectorParts createBlockInMask(BasicBlock *BB);
+  /// A helper function that computes the predicate of the edge between SRC
+  /// and DST.
+  VectorParts createEdgeMask(BasicBlock *Src, BasicBlock *Dst);
+
+  /// A helper function to vectorize a single BB within the innermost loop.
+  void vectorizeBlockInLoop(LoopVectorizationLegality *Legal, BasicBlock *BB,
+                            PhiVector *PV);
+
+  /// Insert the new loop to the loop hierarchy and pass manager
+  /// and update the analysis passes.
+  void updateAnalysis();
+
+  /// This instruction is un-vectorizable. Implement it as a sequence
+  /// of scalars.
+  void scalarizeInstruction(Instruction *Instr);
+
+  /// Create a broadcast instruction. This method generates a broadcast
+  /// instruction (shuffle) for loop invariant values and for the induction
+  /// value. If this is the induction variable then we extend it to N, N+1, ...
+  /// this is needed because each iteration in the loop corresponds to a SIMD
+  /// element.
+  Value *getBroadcastInstrs(Value *V);
+
+  /// This function adds 0, 1, 2 ... to each vector element, starting at zero.
+  /// If Negate is set then negative numbers are added e.g. (0, -1, -2, ...).
+  /// The sequence starts at StartIndex.
+  Value *getConsecutiveVector(Value* Val, unsigned StartIdx, bool Negate);
+
+  /// When we go over instructions in the basic block we rely on previous
+  /// values within the current basic block or on loop invariant values.
+  /// When we widen (vectorize) values we place them in the map. If the values
+  /// are not within the map, they have to be loop invariant, so we simply
+  /// broadcast them into a vector.
+  VectorParts &getVectorValue(Value *V);
+
+  /// Get a uniform vector of constant integers. We use this to get
+  /// vectors of ones and zeros for the reduction code.
+  Constant* getUniformVector(unsigned Val, Type* ScalarTy);
+
+  /// Generate a shuffle sequence that will reverse the vector Vec.
+  Value *reverseVector(Value *Vec);
+
+  /// This is a helper class that holds the vectorizer state. It maps scalar
+  /// instructions to vector instructions. When the code is 'unrolled' then
+  /// then a single scalar value is mapped to multiple vector parts. The parts
+  /// are stored in the VectorPart type.
+  struct ValueMap {
+    /// C'tor.  UnrollFactor controls the number of vectors ('parts') that
+    /// are mapped.
+    ValueMap(unsigned UnrollFactor) : UF(UnrollFactor) {}
+
+    /// \return True if 'Key' is saved in the Value Map.
+    bool has(Value *Key) { return MapStoreage.count(Key); }
+
+    /// Initializes a new entry in the map. Sets all of the vector parts to the
+    /// save value in 'Val'.
+    /// \return A reference to a vector with splat values.
+    VectorParts &splat(Value *Key, Value *Val) {
+      MapStoreage[Key].clear();
+      MapStoreage[Key].append(UF, Val);
+      return MapStoreage[Key];
+    }
+
+    ///\return A reference to the value that is stored at 'Key'.
+    VectorParts &get(Value *Key) {
+      if (!has(Key))
+        MapStoreage[Key].resize(UF);
+      return MapStoreage[Key];
+    }
+
+    /// The unroll factor. Each entry in the map stores this number of vector
+    /// elements.
+    unsigned UF;
+
+    /// Map storage. We use std::map and not DenseMap because insertions to a
+    /// dense map invalidates its iterators.
+    std::map<Value*, VectorParts> MapStoreage;
+  };
+
+  /// The original loop.
+  Loop *OrigLoop;
+  /// Scev analysis to use.
+  ScalarEvolution *SE;
+  /// Loop Info.
+  LoopInfo *LI;
+  /// Dominator Tree.
+  DominatorTree *DT;
+  /// Data Layout.
+  DataLayout *DL;
+  /// The vectorization SIMD factor to use. Each vector will have this many
+  /// vector elements.
+  unsigned VF;
+  /// The vectorization unroll factor to use. Each scalar is vectorized to this
+  /// many different vector instructions.
+  unsigned UF;
+
+  /// The builder that we use
+  IRBuilder<> Builder;
+
+  // --- Vectorization state ---
+
+  /// The vector-loop preheader.
+  BasicBlock *LoopVectorPreHeader;
+  /// The scalar-loop preheader.
+  BasicBlock *LoopScalarPreHeader;
+  /// Middle Block between the vector and the scalar.
+  BasicBlock *LoopMiddleBlock;
+  ///The ExitBlock of the scalar loop.
+  BasicBlock *LoopExitBlock;
+  ///The vector loop body.
+  BasicBlock *LoopVectorBody;
+  ///The scalar loop body.
+  BasicBlock *LoopScalarBody;
+  ///The first bypass block.
+  BasicBlock *LoopBypassBlock;
+
+  /// The new Induction variable which was added to the new block.
+  PHINode *Induction;
+  /// The induction variable of the old basic block.
+  PHINode *OldInduction;
+  /// Maps scalars to widened vectors.
+  ValueMap WidenMap;
+};
+
+/// LoopVectorizationLegality checks if it is legal to vectorize a loop, and
+/// to what vectorization factor.
+/// This class does not look at the profitability of vectorization, only the
+/// legality. This class has two main kinds of checks:
+/// * Memory checks - The code in canVectorizeMemory checks if vectorization
+///   will change the order of memory accesses in a way that will change the
+///   correctness of the program.
+/// * Scalars checks - The code in canVectorizeInstrs and canVectorizeMemory
+/// checks for a number of different conditions, such as the availability of a
+/// single induction variable, that all types are supported and vectorize-able,
+/// etc. This code reflects the capabilities of InnerLoopVectorizer.
+/// This class is also used by InnerLoopVectorizer for identifying
+/// induction variable and the different reduction variables.
+class LoopVectorizationLegality {
+public:
+  LoopVectorizationLegality(Loop *L, ScalarEvolution *SE, DataLayout *DL,
+                            DominatorTree *DT)
+      : TheLoop(L), SE(SE), DL(DL), DT(DT), Induction(0) {}
+
+  /// This enum represents the kinds of reductions that we support.
+  enum ReductionKind {
+    NoReduction, ///< Not a reduction.
+    IntegerAdd,  ///< Sum of numbers.
+    IntegerMult, ///< Product of numbers.
+    IntegerOr,   ///< Bitwise or logical OR of numbers.
+    IntegerAnd,  ///< Bitwise or logical AND of numbers.
+    IntegerXor   ///< Bitwise or logical XOR of numbers.
+  };
+
+  /// This enum represents the kinds of inductions that we support.
+  enum InductionKind {
+    NoInduction,         ///< Not an induction variable.
+    IntInduction,        ///< Integer induction variable. Step = 1.
+    ReverseIntInduction, ///< Reverse int induction variable. Step = -1.
+    PtrInduction         ///< Pointer induction variable. Step = sizeof(elem).
+  };
+
+  /// This POD struct holds information about reduction variables.
+  struct ReductionDescriptor {
+    ReductionDescriptor() : StartValue(0), LoopExitInstr(0), Kind(NoReduction) {
+    }
+
+    ReductionDescriptor(Value *Start, Instruction *Exit, ReductionKind K)
+        : StartValue(Start), LoopExitInstr(Exit), Kind(K) {}
+
+    // The starting value of the reduction.
+    // It does not have to be zero!
+    Value *StartValue;
+    // The instruction who's value is used outside the loop.
+    Instruction *LoopExitInstr;
+    // The kind of the reduction.
+    ReductionKind Kind;
+  };
+
+  // This POD struct holds information about the memory runtime legality
+  // check that a group of pointers do not overlap.
+  struct RuntimePointerCheck {
+    RuntimePointerCheck() : Need(false) {}
+
+    /// Reset the state of the pointer runtime information.
+    void reset() {
+      Need = false;
+      Pointers.clear();
+      Starts.clear();
+      Ends.clear();
+    }
+
+    /// Insert a pointer and calculate the start and end SCEVs.
+    void insert(ScalarEvolution *SE, Loop *Lp, Value *Ptr);
+
+    /// This flag indicates if we need to add the runtime check.
+    bool Need;
+    /// Holds the pointers that we need to check.
+    SmallVector<Value*, 2> Pointers;
+    /// Holds the pointer value at the beginning of the loop.
+    SmallVector<const SCEV*, 2> Starts;
+    /// Holds the pointer value at the end of the loop.
+    SmallVector<const SCEV*, 2> Ends;
+  };
+
+  /// A POD for saving information about induction variables.
+  struct InductionInfo {
+    InductionInfo(Value *Start, InductionKind K) : StartValue(Start), IK(K) {}
+    InductionInfo() : StartValue(0), IK(NoInduction) {}
+    /// Start value.
+    Value *StartValue;
+    /// Induction kind.
+    InductionKind IK;
+  };
+
+  /// ReductionList contains the reduction descriptors for all
+  /// of the reductions that were found in the loop.
+  typedef DenseMap<PHINode*, ReductionDescriptor> ReductionList;
+
+  /// InductionList saves induction variables and maps them to the
+  /// induction descriptor.
+  typedef MapVector<PHINode*, InductionInfo> InductionList;
+
+  /// Returns true if it is legal to vectorize this loop.
+  /// This does not mean that it is profitable to vectorize this
+  /// loop, only that it is legal to do so.
+  bool canVectorize();
+
+  /// Returns the Induction variable.
+  PHINode *getInduction() { return Induction; }
+
+  /// Returns the reduction variables found in the loop.
+  ReductionList *getReductionVars() { return &Reductions; }
+
+  /// Returns the induction variables found in the loop.
+  InductionList *getInductionVars() { return &Inductions; }
+
+  /// Returns True if V is an induction variable in this loop.
+  bool isInductionVariable(const Value *V);
+
+  /// Return true if the block BB needs to be predicated in order for the loop
+  /// to be vectorized.
+  bool blockNeedsPredication(BasicBlock *BB);
+
+  /// Check if this  pointer is consecutive when vectorizing. This happens
+  /// when the last index of the GEP is the induction variable, or that the
+  /// pointer itself is an induction variable.
+  /// This check allows us to vectorize A[idx] into a wide load/store.
+  /// Returns:
+  /// 0 - Stride is unknown or non consecutive.
+  /// 1 - Address is consecutive.
+  /// -1 - Address is consecutive, and decreasing.
+  int isConsecutivePtr(Value *Ptr);
+
+  /// Returns true if the value V is uniform within the loop.
+  bool isUniform(Value *V);
+
+  /// Returns true if this instruction will remain scalar after vectorization.
+  bool isUniformAfterVectorization(Instruction* I) { return Uniforms.count(I); }
+
+  /// Returns the information that we collected about runtime memory check.
+  RuntimePointerCheck *getRuntimePointerCheck() { return &PtrRtCheck; }
+private:
+  /// Check if a single basic block loop is vectorizable.
+  /// At this point we know that this is a loop with a constant trip count
+  /// and we only need to check individual instructions.
+  bool canVectorizeInstrs();
+
+  /// When we vectorize loops we may change the order in which
+  /// we read and write from memory. This method checks if it is
+  /// legal to vectorize the code, considering only memory constrains.
+  /// Returns true if the loop is vectorizable
+  bool canVectorizeMemory();
+
+  /// Return true if we can vectorize this loop using the IF-conversion
+  /// transformation.
+  bool canVectorizeWithIfConvert();
+
+  /// Collect the variables that need to stay uniform after vectorization.
+  void collectLoopUniforms();
+
+  /// Return true if all of the instructions in the block can be speculatively
+  /// executed.
+  bool blockCanBePredicated(BasicBlock *BB);
+
+  /// Returns True, if 'Phi' is the kind of reduction variable for type
+  /// 'Kind'. If this is a reduction variable, it adds it to ReductionList.
+  bool AddReductionVar(PHINode *Phi, ReductionKind Kind);
+  /// Returns true if the instruction I can be a reduction variable of type
+  /// 'Kind'.
+  bool isReductionInstr(Instruction *I, ReductionKind Kind);
+  /// Returns the induction kind of Phi. This function may return NoInduction
+  /// if the PHI is not an induction variable.
+  InductionKind isInductionVariable(PHINode *Phi);
+  /// Return true if can compute the address bounds of Ptr within the loop.
+  bool hasComputableBounds(Value *Ptr);
+
+  /// The loop that we evaluate.
+  Loop *TheLoop;
+  /// Scev analysis.
+  ScalarEvolution *SE;
+  /// DataLayout analysis.
+  DataLayout *DL;
+  // Dominators.
+  DominatorTree *DT;
+
+  //  ---  vectorization state --- //
+
+  /// Holds the integer induction variable. This is the counter of the
+  /// loop.
+  PHINode *Induction;
+  /// Holds the reduction variables.
+  ReductionList Reductions;
+  /// Holds all of the induction variables that we found in the loop.
+  /// Notice that inductions don't need to start at zero and that induction
+  /// variables can be pointers.
+  InductionList Inductions;
+
+  /// Allowed outside users. This holds the reduction
+  /// vars which can be accessed from outside the loop.
+  SmallPtrSet<Value*, 4> AllowedExit;
+  /// This set holds the variables which are known to be uniform after
+  /// vectorization.
+  SmallPtrSet<Instruction*, 4> Uniforms;
+  /// We need to check that all of the pointers in this list are disjoint
+  /// at runtime.
+  RuntimePointerCheck PtrRtCheck;
+};
+
+/// LoopVectorizationCostModel - estimates the expected speedups due to
+/// vectorization.
+/// In many cases vectorization is not profitable. This can happen because of
+/// a number of reasons. In this class we mainly attempt to predict the
+/// expected speedup/slowdowns due to the supported instruction set. We use the
+/// TargetTransformInfo to query the different backends for the cost of
+/// different operations.
+class LoopVectorizationCostModel {
+public:
+  LoopVectorizationCostModel(Loop *L, ScalarEvolution *SE, LoopInfo *LI,
+                             LoopVectorizationLegality *Legal,
+                             const TargetTransformInfo &TTI)
+      : TheLoop(L), SE(SE), LI(LI), Legal(Legal), TTI(TTI) {}
+
+  /// \return The most profitable vectorization factor.
+  /// This method checks every power of two up to VF. If UserVF is not ZERO
+  /// then this vectorization factor will be selected if vectorization is
+  /// possible.
+  unsigned selectVectorizationFactor(bool OptForSize, unsigned UserVF);
+
+
+  /// \return The most profitable unroll factor.
+  /// If UserUF is non-zero then this method finds the best unroll-factor
+  /// based on register pressure and other parameters.
+  unsigned selectUnrollFactor(bool OptForSize, unsigned UserUF);
+
+  /// \brief A struct that represents some properties of the register usage
+  /// of a loop.
+  struct RegisterUsage {
+    /// Holds the number of loop invariant values that are used in the loop.
+    unsigned LoopInvariantRegs;
+    /// Holds the maximum number of concurrent live intervals in the loop.
+    unsigned MaxLocalUsers;
+    /// Holds the number of instructions in the loop.
+    unsigned NumInstructions;
+  };
+
+  /// \return  information about the register usage of the loop.
+  RegisterUsage calculateRegisterUsage();
+
+private:
+  /// Returns the expected execution cost. The unit of the cost does
+  /// not matter because we use the 'cost' units to compare different
+  /// vector widths. The cost that is returned is *not* normalized by
+  /// the factor width.
+  unsigned expectedCost(unsigned VF);
+
+  /// Returns the execution time cost of an instruction for a given vector
+  /// width. Vector width of one means scalar.
+  unsigned getInstructionCost(Instruction *I, unsigned VF);
+
+  /// A helper function for converting Scalar types to vector types.
+  /// If the incoming type is void, we return void. If the VF is 1, we return
+  /// the scalar type.
+  static Type* ToVectorTy(Type *Scalar, unsigned VF);
+
+  /// The loop that we evaluate.
+  Loop *TheLoop;
+  /// Scev analysis.
+  ScalarEvolution *SE;
+  /// Loop Info analysis.
+  LoopInfo *LI;
+  /// Vectorization legality.
+  LoopVectorizationLegality *Legal;
+  /// Vector target information.
+  const TargetTransformInfo &TTI;
+};
 
 /// The LoopVectorize Pass.
 struct LoopVectorize : public LoopPass {
@@ -76,7 +593,7 @@ struct LoopVectorize : public LoopPass {
     SE = &getAnalysis<ScalarEvolution>();
     DL = getAnalysisIfAvailable<DataLayout>();
     LI = &getAnalysis<LoopInfo>();
-    TTI = getAnalysisIfAvailable<TargetTransformInfo>();
+    TTI = &getAnalysis<TargetTransformInfo>();
     DT = &getAnalysis<DominatorTree>();
 
     DEBUG(dbgs() << "LV: Checking a loop in \"" <<
@@ -89,12 +606,8 @@ struct LoopVectorize : public LoopPass {
       return false;
     }
 
-    // Select the preffered vectorization factor.
-    const VectorTargetTransformInfo *VTTI = 0;
-    if (TTI)
-      VTTI = TTI->getVectorTargetTransformInfo();
     // Use the cost model.
-    LoopVectorizationCostModel CM(L, SE, &LVL, VTTI);
+    LoopVectorizationCostModel CM(L, SE, LI, &LVL, *TTI);
 
     // Check the function attribues to find out if this function should be
     // optimized for size.
@@ -112,6 +625,7 @@ struct LoopVectorize : public LoopPass {
     }
 
     unsigned VF = CM.selectVectorizationFactor(OptForSize, VectorizationFactor);
+    unsigned UF = CM.selectUnrollFactor(OptForSize, VectorizationUnroll);
 
     if (VF == 1) {
       DEBUG(dbgs() << "LV: Vectorization is possible but not beneficial.\n");
@@ -120,9 +634,10 @@ struct LoopVectorize : public LoopPass {
 
     DEBUG(dbgs() << "LV: Found a vectorizable loop ("<< VF << ") in "<<
           F->getParent()->getModuleIdentifier()<<"\n");
+    DEBUG(dbgs() << "LV: Unroll Factor is " << UF << "\n");
 
     // If we decided that it is *legal* to vectorizer the loop then do it.
-    InnerLoopVectorizer LB(L, SE, LI, DT, DL, VF, VectorizationUnroll);
+    InnerLoopVectorizer LB(L, SE, LI, DT, DL, VF, UF);
     LB.vectorize(&LVL);
 
     DEBUG(verifyFunction(*L->getHeader()->getParent()));
@@ -133,16 +648,17 @@ struct LoopVectorize : public LoopPass {
     LoopPass::getAnalysisUsage(AU);
     AU.addRequiredID(LoopSimplifyID);
     AU.addRequiredID(LCSSAID);
+    AU.addRequired<DominatorTree>();
     AU.addRequired<LoopInfo>();
     AU.addRequired<ScalarEvolution>();
-    AU.addRequired<DominatorTree>();
+    AU.addRequired<TargetTransformInfo>();
     AU.addPreserved<LoopInfo>();
     AU.addPreserved<DominatorTree>();
   }
 
 };
 
-}// namespace
+} // end anonymous namespace
 
 //===----------------------------------------------------------------------===//
 // Implementation of LoopVectorizationLegality, InnerLoopVectorizer and
@@ -1909,10 +2425,6 @@ bool LoopVectorizationLegality::AddReductionVar(PHINode *Phi,
     if (Iter->use_empty())
       return false;
 
-    // Any reduction instr must be of one of the allowed kinds.
-    if (!isReductionInstr(Iter, Kind))
-      return false;
-
     // Did we find a user inside this loop already ?
     bool FoundInBlockUser = false;
     // Did we reach the initial PHI node already ?
@@ -1950,6 +2462,16 @@ bool LoopVectorizationLegality::AddReductionVar(PHINode *Phi,
       if (FoundInBlockUser)
         return false;
       FoundInBlockUser = true;
+
+      // Any reduction instr must be of one of the allowed kinds.
+      if (!isReductionInstr(U, Kind))
+        return false;
+
+      // Reductions of instructions such as Div, and Sub is only
+      // possible if the LHS is the reduction variable.
+      if (!U->isCommutative() && U->getOperand(0) != Iter)
+        return false;
+
       Iter = U;
     }
 
@@ -1982,9 +2504,11 @@ LoopVectorizationLegality::isReductionInstr(Instruction *I,
   case Instruction::PHI:
     // possibly.
     return true;
-  case Instruction::Add:
   case Instruction::Sub:
+  case Instruction::Add:
     return Kind == IntegerAdd;
+  case Instruction::SDiv:
+  case Instruction::UDiv:
   case Instruction::Mul:
     return Kind == IntegerMult;
   case Instruction::And:
@@ -2082,7 +2606,7 @@ bool LoopVectorizationLegality::hasComputableBounds(Value *Ptr) {
 
 unsigned
 LoopVectorizationCostModel::selectVectorizationFactor(bool OptForSize,
-                                                        unsigned UserVF) {
+                                                      unsigned UserVF) {
   if (OptForSize && Legal->getRuntimePointerCheck()->Need) {
     DEBUG(dbgs() << "LV: Aborting. Runtime ptr check is required in Os.\n");
     return 1;
@@ -2123,11 +2647,6 @@ LoopVectorizationCostModel::selectVectorizationFactor(bool OptForSize,
     return UserVF;
   }
 
-  if (!VTTI) {
-    DEBUG(dbgs() << "LV: No vector target information. Not vectorizing. \n");
-    return 1;
-  }
-
   float Cost = expectedCost(1);
   unsigned Width = 1;
   DEBUG(dbgs() << "LV: Scalar loop costs: "<< (int)Cost << ".\n");
@@ -2146,6 +2665,161 @@ LoopVectorizationCostModel::selectVectorizationFactor(bool OptForSize,
 
   DEBUG(dbgs() << "LV: Selecting VF = : "<< Width << ".\n");
   return Width;
+}
+
+unsigned
+LoopVectorizationCostModel::selectUnrollFactor(bool OptForSize,
+                                               unsigned UserUF) {
+  // Use the user preference, unless 'auto' is selected.
+  if (UserUF != 0)
+    return UserUF;
+
+  // When we optimize for size we don't unroll.
+  if (OptForSize)
+    return 1;
+
+  unsigned TargetVectorRegisters = TTI.getNumberOfRegisters(true);
+  DEBUG(dbgs() << "LV: The target has " << TargetVectorRegisters <<
+        " vector registers\n");
+
+  LoopVectorizationCostModel::RegisterUsage R = calculateRegisterUsage();
+  // We divide by these constants so assume that we have at least one
+  // instruction that uses at least one register.
+  R.MaxLocalUsers = std::max(R.MaxLocalUsers, 1U);
+  R.NumInstructions = std::max(R.NumInstructions, 1U);
+
+  // We calculate the unroll factor using the following formula.
+  // Subtract the number of loop invariants from the number of available
+  // registers. These registers are used by all of the unrolled instances.
+  // Next, divide the remaining registers by the number of registers that is
+  // required by the loop, in order to estimate how many parallel instances
+  // fit without causing spills.
+  unsigned UF = (TargetVectorRegisters - R.LoopInvariantRegs) / R.MaxLocalUsers;
+
+  // We don't want to unroll the loops to the point where they do not fit into
+  // the decoded cache. Assume that we only allow 32 IR instructions.
+  UF = std::min(UF, (32 / R.NumInstructions));
+
+  // Clamp the unroll factor ranges to reasonable factors.
+  if (UF > MaxUnrollSize)
+    UF = MaxUnrollSize;
+  else if (UF < 1)
+    UF = 1;
+
+  return UF;
+}
+
+LoopVectorizationCostModel::RegisterUsage
+LoopVectorizationCostModel::calculateRegisterUsage() {
+  // This function calculates the register usage by measuring the highest number
+  // of values that are alive at a single location. Obviously, this is a very
+  // rough estimation. We scan the loop in a topological order in order and
+  // assign a number to each instruction. We use RPO to ensure that defs are
+  // met before their users. We assume that each instruction that has in-loop
+  // users starts an interval. We record every time that an in-loop value is
+  // used, so we have a list of the first and last occurrences of each
+  // instruction. Next, we transpose this data structure into a multi map that
+  // holds the list of intervals that *end* at a specific location. This multi
+  // map allows us to perform a linear search. We scan the instructions linearly
+  // and record each time that a new interval starts, by placing it in a set.
+  // If we find this value in the multi-map then we remove it from the set.
+  // The max register usage is the maximum size of the set.
+  // We also search for instructions that are defined outside the loop, but are
+  // used inside the loop. We need this number separately from the max-interval
+  // usage number because when we unroll, loop-invariant values do not take
+  // more register.
+  LoopBlocksDFS DFS(TheLoop);
+  DFS.perform(LI);
+
+  RegisterUsage R;
+  R.NumInstructions = 0;
+
+  // Each 'key' in the map opens a new interval. The values
+  // of the map are the index of the 'last seen' usage of the
+  // instruction that is the key.
+  typedef DenseMap<Instruction*, unsigned> IntervalMap;
+  // Maps instruction to its index.
+  DenseMap<unsigned, Instruction*> IdxToInstr;
+  // Marks the end of each interval.
+  IntervalMap EndPoint;
+  // Saves the list of instruction indices that are used in the loop.
+  SmallSet<Instruction*, 8> Ends;
+  // Saves the list of values that are used in the loop but are
+  // defined outside the loop, such as arguments and constants.
+  SmallPtrSet<Value*, 8> LoopInvariants;
+
+  unsigned Index = 0;
+  for (LoopBlocksDFS::RPOIterator bb = DFS.beginRPO(),
+       be = DFS.endRPO(); bb != be; ++bb) {
+    R.NumInstructions += (*bb)->size();
+    for (BasicBlock::iterator it = (*bb)->begin(), e = (*bb)->end(); it != e;
+         ++it) {
+      Instruction *I = it;
+      IdxToInstr[Index++] = I;
+
+      // Save the end location of each USE.
+      for (unsigned i = 0; i < I->getNumOperands(); ++i) {
+        Value *U = I->getOperand(i);
+        Instruction *Instr = dyn_cast<Instruction>(U);
+
+        // Ignore non-instruction values such as arguments, constants, etc.
+        if (!Instr) continue;
+
+        // If this instruction is outside the loop then record it and continue.
+        if (!TheLoop->contains(Instr)) {
+          LoopInvariants.insert(Instr);
+          continue;
+        }
+
+        // Overwrite previous end points.
+        EndPoint[Instr] = Index;
+        Ends.insert(Instr);
+      }
+    }
+  }
+
+  // Saves the list of intervals that end with the index in 'key'.
+  typedef SmallVector<Instruction*, 2> InstrList;
+  DenseMap<unsigned, InstrList> TransposeEnds;
+
+  // Transpose the EndPoints to a list of values that end at each index.
+  for (IntervalMap::iterator it = EndPoint.begin(), e = EndPoint.end();
+       it != e; ++it)
+    TransposeEnds[it->second].push_back(it->first);
+
+  SmallSet<Instruction*, 8> OpenIntervals;
+  unsigned MaxUsage = 0;
+
+
+  DEBUG(dbgs() << "LV(REG): Calculating max register usage:\n");
+  for (unsigned int i = 0; i < Index; ++i) {
+    Instruction *I = IdxToInstr[i];
+    // Ignore instructions that are never used within the loop.
+    if (!Ends.count(I)) continue;
+
+    // Remove all of the instructions that end at this location.
+    InstrList &List = TransposeEnds[i];
+    for (unsigned int j=0, e = List.size(); j < e; ++j)
+      OpenIntervals.erase(List[j]);
+
+    // Count the number of live interals.
+    MaxUsage = std::max(MaxUsage, OpenIntervals.size());
+
+    DEBUG(dbgs() << "LV(REG): At #" << i << " Interval # " <<
+          OpenIntervals.size() <<"\n");
+
+    // Add the current instruction to the list of open intervals.
+    OpenIntervals.insert(I);
+  }
+
+  unsigned Invariant = LoopInvariants.size();
+  DEBUG(dbgs() << "LV(REG): Found max usage: " << MaxUsage << " \n");
+  DEBUG(dbgs() << "LV(REG): Found invariant usage: " << Invariant << " \n");
+  DEBUG(dbgs() << "LV(REG): LoopSize: " << R.NumInstructions << " \n");
+
+  R.LoopInvariantRegs = Invariant;
+  R.MaxLocalUsers = MaxUsage;
+  return R;
 }
 
 unsigned LoopVectorizationCostModel::expectedCost(unsigned VF) {
@@ -2179,8 +2853,6 @@ unsigned LoopVectorizationCostModel::expectedCost(unsigned VF) {
 
 unsigned
 LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
-  assert(VTTI && "Invalid vector target transformation info");
-
   // If we know that this instruction will remain uniform, check the cost of
   // the scalar version.
   if (Legal->isUniformAfterVectorization(I))
@@ -2197,7 +2869,7 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
     // generate vector geps.
     return 0;
   case Instruction::Br: {
-    return VTTI->getCFInstrCost(I->getOpcode());
+    return TTI.getCFInstrCost(I->getOpcode());
   }
   case Instruction::PHI:
     //TODO: IF-converted IFs become selects.
@@ -2220,7 +2892,7 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
   case Instruction::And:
   case Instruction::Or:
   case Instruction::Xor:
-    return VTTI->getArithmeticInstrCost(I->getOpcode(), VectorTy);
+    return TTI.getArithmeticInstrCost(I->getOpcode(), VectorTy);
   case Instruction::Select: {
     SelectInst *SI = cast<SelectInst>(I);
     const SCEV *CondSCEV = SE->getSCEV(SI->getCondition());
@@ -2229,13 +2901,13 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
     if (ScalarCond)
       CondTy = VectorType::get(CondTy, VF);
 
-    return VTTI->getCmpSelInstrCost(I->getOpcode(), VectorTy, CondTy);
+    return TTI.getCmpSelInstrCost(I->getOpcode(), VectorTy, CondTy);
   }
   case Instruction::ICmp:
   case Instruction::FCmp: {
     Type *ValTy = I->getOperand(0)->getType();
     VectorTy = ToVectorTy(ValTy, VF);
-    return VTTI->getCmpSelInstrCost(I->getOpcode(), VectorTy);
+    return TTI.getCmpSelInstrCost(I->getOpcode(), VectorTy);
   }
   case Instruction::Store: {
     StoreInst *SI = cast<StoreInst>(I);
@@ -2243,7 +2915,7 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
     VectorTy = ToVectorTy(ValTy, VF);
 
     if (VF == 1)
-      return VTTI->getMemoryOpCost(I->getOpcode(), VectorTy,
+      return TTI.getMemoryOpCost(I->getOpcode(), VectorTy,
                                    SI->getAlignment(),
                                    SI->getPointerAddressSpace());
 
@@ -2256,36 +2928,33 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
       // The cost of extracting from the value vector and pointer vector.
       Type *PtrTy = ToVectorTy(I->getOperand(0)->getType(), VF);
       for (unsigned i = 0; i < VF; ++i) {
-        Cost += VTTI->getVectorInstrCost(Instruction::ExtractElement,
-                                         VectorTy, i);
-        Cost += VTTI->getVectorInstrCost(Instruction::ExtractElement,
-                                         PtrTy, i);
+        Cost += TTI.getVectorInstrCost(Instruction::ExtractElement, VectorTy,
+                                       i);
+        Cost += TTI.getVectorInstrCost(Instruction::ExtractElement, PtrTy, i);
       }
 
       // The cost of the scalar stores.
-      Cost += VF * VTTI->getMemoryOpCost(I->getOpcode(),
-                                         ValTy->getScalarType(),
-                                         SI->getAlignment(),
-                                         SI->getPointerAddressSpace());
+      Cost += VF * TTI.getMemoryOpCost(I->getOpcode(), ValTy->getScalarType(),
+                                       SI->getAlignment(),
+                                       SI->getPointerAddressSpace());
       return Cost;
     }
 
     // Wide stores.
-    unsigned Cost = VTTI->getMemoryOpCost(I->getOpcode(), VectorTy,
-                                          SI->getAlignment(),
-                                          SI->getPointerAddressSpace());
+    unsigned Cost = TTI.getMemoryOpCost(I->getOpcode(), VectorTy,
+                                        SI->getAlignment(),
+                                        SI->getPointerAddressSpace());
     if (Reverse)
-      Cost += VTTI->getShuffleCost(VectorTargetTransformInfo::Reverse,
-                                   VectorTy, 0);
+      Cost += TTI.getShuffleCost(TargetTransformInfo::SK_Reverse,
+                                  VectorTy, 0);
     return Cost;
   }
   case Instruction::Load: {
     LoadInst *LI = cast<LoadInst>(I);
 
     if (VF == 1)
-      return VTTI->getMemoryOpCost(I->getOpcode(), VectorTy,
-                                   LI->getAlignment(),
-                                   LI->getPointerAddressSpace());
+      return TTI.getMemoryOpCost(I->getOpcode(), VectorTy, LI->getAlignment(),
+                                 LI->getPointerAddressSpace());
 
     // Scalarized loads.
     int Stride = Legal->isConsecutivePtr(LI->getPointerOperand());
@@ -2296,29 +2965,25 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
 
       // The cost of extracting from the pointer vector.
       for (unsigned i = 0; i < VF; ++i)
-        Cost += VTTI->getVectorInstrCost(Instruction::ExtractElement,
-                                         PtrTy, i);
+        Cost += TTI.getVectorInstrCost(Instruction::ExtractElement, PtrTy, i);
 
       // The cost of inserting data to the result vector.
       for (unsigned i = 0; i < VF; ++i)
-        Cost += VTTI->getVectorInstrCost(Instruction::InsertElement,
-                                         VectorTy, i);
+        Cost += TTI.getVectorInstrCost(Instruction::InsertElement, VectorTy, i);
 
       // The cost of the scalar stores.
-      Cost += VF * VTTI->getMemoryOpCost(I->getOpcode(),
-                                         RetTy->getScalarType(),
-                                         LI->getAlignment(),
-                                         LI->getPointerAddressSpace());
+      Cost += VF * TTI.getMemoryOpCost(I->getOpcode(), RetTy->getScalarType(),
+                                       LI->getAlignment(),
+                                       LI->getPointerAddressSpace());
       return Cost;
     }
 
     // Wide loads.
-    unsigned Cost = VTTI->getMemoryOpCost(I->getOpcode(), VectorTy,
-                                          LI->getAlignment(),
-                                          LI->getPointerAddressSpace());
+    unsigned Cost = TTI.getMemoryOpCost(I->getOpcode(), VectorTy,
+                                        LI->getAlignment(),
+                                        LI->getPointerAddressSpace());
     if (Reverse)
-      Cost += VTTI->getShuffleCost(VectorTargetTransformInfo::Reverse,
-                                   VectorTy, 0);
+      Cost += TTI.getShuffleCost(TargetTransformInfo::SK_Reverse, VectorTy, 0);
     return Cost;
   }
   case Instruction::ZExt:
@@ -2337,11 +3002,11 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
     // The cost of these is the same as the scalar operation.
     if (I->getOpcode() == Instruction::Trunc &&
         Legal->isInductionVariable(I->getOperand(0)))
-         return VTTI->getCastInstrCost(I->getOpcode(), I->getType(),
-                                       I->getOperand(0)->getType());
+      return TTI.getCastInstrCost(I->getOpcode(), I->getType(),
+                                  I->getOperand(0)->getType());
 
     Type *SrcVecTy = ToVectorTy(I->getOperand(0)->getType(), VF);
-    return VTTI->getCastInstrCost(I->getOpcode(), VectorTy, SrcVecTy);
+    return TTI.getCastInstrCost(I->getOpcode(), VectorTy, SrcVecTy);
   }
   case Instruction::Call: {
     assert(isTriviallyVectorizableIntrinsic(I));
@@ -2350,7 +3015,7 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
     SmallVector<Type*, 4> Tys;
     for (unsigned i = 0, ie = II->getNumArgOperands(); i != ie; ++i)
       Tys.push_back(ToVectorTy(II->getArgOperand(i)->getType(), VF));
-    return VTTI->getIntrinsicInstrCost(II->getIntrinsicID(), RetTy, Tys);
+    return TTI.getIntrinsicInstrCost(II->getIntrinsicID(), RetTy, Tys);
   }
   default: {
     // We are scalarizing the instruction. Return the cost of the scalar
@@ -2359,10 +3024,10 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
     unsigned Cost = 0;
 
     if (!RetTy->isVoidTy() && VF != 1) {
-      unsigned InsCost = VTTI->getVectorInstrCost(Instruction::InsertElement,
-                                                  VectorTy);
-      unsigned ExtCost = VTTI->getVectorInstrCost(Instruction::ExtractElement,
-                                                  VectorTy);
+      unsigned InsCost = TTI.getVectorInstrCost(Instruction::InsertElement,
+                                                VectorTy);
+      unsigned ExtCost = TTI.getVectorInstrCost(Instruction::ExtractElement,
+                                                VectorTy);
 
       // The cost of inserting the results plus extracting each one of the
       // operands.
@@ -2371,7 +3036,7 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
 
     // The cost of executing VF copies of the scalar instruction. This opcode
     // is unknown. Assume that it is the same as 'mul'.
-    Cost += VF * VTTI->getArithmeticInstrCost(Instruction::Mul, VectorTy);
+    Cost += VF * TTI.getArithmeticInstrCost(Instruction::Mul, VectorTy);
     return Cost;
   }
   }// end of switch.
@@ -2387,6 +3052,7 @@ char LoopVectorize::ID = 0;
 static const char lv_name[] = "Loop Vectorization";
 INITIALIZE_PASS_BEGIN(LoopVectorize, LV_NAME, lv_name, false, false)
 INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
+INITIALIZE_AG_DEPENDENCY(TargetTransformInfo)
 INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)
 INITIALIZE_PASS_DEPENDENCY(LoopSimplify)
 INITIALIZE_PASS_END(LoopVectorize, LV_NAME, lv_name, false, false)

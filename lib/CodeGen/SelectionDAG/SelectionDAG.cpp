@@ -19,6 +19,7 @@
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Assembly/Writer.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -48,7 +49,6 @@
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSelectionDAGInfo.h"
-#include "llvm/TargetTransformInfo.h"
 #include <algorithm>
 #include <cmath>
 using namespace llvm;
@@ -885,15 +885,17 @@ unsigned SelectionDAG::getEVTAlignment(EVT VT) const {
 // EntryNode could meaningfully have debug info if we can find it...
 SelectionDAG::SelectionDAG(const TargetMachine &tm, CodeGenOpt::Level OL)
   : TM(tm), TLI(*tm.getTargetLowering()), TSI(*tm.getSelectionDAGInfo()),
-    OptLevel(OL), EntryNode(ISD::EntryToken, DebugLoc(), getVTList(MVT::Other)),
+    TTI(0), OptLevel(OL), EntryNode(ISD::EntryToken, DebugLoc(),
+                                    getVTList(MVT::Other)),
     Root(getEntryNode()), Ordering(0), UpdateListeners(0) {
   AllNodes.push_back(&EntryNode);
   Ordering = new SDNodeOrdering();
   DbgInfo = new SDDbgInfo();
 }
 
-void SelectionDAG::init(MachineFunction &mf) {
+void SelectionDAG::init(MachineFunction &mf, const TargetTransformInfo *tti) {
   MF = &mf;
+  TTI = tti;
   Context = &mf.getFunction()->getContext();
 }
 
@@ -3386,8 +3388,8 @@ static SDValue getMemsetStringVal(EVT VT, DebugLoc dl, SelectionDAG &DAG,
 
   // If the "cost" of materializing the integer immediate is 1 or free, then
   // it is cost effective to turn the load into the immediate.
-  if (DAG.getTarget().getScalarTargetTransformInfo()->
-      getIntImmCost(Val, VT.getTypeForEVT(*DAG.getContext())) < 2)
+  const TargetTransformInfo *TTI = DAG.getTargetTransformInfo();
+  if (TTI->getIntImmCost(Val, VT.getTypeForEVT(*DAG.getContext())) < 2)
     return DAG.getConstant(Val, VT);
   return SDValue(0, 0);
 }

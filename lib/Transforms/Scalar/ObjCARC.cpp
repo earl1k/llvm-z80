@@ -912,7 +912,7 @@ bool ObjCARCExpand::runOnFunction(Function &F) {
     }
   }
   
-  DEBUG(dbgs() << "ObjCARCExpand: Finished Queue.\n\n");
+  DEBUG(dbgs() << "ObjCARCExpand: Finished List.\n\n");
   
   return Changed;
 }
@@ -995,6 +995,9 @@ bool ObjCARCAPElim::OptimizeBB(BasicBlock *BB) {
       // zap the pair.
       if (Push && cast<CallInst>(Inst)->getArgOperand(0) == Push) {
         Changed = true;
+        DEBUG(dbgs() << "ObjCARCAPElim::OptimizeBB: Zapping push pop autorelease pair:\n"
+                     << "                           Pop: " << *Inst << "\n"
+                     << "                           Push: " << *Push << "\n");
         Inst->eraseFromParent();
         Push->eraseFromParent();
       }
@@ -2196,7 +2199,17 @@ ObjCARCOpt::OptimizeRetainCall(Function &F, Instruction *Retain) {
   // Turn it to an objc_retainAutoreleasedReturnValue..
   Changed = true;
   ++NumPeeps;
+  
+  DEBUG(dbgs() << "ObjCARCOpt::OptimizeRetainCall: Transforming "
+                  "objc_retainAutoreleasedReturnValue => "
+                  "objc_retain since the operand is not a return value.\n"
+                  "                                Old: "
+               << *Retain << "\n");
+  
   cast<CallInst>(Retain)->setCalledFunction(getRetainRVCallee(F.getParent()));
+
+  DEBUG(dbgs() << "                                New: "
+               << *Retain << "\n");
 }
 
 /// OptimizeRetainRVCall - Turn objc_retainAutoreleasedReturnValue into
@@ -2234,6 +2247,11 @@ ObjCARCOpt::OptimizeRetainRVCall(Function &F, Instruction *RetainRV) {
         GetObjCArg(I) == Arg) {
       Changed = true;
       ++NumPeeps;
+      
+      DEBUG(dbgs() << "ObjCARCOpt::OptimizeRetainRVCall: Erasing " << *I << "\n"
+                   << "                                  Erasing " << *RetainRV
+                   << "\n");
+      
       EraseInstruction(I);
       EraseInstruction(RetainRV);
       return true;
@@ -2243,7 +2261,18 @@ ObjCARCOpt::OptimizeRetainRVCall(Function &F, Instruction *RetainRV) {
   // Turn it to a plain objc_retain.
   Changed = true;
   ++NumPeeps;
+  
+  DEBUG(dbgs() << "ObjCARCOpt::OptimizeRetainRVCall: Transforming "
+                  "objc_retainAutoreleasedReturnValue => "
+                  "objc_retain since the operand is not a return value.\n"
+                  "                                  Old: "
+               << *RetainRV << "\n");
+  
   cast<CallInst>(RetainRV)->setCalledFunction(getRetainCallee(F.getParent()));
+
+  DEBUG(dbgs() << "                                  New: "
+               << *RetainRV << "\n");
+
   return false;
 }
 
@@ -2269,8 +2298,20 @@ ObjCARCOpt::OptimizeAutoreleaseRVCall(Function &F, Instruction *AutoreleaseRV) {
 
   Changed = true;
   ++NumPeeps;
+
+  DEBUG(dbgs() << "ObjCARCOpt::OptimizeAutoreleaseRVCall: Transforming "
+                  "objc_autoreleaseReturnValue => "
+                  "objc_autorelease since its operand is not used as a return "
+                  "value.\n"
+                  "                                       Old: "
+               << *AutoreleaseRV << "\n");
+
   cast<CallInst>(AutoreleaseRV)->
     setCalledFunction(getAutoreleaseCallee(F.getParent()));
+  
+  DEBUG(dbgs() << "                                       New: "
+               << *AutoreleaseRV << "\n");
+  
 }
 
 /// OptimizeIndividualCalls - Visit each call, one at a time, and make
@@ -2283,7 +2324,7 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ) {
     Instruction *Inst = &*I++;
 
-    DEBUG(dbgs() << "ObjCARCOpt: OptimizeIndividualCalls: Visiting: " <<
+    DEBUG(dbgs() << "ObjCARCOpt::OptimizeIndividualCalls: Visiting: " <<
           *Inst << "\n");
 
     InstructionClass Class = GetBasicInstructionClass(Inst);
@@ -2302,6 +2343,8 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
     case IC_NoopCast:
       Changed = true;
       ++NumNoops;
+      DEBUG(dbgs() << "ObjCARCOpt::OptimizeIndividualCalls: Erasing no-op cast:"
+                   " " << *Inst << "\n");
       EraseInstruction(Inst);
       continue;
 
@@ -2318,7 +2361,13 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
         new StoreInst(UndefValue::get(cast<PointerType>(Ty)->getElementType()),
                       Constant::getNullValue(Ty),
                       CI);
-        CI->replaceAllUsesWith(UndefValue::get(CI->getType()));
+        llvm::Value *NewValue = UndefValue::get(CI->getType());        
+        DEBUG(dbgs() << "ObjCARCOpt::OptimizeIndividualCalls: A null "
+                        "pointer-to-weak-pointer is undefined behavior.\n"
+                        "                                     Old = " << *CI <<
+                        "\n                                     New = " <<
+                        *NewValue << "\n");        
+        CI->replaceAllUsesWith(NewValue);
         CI->eraseFromParent();
         continue;
       }
@@ -2334,7 +2383,15 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
         new StoreInst(UndefValue::get(cast<PointerType>(Ty)->getElementType()),
                       Constant::getNullValue(Ty),
                       CI);
-        CI->replaceAllUsesWith(UndefValue::get(CI->getType()));
+
+        llvm::Value *NewValue = UndefValue::get(CI->getType());
+        DEBUG(dbgs() << "ObjCARCOpt::OptimizeIndividualCalls: A null "
+                        "pointer-to-weak-pointer is undefined behavior.\n"
+                        "                                     Old = " << *CI <<
+                        "\n                                     New = " <<
+                        *NewValue << "\n");
+        
+        CI->replaceAllUsesWith(NewValue);
         CI->eraseFromParent();
         continue;
       }
@@ -2368,6 +2425,14 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
                            Call->getArgOperand(0), "", Call);
         NewCall->setMetadata(ImpreciseReleaseMDKind,
                              MDNode::get(C, ArrayRef<Value *>()));
+        
+        DEBUG(dbgs() << "ObjCARCOpt::OptimizeIndividualCalls: Replacing "
+                        "objc_autorelease(x) with objc_release(x) since x is "
+                        "otherwise unused.\n"
+                        "                                     Old: " << *Call <<
+                        "\n                                     New: " <<
+                        *NewCall << "\n");
+        
         EraseInstruction(Call);
         Inst = NewCall;
         Class = IC_Release;
@@ -2378,12 +2443,17 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
     // a tail keyword.
     if (IsAlwaysTail(Class)) {
       Changed = true;
+      DEBUG(dbgs() << "ObjCARCOpt::OptimizeIndividualCalls: Adding tail keyword"
+            " to function since it can never be passed stack args: " << *Inst <<
+            "\n");
       cast<CallInst>(Inst)->setTailCall();
     }
 
     // Set nounwind as needed.
     if (IsNoThrow(Class)) {
       Changed = true;
+      DEBUG(dbgs() << "ObjCARCOpt::OptimizeIndividualCalls: Found no throw"
+            " class. Setting nounwind on: " << *Inst << "\n");
       cast<CallInst>(Inst)->setDoesNotThrow();
     }
 
@@ -2398,6 +2468,8 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
     if (isNullOrUndef(Arg)) {
       Changed = true;
       ++NumNoops;
+      DEBUG(dbgs() << "ObjCARCOpt::OptimizeIndividualCalls: ARC calls with "
+            " null are no-ops. Erasing: " << *Inst << "\n");
       EraseInstruction(Inst);
       continue;
     }
@@ -2500,7 +2572,7 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
       }
     } while (!Worklist.empty());
 
-    DEBUG(dbgs() << "ObjCARCOpt: Finished Individual Call Queue.\n\n");
+    DEBUG(dbgs() << "ObjCARCOpt::OptimizeIndividualCalls: Finished Queue.\n\n");
 
   }
 }
@@ -3406,7 +3478,7 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
   for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ) {
     Instruction *Inst = &*I++;
 
-    DEBUG(dbgs() << "ObjCARCOpt: OptimizeWeakCalls: Visiting: " << *Inst <<
+    DEBUG(dbgs() << "ObjCARCOpt::OptimizeWeakCalls: Visiting: " << *Inst <<
           "\n");
 
     InstructionClass Class = GetBasicInstructionClass(Inst);
@@ -3555,7 +3627,7 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
     }
   }
   
-  DEBUG(dbgs() << "ObjCARCOpt: Finished visiting weak calls.\n\n");
+  DEBUG(dbgs() << "ObjCARCOpt::OptimizeWeakCalls: Finished List.\n\n");
   
 }
 
@@ -3606,7 +3678,7 @@ void ObjCARCOpt::OptimizeReturns(Function &F) {
     BasicBlock *BB = FI;
     ReturnInst *Ret = dyn_cast<ReturnInst>(&BB->back());
 
-    DEBUG(dbgs() << "ObjCARCOpt: OptimizeReturns: Visiting: " << *Ret << "\n");
+    DEBUG(dbgs() << "ObjCARCOpt::OptimizeReturns: Visiting: " << *Ret << "\n");
 
     if (!Ret) continue;
 
@@ -3681,6 +3753,9 @@ void ObjCARCOpt::OptimizeReturns(Function &F) {
           // If so, we can zap the retain and autorelease.
           Changed = true;
           ++NumRets;
+          DEBUG(dbgs() << "ObjCARCOpt::OptimizeReturns: Erasing: " << *Retain
+                       << "\n                             Erasing: "
+                       << *Autorelease << "\n");
           EraseInstruction(Retain);
           EraseInstruction(Autorelease);
         }
@@ -3692,7 +3767,7 @@ void ObjCARCOpt::OptimizeReturns(Function &F) {
     Visited.clear();
   }
   
-  DEBUG(dbgs() << "ObjCARCOpt: OptimizeReturns: Finished visiting returns.\n\n");
+  DEBUG(dbgs() << "ObjCARCOpt::OptimizeReturns: Finished List.\n\n");
   
 }
 
@@ -3952,12 +4027,20 @@ ObjCARCContract::ContractAutorelease(Function &F, Instruction *Autorelease,
 
   Changed = true;
   ++NumPeeps;
-
+  
+  DEBUG(dbgs() << "ObjCARCContract::ContractAutorelease: Fusing "
+                  "retain/autorelease. Erasing: " << *Autorelease << "\n"
+                  "                                      Old Retain: "
+               << *Retain << "\n");
+  
   if (Class == IC_AutoreleaseRV)
     Retain->setCalledFunction(getRetainAutoreleaseRVCallee(F.getParent()));
   else
     Retain->setCalledFunction(getRetainAutoreleaseCallee(F.getParent()));
-
+  
+  DEBUG(dbgs() << "                                      New Retain: "
+               << *Retain << "\n");
+  
   EraseInstruction(Autorelease);
   return true;
 }
@@ -4147,6 +4230,8 @@ bool ObjCARCContract::runOnFunction(Function &F) {
       } while (isNoopInstruction(BBI));
 
       if (&*BBI == GetObjCArg(Inst)) {
+        DEBUG(dbgs() << "ObjCARCContract: Adding inline asm marker for "
+                        "retainAutoreleasedReturnValue optimization.\n");
         Changed = true;
         InlineAsm *IA =
           InlineAsm::get(FunctionType::get(Type::getVoidTy(Inst->getContext()),
@@ -4166,6 +4251,10 @@ bool ObjCARCContract::runOnFunction(Function &F) {
           ConstantPointerNull::get(cast<PointerType>(CI->getType()));
         Changed = true;
         new StoreInst(Null, CI->getArgOperand(0), CI);
+        
+        DEBUG(dbgs() << "OBJCARCContract: Old = " << *CI << "\n"
+                     << "                 New = " << *Null << "\n");
+        
         CI->replaceAllUsesWith(Null);
         CI->eraseFromParent();
       }
@@ -4185,7 +4274,7 @@ bool ObjCARCContract::runOnFunction(Function &F) {
       continue;
     }
 
-    DEBUG(dbgs() << "ObjCARCContract: Finished Queue.\n\n");
+    DEBUG(dbgs() << "ObjCARCContract: Finished List.\n\n");
 
     // Don't use GetObjCArg because we don't want to look through bitcasts
     // and such; to do the replacement, the argument must have type i8*.

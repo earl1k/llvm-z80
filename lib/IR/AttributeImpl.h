@@ -29,6 +29,7 @@ class LLVMContext;
 /// \brief This class represents a single, uniqued attribute. That attribute
 /// could be a single enum, a tuple, or a string.
 class AttributeImpl : public FoldingSetNode {
+  LLVMContext &Context;
   Constant *Data;
   SmallVector<Constant*, 0> Vals;
 public:
@@ -38,38 +39,27 @@ public:
                 ArrayRef<Constant*> values);
   AttributeImpl(LLVMContext &C, StringRef data);
 
-  ArrayRef<Constant*> getValues() const {
-    return Vals;
-  }
+  ArrayRef<Constant*> getValues() const { return Vals; }
 
-  bool contains(Attribute::AttrKind Kind) const;
-  bool contains(StringRef Kind) const;
-
-  bool hasAttribute(uint64_t A) const;
+  bool hasAttribute(Attribute::AttrKind A) const;
 
   bool hasAttributes() const;
-  bool hasAttributes(const Attribute &A) const;
 
   uint64_t getAlignment() const;
+  void setAlignment(unsigned Align);
+
   uint64_t getStackAlignment() const;
+  void setStackAlignment(unsigned Align);
 
-  bool operator==(Attribute::AttrKind Kind) const {
-    return contains(Kind);
-  }
-  bool operator!=(Attribute::AttrKind Kind) const {
-    return !contains(Kind);
-  }
+  bool operator==(Attribute::AttrKind Kind) const;
+  bool operator!=(Attribute::AttrKind Kind) const;
 
-  bool operator==(StringRef Kind) const {
-    return contains(Kind);
-  }
-  bool operator!=(StringRef Kind) const {
-    return !contains(Kind);
-  }
+  bool operator==(StringRef Kind) const;
+  bool operator!=(StringRef Kind) const;
 
   uint64_t getBitMask() const;         // FIXME: Remove.
 
-  static uint64_t getAttrMask(uint64_t Val);
+  static uint64_t getAttrMask(Attribute::AttrKind Val);
 
   void Profile(FoldingSetNodeID &ID) const {
     Profile(ID, Data, Vals);
@@ -87,23 +77,28 @@ public:
 /// \class
 /// \brief This class represents a set of attributes.
 class AttributeSetImpl : public FoldingSetNode {
+  LLVMContext &Context;
+  SmallVector<AttributeWithIndex, 4> AttrList;
+
   // AttributesSet is uniqued, these should not be publicly available.
   void operator=(const AttributeSetImpl &) LLVM_DELETED_FUNCTION;
   AttributeSetImpl(const AttributeSetImpl &) LLVM_DELETED_FUNCTION;
 public:
-  LLVMContext &Context;
-  SmallVector<AttributeWithIndex, 4> Attrs;
-
   AttributeSetImpl(LLVMContext &C, ArrayRef<AttributeWithIndex> attrs)
-    : Context(C), Attrs(attrs.begin(), attrs.end()) {}
+    : Context(C), AttrList(attrs.begin(), attrs.end()) {}
+
+  LLVMContext &getContext() { return Context; }
+  ArrayRef<AttributeWithIndex> getAttributes() const { return AttrList; }
+  unsigned getNumAttributes() const { return AttrList.size(); }
 
   void Profile(FoldingSetNodeID &ID) const {
-    Profile(ID, Attrs);
+    Profile(ID, AttrList);
   }
-  static void Profile(FoldingSetNodeID &ID, ArrayRef<AttributeWithIndex> Attrs){
-    for (unsigned i = 0, e = Attrs.size(); i != e; ++i) {
-      ID.AddInteger(Attrs[i].Attrs.getBitMask());
-      ID.AddInteger(Attrs[i].Index);
+  static void Profile(FoldingSetNodeID &ID,
+                      ArrayRef<AttributeWithIndex> AttrList){
+    for (unsigned i = 0, e = AttrList.size(); i != e; ++i) {
+      ID.AddInteger(AttrList[i].Index);
+      ID.AddInteger(AttrList[i].Attrs.getBitMask());
     }
   }
 };

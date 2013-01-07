@@ -75,7 +75,7 @@ public:
 
   void clear() {
     if (getNumEntries() == 0 && getNumTombstones() == 0) return;
-    
+
     // If the capacity of the array is huge, and the # elements used is small,
     // shrink the array.
     if (getNumEntries() * 4 < getNumBuckets() && getNumBuckets() > 64) {
@@ -430,7 +430,8 @@ private:
     incrementNumEntries();
 
     // If we are writing over a tombstone, remember this.
-    if (!KeyInfoT::isEqual(TheBucket->first, getEmptyKey()))
+    const KeyT EmptyKey = getEmptyKey();
+    if (!KeyInfoT::isEqual(TheBucket->first, EmptyKey))
       decrementNumTombstones();
 
     return TheBucket;
@@ -531,13 +532,13 @@ public:
     init(NumInitBuckets);
   }
 
-  DenseMap(const DenseMap &other) {
+  DenseMap(const DenseMap &other) : BaseT() {
     init(0);
     copyFrom(other);
   }
 
 #if LLVM_HAS_RVALUE_REFERENCES
-  DenseMap(DenseMap &&other) {
+  DenseMap(DenseMap &&other) : BaseT() {
     init(0);
     swap(other);
   }
@@ -1027,7 +1028,7 @@ private:
       ++Ptr;
   }
 };
-  
+
 template<typename KeyT, typename ValueT, typename KeyInfoT>
 static inline size_t
 capacity_in_bytes(const DenseMap<KeyT, ValueT, KeyInfoT> &X) {

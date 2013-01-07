@@ -1,4 +1,4 @@
-; RUN: opt < %s  -loop-vectorize -force-vector-width=4 -dce -instcombine -licm -S | FileCheck %s
+; RUN: opt < %s  -loop-vectorize -force-vector-unroll=1 -force-vector-width=4 -dce -instcombine -licm -S | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.8.0"
@@ -269,4 +269,57 @@ for.body:                                         ; preds = %entry, %for.body
 for.end:                                          ; preds = %for.body, %entry
   %result.0.lcssa = phi i32 [ 0, %entry ], [ %xor, %for.body ]
   ret i32 %result.0.lcssa
+}
+
+; In this code the subtracted variable is on the RHS and this is not an induction variable.
+;CHECK: @reduction_sub_rhs
+;CHECK-NOT: phi <4 x i32>
+;CHECK-NOT: sub nsw <4 x i32>
+;CHECK: ret i32
+define i32 @reduction_sub_rhs(i32 %n, i32* noalias nocapture %A) nounwind uwtable readonly {
+entry:
+  %cmp4 = icmp sgt i32 %n, 0
+  br i1 %cmp4, label %for.body, label %for.end
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
+  %x.05 = phi i32 [ %sub, %for.body ], [ 0, %entry ]
+  %arrayidx = getelementptr inbounds i32* %A, i64 %indvars.iv
+  %0 = load i32* %arrayidx, align 4
+  %sub = sub nsw i32 %0, %x.05
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, %n
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body, %entry
+  %x.0.lcssa = phi i32 [ 0, %entry ], [ %sub, %for.body ]
+  ret i32 %x.0.lcssa
+}
+
+
+; In this test the reduction variable is on the LHS and we can vectorize it.
+;CHECK: @reduction_sub_lhs
+;CHECK: phi <4 x i32>
+;CHECK: sub nsw <4 x i32>
+;CHECK: ret i32
+define i32 @reduction_sub_lhs(i32 %n, i32* noalias nocapture %A) nounwind uwtable readonly {
+entry:
+  %cmp4 = icmp sgt i32 %n, 0
+  br i1 %cmp4, label %for.body, label %for.end
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
+  %x.05 = phi i32 [ %sub, %for.body ], [ 0, %entry ]
+  %arrayidx = getelementptr inbounds i32* %A, i64 %indvars.iv
+  %0 = load i32* %arrayidx, align 4
+  %sub = sub nsw i32 %x.05, %0
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, %n
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body, %entry
+  %x.0.lcssa = phi i32 [ 0, %entry ], [ %sub, %for.body ]
+  ret i32 %x.0.lcssa
 }

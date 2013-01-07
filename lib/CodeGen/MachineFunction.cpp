@@ -76,8 +76,15 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
 }
 
 MachineFunction::~MachineFunction() {
-  BasicBlocks.clear();
+  // Don't call destructors on MachineInstr and MachineOperand. All of their
+  // memory comes from the BumpPtrAllocator which is about to be purged.
+  //
+  // Do call MachineBasicBlock destructors, it contains std::vectors.
+  for (iterator I = begin(), E = end(); I != E; I = BasicBlocks.erase(I))
+    I->Insts.clearAndLeakNodesUnsafely();
+
   InstructionRecycler.clear(Allocator);
+  OperandRecycler.clear(Allocator);
   BasicBlockRecycler.clear(Allocator);
   if (RegInfo) {
     RegInfo->~MachineRegisterInfo();
@@ -175,9 +182,17 @@ MachineFunction::CloneMachineInstr(const MachineInstr *Orig) {
 
 /// DeleteMachineInstr - Delete the given MachineInstr.
 ///
+/// This function also serves as the MachineInstr destructor - the real
+/// ~MachineInstr() destructor must be empty.
 void
 MachineFunction::DeleteMachineInstr(MachineInstr *MI) {
-  MI->~MachineInstr();
+  // Strip it for parts. The operand array and the MI object itself are
+  // independently recyclable.
+  if (MI->Operands)
+    deallocateOperandArray(MI->CapOperands, MI->Operands);
+  // Don't call ~MachineInstr() which must be trivial anyway because
+  // ~MachineFunction drops whole lists of MachineInstrs wihout calling their
+  // destructors.
   InstructionRecycler.Deallocate(Allocator, MI);
 }
 
