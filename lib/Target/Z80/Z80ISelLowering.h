@@ -33,9 +33,15 @@ namespace llvm {
   public:
     explicit Z80TargetLowering(Z80TargetMachine &TM);
 
+    // LowerOperation - Provide custom lowering hooks for some operations.
+    virtual SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const;
+
     // getTargetNodeName - This method returns the name of a target specific
     // DAG node.
     virtual const char *getTargetNodeName(unsigned Opcode) const;
+
+    SDValue LowerZExt(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerSExt(SDValue Op, SelectionDAG &DAG) const;
   private:
     virtual SDValue
       LowerFormalArguments(SDValue Chain,

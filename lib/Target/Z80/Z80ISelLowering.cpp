@@ -27,6 +27,9 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
   addRegisterClass(MVT::i16, &Z80::GR16RegClass);
 
   computeRegisterProperties();
+
+  setOperationAction(ISD::ZERO_EXTEND, MVT::i16, Custom);
+  setOperationAction(ISD::SIGN_EXTEND, MVT::i16, Custom);
 }
 
 //===----------------------------------------------------------------------===//
@@ -139,6 +142,17 @@ SDValue Z80TargetLowering::LowerReturn(SDValue Chain,
   return DAG.getNode(Z80ISD::RET, dl, MVT::Other, Chain);
 }
 
+SDValue Z80TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const
+{
+  switch (Op.getOpcode())
+  {
+  case ISD::ZERO_EXTEND: return LowerZExt(Op, DAG);
+  case ISD::SIGN_EXTEND: return LowerSExt(Op, DAG);
+  default:
+    llvm_unreachable("unimplemented operation");
+  }
+}
+
 const char *Z80TargetLowering::getTargetNodeName(unsigned Opcode) const
 {
   switch (Opcode)
@@ -146,4 +160,40 @@ const char *Z80TargetLowering::getTargetNodeName(unsigned Opcode) const
   default: return NULL;
   case Z80ISD::RET: return "Z80ISD::RET";
   }
+}
+
+SDValue Z80TargetLowering::LowerZExt(SDValue Op, SelectionDAG &DAG) const
+{
+  DebugLoc dl = Op.getDebugLoc();
+  SDValue Val = Op.getOperand(0);
+  EVT VT      = Op.getValueType();
+
+  assert(VT == MVT::i16 && "ZExt support only i16");
+
+  SDValue Tmp = DAG.getConstant(0, VT.getHalfSizedIntegerVT(*DAG.getContext()));
+  SDValue HI  = DAG.getTargetInsertSubreg(Z80::subreg_hi, dl, VT, DAG.getUNDEF(VT), Tmp);
+  SDValue LO  = DAG.getTargetInsertSubreg(Z80::subreg_lo, dl, VT, HI, Val);
+  return LO;
+}
+
+SDValue Z80TargetLowering::LowerSExt(SDValue Op, SelectionDAG &DAG) const
+{
+  DebugLoc dl = Op.getDebugLoc();
+  SDValue Val = Op.getOperand(0);
+  EVT VT      = Op.getValueType();
+  EVT HalfVT  = VT.getHalfSizedIntegerVT(*DAG.getContext());
+
+  assert(VT == MVT::i16 && "SExt support only i16");
+
+  // Generating the next code:
+  // LD L,A
+  // ADD A,L - set carry flag if negative (7 bit is set)
+  // SBC A,A - turn to -1 if carry flag set
+  // LD H,A
+  SDValue LO   = DAG.getTargetInsertSubreg(Z80::subreg_lo, dl, VT, DAG.getUNDEF(VT), Val);
+  SDValue Add  = DAG.getNode(ISD::ADDC, dl, DAG.getVTList(HalfVT, MVT::Glue), Val, Val);
+  SDValue Flag = Add.getValue(1);
+  SDValue Sub  = DAG.getNode(ISD::SUBE, dl, HalfVT, Add, Add, Flag);
+  SDValue HI   = DAG.getTargetInsertSubreg(Z80::subreg_hi, dl, VT, LO, Sub);
+  return HI;
 }

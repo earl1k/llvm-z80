@@ -96,3 +96,14 @@ def : Pat<(addc A, imm:$src), (ADD8r imm:$src)>;
 
 def : Pat<(subc A, GR8:$src), (SUB8r GR8:$src)>;
 def : Pat<(subc A, imm:$src), (SUB8r imm:$src)>;
+
+//===----------------------------------------------------------------------===//
+// Non-Instruction Patterns.
+//===----------------------------------------------------------------------===//
+
+// anyext
+def : Pat<(i16 (anyext GR8:$src)),
+  (SUBREG_TO_REG (i16 0), GR8:$src, subreg_lo)>;
+
+// trunc
+def : Pat<(i8 (trunc GR16:$src)), (EXTRACT_SUBREG GR16:$src, subreg_lo)>;
