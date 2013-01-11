@@ -35,6 +35,20 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
   }
+  else if (Z80::GR16RegClass.contains(DestReg, SrcReg))
+  {
+    unsigned DestSubReg, SrcSubReg;
+
+    DestSubReg = RI.getSubReg(DestReg, Z80::subreg_lo);
+    SrcSubReg  = RI.getSubReg(SrcReg,  Z80::subreg_lo);
+    BuildMI(MBB, I, DL, get(Z80::LD8rr), DestSubReg)
+      .addReg(SrcSubReg, getKillRegState(KillSrc));
+
+    DestSubReg = RI.getSubReg(DestReg, Z80::subreg_hi);
+    SrcSubReg  = RI.getSubReg(SrcReg,  Z80::subreg_hi);
+    BuildMI(MBB, I, DL, get(Z80::LD8rr), DestSubReg)
+      .addReg(SrcSubReg, getKillRegState(KillSrc));
+  }
   else llvm_unreachable("Imposible reg-to-reg copy");
 }
 
