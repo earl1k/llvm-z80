@@ -30,6 +30,9 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
 
   setOperationAction(ISD::ZERO_EXTEND, MVT::i16, Custom);
   setOperationAction(ISD::SIGN_EXTEND, MVT::i16, Custom);
+
+  setOperationAction(ISD::SUB,  MVT::i16, Custom);
+  setOperationAction(ISD::SUBC, MVT::i16, Custom);
 }
 
 //===----------------------------------------------------------------------===//
@@ -148,6 +151,8 @@ SDValue Z80TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const
   {
   case ISD::ZERO_EXTEND: return LowerZExt(Op, DAG);
   case ISD::SIGN_EXTEND: return LowerSExt(Op, DAG);
+  case ISD::SUB:
+  case ISD::SUBC:        return LowerSUB(Op, DAG);
   default:
     llvm_unreachable("unimplemented operation");
   }
@@ -158,7 +163,8 @@ const char *Z80TargetLowering::getTargetNodeName(unsigned Opcode) const
   switch (Opcode)
   {
   default: return NULL;
-  case Z80ISD::RET: return "Z80ISD::RET";
+  case Z80ISD::RET:       return "Z80ISD::RET";
+  case Z80ISD::SET_FLAGS: return "Z80ISD::SET_FLAGS";
   }
 }
 
@@ -196,4 +202,21 @@ SDValue Z80TargetLowering::LowerSExt(SDValue Op, SelectionDAG &DAG) const
   SDValue Sub  = DAG.getNode(ISD::SUBE, dl, HalfVT, Add, Add, Flag);
   SDValue HI   = DAG.getTargetInsertSubreg(Z80::subreg_hi, dl, VT, LO, Sub);
   return HI;
+}
+
+SDValue Z80TargetLowering::LowerSUB(SDValue Op, SelectionDAG &DAG) const
+{
+  DebugLoc dl = Op.getDebugLoc();
+  SDValue Op0 = Op.getOperand(0);
+  SDValue Op1 = Op.getOperand(1);
+  EVT VT      = Op.getValueType();
+
+  assert(VT == MVT::i16 && "Only i16 SUB can by lowered");
+
+  // Generating next code:
+  // AND A - clear carry flag (SET_FLAGS Node)
+  // SBC HL, $Rp - sub without carry
+  SDValue Flag = DAG.getNode(Z80ISD::SET_FLAGS, dl, DAG.getVTList(MVT::i8, MVT::Glue)).getValue(1);
+  SDValue Sub  = DAG.getNode(ISD::SUBE, dl, VT, Op0, Op1, Flag);
+  return Sub;
 }
