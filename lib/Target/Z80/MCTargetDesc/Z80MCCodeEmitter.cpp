@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
+#include "MCTargetDesc/Z80BaseInfo.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInstrInfo.h"
@@ -64,9 +65,14 @@ void Z80MCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
 {
   unsigned Opcode = MI.getOpcode();
   const MCInstrDesc &Desc = MCII.get(Opcode);
+  uint64_t TSFlags = Desc.TSFlags;
   unsigned Size = Desc.getSize();
+
   uint64_t Bits = getBinaryCodeForInstr(MI, Fixups);
 
+  if (TSFlags & Z80II::PrefixMask)
+    EmitByte(Z80II::getPrefix(TSFlags), OS);
+  
   EmitInstruction(Bits, Size, OS);
 }
 

@@ -59,7 +59,9 @@ MachineInstr *Z80InstrInfo::commuteInstruction(MachineInstr *MI,
   {
   default: return TargetInstrInfo::commuteInstruction(MI, NewMI);
   case Z80::ADD8r:
+  case Z80::ADD16r:
   case Z80::ADC8r:
+  case Z80::ADC16r:
   case Z80::AND8r:
   case Z80::XOR8r:
   case Z80::OR8r:

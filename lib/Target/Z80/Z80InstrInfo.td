@@ -91,8 +91,21 @@ let Uses = [A], Defs = [A, FLAGS] in {
   defm SBC8 : ALUI<ALU_SBC, "sbc\t{a, $src}", sube>;
 }
 
+let Uses = [HL], Defs = [HL, FLAGS] in {
+  let isCommutable = 1 in {
+    def ADD16r : IRp<0x09, (outs), (ins GR16:$src),
+      "add\t{hl, $src}", [(set HL, (add HL, GR16:$src))]>;
+    def ADC16r : IRp<0x4A, (outs), (ins GR16:$src),
+      "adc\t{hl, $src}", [(set HL, (adde HL, GR16:$src))]>, ED;
+  }
+  def SBC16r : IRp<0x42, (outs), (ins GR16:$src),
+    "sbc\t{hl, $src}", [(set HL, (sube HL, GR16:$src))]>, ED;
+}
+
 def : Pat<(addc A, GR8:$src), (ADD8r GR8:$src)>;
 def : Pat<(addc A, imm:$src), (ADD8r imm:$src)>;
+
+def : Pat<(addc HL, GR16:$src), (ADD16r GR16:$src)>;
 
 def : Pat<(subc A, GR8:$src), (SUB8r GR8:$src)>;
 def : Pat<(subc A, imm:$src), (SUB8r imm:$src)>;

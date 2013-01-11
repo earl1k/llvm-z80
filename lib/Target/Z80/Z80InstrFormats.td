@@ -15,6 +15,17 @@
 //
 //===-------------------- --------------------------------------------------===//
 
+class Prefix<bits<3> n> {
+  field bits<3> Prefix = n;
+}
+
+class CB       : Prefix<1>;
+class ED       : Prefix<2>;
+class DD       : Prefix<3>;
+class FD       : Prefix<4>;
+class DDCB     : Prefix<5>;
+class FDCB     : Prefix<6>;
+
 //===----------------------------------------------------------------------===//
 // Z80 Instruction Format Definitions.
 //===----------------------------------------------------------------------===//
@@ -39,9 +50,12 @@ class Z80Inst<dag outs, dag ins, string asmstr>
   let Namespace = "Z80";
 
   field bits<32> Inst;
+  bits<3> Prefix = 0;
 
   dag OutOperandList = outs;
   dag InOperandList = ins;
+
+  let TSFlags{2-0} = Prefix;
 
   let AsmString = asmstr;
 }
