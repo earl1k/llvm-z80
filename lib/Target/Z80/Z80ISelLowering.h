@@ -42,6 +42,9 @@ namespace llvm {
     // DAG node.
     virtual const char *getTargetNodeName(unsigned Opcode) const;
 
+    // getShiftAmountTy - Return the value type to use for amount in shifts
+    virtual MVT getShiftAmountTy(EVT LHSTy) const { return MVT::i8; }
+
     SDValue LowerZExt(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSExt(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSUB(SDValue Op, SelectionDAG &DAG) const;
