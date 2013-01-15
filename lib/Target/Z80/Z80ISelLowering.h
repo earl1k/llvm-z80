@@ -26,7 +26,8 @@ namespace llvm {
     enum NodeType {
       FIRST_NUMBER = ISD::BUILTIN_OP_END,
       RET,
-      SET_FLAGS
+      SET_FLAGS,
+      RLC, RRC, RL, RR, SLA, SRA, SLL, SRL
     }; // end NodeType
   } // end namespace Z80ISD
 
@@ -44,6 +45,7 @@ namespace llvm {
     SDValue LowerZExt(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSExt(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSUB(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerShifts(SDValue Op, SelectionDAG &DAG) const;
   private:
     virtual SDValue
       LowerFormalArguments(SDValue Chain,

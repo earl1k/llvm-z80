@@ -22,8 +22,17 @@ include "Z80InstrFormats.td"
 //===----------------------------------------------------------------------===//
 def Z80ret       : SDNode<"Z80ISD::RET", SDTNone,
                  [SDNPHasChain, SDNPOptInGlue]>;
-def Z80set_flags : SDNode<"Z80ISD::SET_FLAGS", SDTNone,
-                 [SDNPOutGlue]>;
+def Z80set_flags : SDNode<"Z80ISD::SET_FLAGS", SDTNone, [SDNPOutGlue]>;
+def Z80rlc       : SDNode<"Z80ISD::RLC", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80rrc       : SDNode<"Z80ISD::RRC", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80rl        : SDNode<"Z80ISD::RL",  SDTIntUnaryOp,
+                 [SDNPOutGlue, SDNPInGlue]>;
+def Z80rr        : SDNode<"Z80ISD::RR",  SDTIntUnaryOp, 
+                 [SDNPOutGlue, SDNPInGlue]>;
+def Z80sla       : SDNode<"Z80ISD::SLA", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80sra       : SDNode<"Z80ISD::SRA", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80sll       : SDNode<"Z80ISD::SLL", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80srl       : SDNode<"Z80ISD::SRL", SDTIntUnaryOp, [SDNPOutGlue]>;
 
 //===----------------------------------------------------------------------===//
 // Instruction list.
@@ -68,12 +77,14 @@ def ALU_OR  : ALUOpType<6, or>;
 def ALU_CP  : ALUOpType<7, undef>;
 
 class ALUIr<ALUOpType alu, string asmstr>
-  : IRz<0x80, (outs), (ins GR8:$src), asmstr, [(set A, (alu.Node A, GR8:$src))]> {
+  : IRz<0x80, (outs), (ins GR8:$src), asmstr,
+  [(set A, (alu.Node A, GR8:$src))]> {
   ALUOpType aluType = alu;
   let Inst{5-3} = aluType.Value;
 }
 class ALUIi<ALUOpType alu, string asmstr>
-  : II8<0xC6, (outs), (ins i8imm:$src), asmstr, [(set A, (alu.Node A, imm:$src))]> {
+  : II8<0xC6, (outs), (ins i8imm:$src), asmstr,
+  [(set A, (alu.Node A, imm:$src))]> {
   ALUOpType aluType = alu;
   let Inst{5-3} = aluType.Value;
 }
@@ -81,6 +92,31 @@ class ALUIi<ALUOpType alu, string asmstr>
 multiclass ALUI<ALUOpType alu, string asmstr> {
   def r : ALUIr<alu, asmstr>;
   def i : ALUIi<alu, asmstr>;
+}
+
+class RSOpType<bits<3> val, SDNode ops> {
+  field bits<3> Value = val;
+  SDNode Node = ops;
+}
+
+def RS_RLC : RSOpType<0, Z80rlc>;
+def RS_RRC : RSOpType<1, Z80rrc>;
+def RS_RL  : RSOpType<2, Z80rl>;
+def RS_RR  : RSOpType<3, Z80rr>;
+def RS_SLA : RSOpType<4, Z80sla>;
+def RS_SRA : RSOpType<5, Z80sra>;
+def RS_SLL : RSOpType<6, Z80sll>;
+def RS_SRL : RSOpType<7, Z80srl>;
+
+class RSIr<RSOpType rs, string asmstr>
+  : IRz<0x00, (outs GR8:$dst), (ins GR8:$src), asmstr,
+  [(set GR8:$dst, (rs.Node GR8:$src))]>, CB {
+  let Inst{5-3} = rs.Value;
+  let Constraints = "$src = $dst";
+}
+
+multiclass RSI<RSOpType rs, string asmstr> {
+  def r : RSIr<rs, asmstr>;
 }
 
 let Uses = [A], Defs = [A, FLAGS] in {
@@ -95,6 +131,19 @@ let Uses = [A], Defs = [A, FLAGS] in {
   defm SUB8 : ALUI<ALU_SUB, "sub\t{$src}">;
   let Uses = [A, FLAGS] in
   defm SBC8 : ALUI<ALU_SBC, "sbc\t{a, $src}">;
+}
+
+let Defs = [FLAGS] in {
+  defm RLC8 : RSI<RS_RLC, "rlc\t{$src}">;
+  defm RRC8 : RSI<RS_RRC, "rrc\t{$src}">;
+  let Uses = [FLAGS] in {
+    defm RL8  : RSI<RS_RL,  "rl\t{$src}">;
+    defm RR8  : RSI<RS_RR,  "rr\t{$src}">;
+  }
+  defm SLA8 : RSI<RS_SLA, "sla\t{$src}">;
+  defm SRA8 : RSI<RS_SRA, "sra\t{$src}">;
+  defm SLL8 : RSI<RS_SLL, "sll\t{$src}">;
+  defm SRL8 : RSI<RS_SRL, "srl\t{$src}">;
 }
 
 let Uses = [HL], Defs = [HL, FLAGS] in {
