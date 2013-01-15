@@ -34,6 +34,9 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
   setOperationAction(ISD::SRL, MVT::i8, Custom);
   setOperationAction(ISD::SHL, MVT::i8, Custom);
   setOperationAction(ISD::SRA, MVT::i8, Custom);
+  setOperationAction(ISD::SRL, MVT::i16, Custom);
+  setOperationAction(ISD::SHL, MVT::i16, Custom);
+  setOperationAction(ISD::SRA, MVT::i16, Custom);
 
   setOperationAction(ISD::SUB,  MVT::i16, Custom);
   setOperationAction(ISD::SUBC, MVT::i16, Custom);
@@ -262,10 +265,31 @@ SDValue Z80TargetLowering::LowerShifts(SDValue Op, SelectionDAG &DAG) const
     break;
   }
 
-  assert(VT == MVT::i8 && "Not implemented yet!");
-
-  while (ShiftAmount--)
-    Victim = DAG.getNode(Opc, dl, VT, Victim);
+  if (VT == MVT::i16)
+  {
+    SDValue LO, HI, Flag;
+    EVT HalfVT = VT.getHalfSizedIntegerVT(*DAG.getContext());
+    SDVTList VTs = DAG.getVTList(HalfVT, MVT::Glue);
+    LO = DAG.getTargetExtractSubreg(Z80::subreg_lo, dl, HalfVT, Victim);
+    HI = DAG.getTargetExtractSubreg(Z80::subreg_hi, dl, HalfVT, Victim);
+    while (ShiftAmount--) {
+      if (Opc == Z80ISD::SLA) {
+        LO = DAG.getNode(Opc, dl, VTs, LO);
+        Flag = LO.getValue(1);
+        HI = DAG.getNode(Z80ISD::RL, dl, HalfVT, HI, Flag);
+      }
+      else {
+        HI = DAG.getNode(Opc, dl, VTs, HI);
+        Flag = HI.getValue(1);
+        LO = DAG.getNode(Z80ISD::RR, dl, HalfVT, LO, Flag);
+      }
+    }
+    Victim = DAG.getTargetInsertSubreg(Z80::subreg_lo, dl, VT, DAG.getUNDEF(VT), LO);
+    Victim = DAG.getTargetInsertSubreg(Z80::subreg_hi, dl, VT, Victim, HI);
+  }
+  else
+    while (ShiftAmount--)
+      Victim = DAG.getNode(Opc, dl, VT, Victim);
 
   return Victim;
 }
