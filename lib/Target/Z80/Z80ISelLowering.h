@@ -49,6 +49,7 @@ namespace llvm {
     SDValue LowerSExt(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSUB(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerShifts(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerBinaryOp(SDValue Op, SelectionDAG &DAG) const;
   private:
     virtual SDValue
       LowerFormalArguments(SDValue Chain,
