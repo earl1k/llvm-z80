@@ -53,47 +53,48 @@ let isReMaterializable = 1, isAsCheapAsAMove = 1 in {
 // Arithmetic Instructions
 //===----------------------------------------------------------------------===//
 
-class ALUOpType<bits<3> val> {
+class ALUOpType<bits<3> val, SDNode ops> {
   field bits<3> Value = val;
+  SDNode Node = ops;
 }
 
-def ALU_ADD : ALUOpType<0>;
-def ALU_ADC : ALUOpType<1>;
-def ALU_SUB : ALUOpType<2>;
-def ALU_SBC : ALUOpType<3>;
-def ALU_AND : ALUOpType<4>;
-def ALU_XOR : ALUOpType<5>;
-def ALU_OR  : ALUOpType<6>;
-def ALU_CP  : ALUOpType<7>;
+def ALU_ADD : ALUOpType<0, add>;
+def ALU_ADC : ALUOpType<1, adde>;
+def ALU_SUB : ALUOpType<2, sub>;
+def ALU_SBC : ALUOpType<3, sube>;
+def ALU_AND : ALUOpType<4, and>;
+def ALU_XOR : ALUOpType<5, xor>;
+def ALU_OR  : ALUOpType<6, or>;
+def ALU_CP  : ALUOpType<7, undef>;
 
-class ALUIr<ALUOpType alu, string asmstr, SDNode ops>
-  : IRz<0x80, (outs), (ins GR8:$src), asmstr, [(set A, (ops A, GR8:$src))]> {
+class ALUIr<ALUOpType alu, string asmstr>
+  : IRz<0x80, (outs), (ins GR8:$src), asmstr, [(set A, (alu.Node A, GR8:$src))]> {
   ALUOpType aluType = alu;
   let Inst{5-3} = aluType.Value;
 }
-class ALUIi<ALUOpType alu, string asmstr, SDNode ops>
-  : II8<0xC6, (outs), (ins i8imm:$src), asmstr, [(set A, (ops A, imm:$src))]> {
+class ALUIi<ALUOpType alu, string asmstr>
+  : II8<0xC6, (outs), (ins i8imm:$src), asmstr, [(set A, (alu.Node A, imm:$src))]> {
   ALUOpType aluType = alu;
   let Inst{5-3} = aluType.Value;
 }
 
-multiclass ALUI<ALUOpType alu, string asmstr, SDNode ops> {
-  def r : ALUIr<alu, asmstr, ops>;
-  def i : ALUIi<alu, asmstr, ops>;
+multiclass ALUI<ALUOpType alu, string asmstr> {
+  def r : ALUIr<alu, asmstr>;
+  def i : ALUIi<alu, asmstr>;
 }
 
 let Uses = [A], Defs = [A, FLAGS] in {
   let isCommutable = 1 in {
-    defm ADD8 : ALUI<ALU_ADD, "add\t{a, $src}", add>;
+    defm ADD8 : ALUI<ALU_ADD, "add\t{a, $src}">;
     let Uses = [A, FLAGS] in
-    defm ADC8 : ALUI<ALU_ADC, "adc\t{a, $src}", adde>;
-    defm AND8 : ALUI<ALU_AND, "and\t{$src}", and>;
-    defm XOR8 : ALUI<ALU_XOR, "xor\t{$src}", xor>;
-    defm OR8  : ALUI<ALU_OR,  "or\t{$src}",  or>;
+    defm ADC8 : ALUI<ALU_ADC, "adc\t{a, $src}">;
+    defm AND8 : ALUI<ALU_AND, "and\t{$src}">;
+    defm XOR8 : ALUI<ALU_XOR, "xor\t{$src}">;
+    defm OR8  : ALUI<ALU_OR,  "or\t{$src}">;
   }
-  defm SUB8 : ALUI<ALU_SUB, "sub\t{$src}", sub>;
+  defm SUB8 : ALUI<ALU_SUB, "sub\t{$src}">;
   let Uses = [A, FLAGS] in
-  defm SBC8 : ALUI<ALU_SBC, "sbc\t{a, $src}", sube>;
+  defm SBC8 : ALUI<ALU_SBC, "sbc\t{a, $src}">;
 }
 
 let Uses = [HL], Defs = [HL, FLAGS] in {
