@@ -1,5 +1,3 @@
-.. _getting_started:
-
 ====================================
 Getting Started with the LLVM System  
 ====================================
@@ -466,6 +464,8 @@ The files are as follows, with *x.y* marking the version number:
 ``llvm-gcc-4.2-x.y-platform.tar.gz``
 
   Binary release of the llvm-gcc-4.2 front end for a specific platform.
+
+.. _checkout:
 
 Checkout LLVM from Subversion
 -----------------------------

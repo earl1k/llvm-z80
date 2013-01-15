@@ -143,7 +143,7 @@ void MachineOperand::ChangeToRegister(unsigned Reg, bool isDef, bool isImp,
   // Change this to a register and set the reg#.
   OpKind = MO_Register;
   SmallContents.RegNo = Reg;
-  SubReg = 0;
+  SubReg_TargetFlags = 0;
   IsDef = isDef;
   IsImp = isImp;
   IsKill = isKill;
@@ -741,33 +741,30 @@ void MachineInstr::RemoveOperand(unsigned OpNo) {
 void MachineInstr::addMemOperand(MachineFunction &MF,
                                  MachineMemOperand *MO) {
   mmo_iterator OldMemRefs = MemRefs;
-  uint16_t OldNumMemRefs = NumMemRefs;
+  unsigned OldNumMemRefs = NumMemRefs;
 
-  uint16_t NewNum = NumMemRefs + 1;
+  unsigned NewNum = NumMemRefs + 1;
   mmo_iterator NewMemRefs = MF.allocateMemRefsArray(NewNum);
 
   std::copy(OldMemRefs, OldMemRefs + OldNumMemRefs, NewMemRefs);
   NewMemRefs[NewNum - 1] = MO;
-
-  MemRefs = NewMemRefs;
-  NumMemRefs = NewNum;
+  setMemRefs(NewMemRefs, NewMemRefs + NewNum);
 }
 
 bool MachineInstr::hasPropertyInBundle(unsigned Mask, QueryType Type) const {
-  const MachineBasicBlock *MBB = getParent();
-  MachineBasicBlock::const_instr_iterator MII = *this; ++MII;
-  while (MII != MBB->end() && MII->isInsideBundle()) {
+  assert(!isBundledWithPred() && "Must be called on bundle header");
+  for (MachineBasicBlock::const_instr_iterator MII = this;; ++MII) {
     if (MII->getDesc().getFlags() & Mask) {
       if (Type == AnyInBundle)
         return true;
     } else {
-      if (Type == AllInBundle)
+      if (Type == AllInBundle && !MII->isBundle())
         return false;
     }
-    ++MII;
+    // This was the last instruction in the bundle.
+    if (!MII->isBundledWithSucc())
+      return Type == AllInBundle;
   }
-
-  return Type == AllInBundle;
 }
 
 bool MachineInstr::isIdenticalTo(const MachineInstr *Other,
@@ -899,7 +896,7 @@ void MachineInstr::unbundleFromSucc() {
   assert(isBundledWithSucc() && "MI isn't bundled with its successor");
   clearFlag(BundledSucc);
   MachineBasicBlock::instr_iterator Succ = this;
-  --Succ;
+  ++Succ;
   assert(Succ->isBundledWithPred() && "Inconsistent bundle flags");
   Succ->clearFlag(BundledPred);
 }
@@ -984,18 +981,13 @@ MachineInstr::getRegClassConstraint(unsigned OpIdx,
   return NULL;
 }
 
-/// getBundleSize - Return the number of instructions inside the MI bundle.
+/// Return the number of instructions inside the MI bundle, not counting the
+/// header instruction.
 unsigned MachineInstr::getBundleSize() const {
-  assert(isBundle() && "Expecting a bundle");
-
-  const MachineBasicBlock *MBB = getParent();
-  MachineBasicBlock::const_instr_iterator I = *this, E = MBB->instr_end();
+  MachineBasicBlock::const_instr_iterator I = this;
   unsigned Size = 0;
-  while ((++I != E) && I->isInsideBundle()) {
-    ++Size;
-  }
-  assert(Size > 1 && "Malformed bundle");
-
+  while (I->isBundledWithSucc())
+    ++Size, ++I;
   return Size;
 }
 
@@ -1484,10 +1476,14 @@ void MachineInstr::print(raw_ostream &OS, const TargetMachine *TM) const {
     OS << " ";
     getOperand(InlineAsm::MIOp_AsmString).print(OS, TM);
 
-    // Print HasSideEffects, IsAlignStack
+    // Print HasSideEffects, MayLoad, MayStore, IsAlignStack
     unsigned ExtraInfo = getOperand(InlineAsm::MIOp_ExtraInfo).getImm();
     if (ExtraInfo & InlineAsm::Extra_HasSideEffects)
       OS << " [sideeffect]";
+    if (ExtraInfo & InlineAsm::Extra_MayLoad)
+      OS << " [mayload]";
+    if (ExtraInfo & InlineAsm::Extra_MayStore)
+      OS << " [maystore]";
     if (ExtraInfo & InlineAsm::Extra_IsAlignStack)
       OS << " [alignstack]";
     if (getInlineAsmDialect() == InlineAsm::AD_ATT)
@@ -1592,7 +1588,8 @@ void MachineInstr::print(raw_ostream &OS, const TargetMachine *TM) const {
   }
 
   bool HaveSemi = false;
-  if (Flags) {
+  const unsigned PrintableFlags = FrameSetup;
+  if (Flags & PrintableFlags) {
     if (!HaveSemi) OS << ";"; HaveSemi = true;
     OS << " flags: ";
 

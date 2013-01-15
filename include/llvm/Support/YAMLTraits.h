@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_YAML_TRAITS_H_
-#define LLVM_YAML_TRAITS_H_
+#ifndef LLVM_SUPPORT_YAMLTRAITS_H
+#define LLVM_SUPPORT_YAMLTRAITS_H
 
 
 #include "llvm/ADT/DenseMap.h"
@@ -195,7 +195,7 @@ public:
 template <class T>
 struct has_ScalarTraits
 {
-  typedef llvm::StringRef (*Signature_input)(llvm::StringRef, void*, T&);
+  typedef StringRef (*Signature_input)(StringRef, void*, T&);
   typedef void (*Signature_output)(const T&, void*, llvm::raw_ostream&);
 
   template <typename U>
@@ -528,73 +528,73 @@ yamlize(IO &io, T &Seq, bool) {
 template<>
 struct ScalarTraits<bool> {
   static void output(const bool &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, bool &);
+  static StringRef input(StringRef, void*, bool &);
 };
 
 template<>
 struct ScalarTraits<StringRef> {
   static void output(const StringRef &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, StringRef &);
+  static StringRef input(StringRef, void*, StringRef &);
 };
 
 template<>
 struct ScalarTraits<uint8_t> {
   static void output(const uint8_t &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, uint8_t &);
+  static StringRef input(StringRef, void*, uint8_t &);
 };
 
 template<>
 struct ScalarTraits<uint16_t> {
   static void output(const uint16_t &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, uint16_t &);
+  static StringRef input(StringRef, void*, uint16_t &);
 };
 
 template<>
 struct ScalarTraits<uint32_t> {
   static void output(const uint32_t &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, uint32_t &);
+  static StringRef input(StringRef, void*, uint32_t &);
 };
 
 template<>
 struct ScalarTraits<uint64_t> {
   static void output(const uint64_t &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, uint64_t &);
+  static StringRef input(StringRef, void*, uint64_t &);
 };
 
 template<>
 struct ScalarTraits<int8_t> {
   static void output(const int8_t &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, int8_t &);
+  static StringRef input(StringRef, void*, int8_t &);
 };
 
 template<>
 struct ScalarTraits<int16_t> {
   static void output(const int16_t &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, int16_t &);
+  static StringRef input(StringRef, void*, int16_t &);
 };
 
 template<>
 struct ScalarTraits<int32_t> {
   static void output(const int32_t &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, int32_t &);
+  static StringRef input(StringRef, void*, int32_t &);
 };
 
 template<>
 struct ScalarTraits<int64_t> {
   static void output(const int64_t &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, int64_t &);
+  static StringRef input(StringRef, void*, int64_t &);
 };
 
 template<>
 struct ScalarTraits<float> {
   static void output(const float &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, float &);
+  static StringRef input(StringRef, void*, float &);
 };
 
 template<>
 struct ScalarTraits<double> {
   static void output(const double &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, double &);
+  static StringRef input(StringRef, void*, double &);
 };
 
 
@@ -685,7 +685,8 @@ class Input : public IO {
 public:
   // Construct a yaml Input object from a StringRef and optional user-data.
   Input(StringRef InputContent, void *Ctxt=NULL);
-
+  ~Input();
+  
   // Check if there was an syntax or semantic error during parsing.
   llvm::error_code error();
 
@@ -718,6 +719,7 @@ private:
   class HNode {
   public:
     HNode(Node *n) : _node(n) { }
+    virtual ~HNode() { }
     static inline bool classof(const HNode *) { return true; }
 
     Node *_node;
@@ -726,6 +728,7 @@ private:
   class EmptyHNode : public HNode {
   public:
     EmptyHNode(Node *n) : HNode(n) { }
+    virtual ~EmptyHNode() {}
     static inline bool classof(const HNode *n) {
       return NullNode::classof(n->_node);
     }
@@ -735,6 +738,7 @@ private:
   class ScalarHNode : public HNode {
   public:
     ScalarHNode(Node *n, StringRef s) : HNode(n), _value(s) { }
+    virtual ~ScalarHNode() { }
 
     StringRef value() const { return _value; }
 
@@ -749,6 +753,7 @@ private:
   class MapHNode : public HNode {
   public:
     MapHNode(Node *n) : HNode(n) { }
+    virtual ~MapHNode();
 
     static inline bool classof(const HNode *n) {
       return MappingNode::classof(n->_node);
@@ -774,6 +779,7 @@ private:
   class SequenceHNode : public HNode {
   public:
     SequenceHNode(Node *n) : HNode(n) { }
+    virtual ~SequenceHNode();
 
     static inline bool classof(const HNode *n) {
       return SequenceNode::classof(n->_node);
@@ -795,10 +801,11 @@ public:
   void nextDocument();
 
 private:
-  llvm::yaml::Stream              *Strm;
-  llvm::SourceMgr                  SrcMgr;
+  llvm::SourceMgr                  SrcMgr; // must be before Strm
+  OwningPtr<llvm::yaml::Stream>    Strm;
+  OwningPtr<HNode>                 TopNode;
   llvm::error_code                 EC;
-  llvm::BumpPtrAllocator           Allocator;
+  llvm::BumpPtrAllocator           StringAllocator;
   llvm::yaml::document_iterator    DocIterator;
   std::vector<bool>                BitValuesUsed;
   HNode                           *CurrentNode;
@@ -906,25 +913,25 @@ LLVM_YAML_STRONG_TYPEDEF(uint64_t, Hex64)
 template<>
 struct ScalarTraits<Hex8> {
   static void output(const Hex8 &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, Hex8 &);
+  static StringRef input(StringRef, void*, Hex8 &);
 };
 
 template<>
 struct ScalarTraits<Hex16> {
   static void output(const Hex16 &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, Hex16 &);
+  static StringRef input(StringRef, void*, Hex16 &);
 };
 
 template<>
 struct ScalarTraits<Hex32> {
   static void output(const Hex32 &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, Hex32 &);
+  static StringRef input(StringRef, void*, Hex32 &);
 };
 
 template<>
 struct ScalarTraits<Hex64> {
   static void output(const Hex64 &, void*, llvm::raw_ostream &);
-  static llvm::StringRef input(llvm::StringRef , void*, Hex64 &);
+  static StringRef input(StringRef, void*, Hex64 &);
 };
 
 
@@ -1094,4 +1101,4 @@ operator<<(Output &yout, T &seq) {
 
 
 
-#endif // LLVM_YAML_TRAITS_H_
+#endif // LLVM_SUPPORT_YAMLTRAITS_H

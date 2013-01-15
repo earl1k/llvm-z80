@@ -127,11 +127,16 @@ public:
   virtual void ChangeSection(const MCSection *Section);
 
   virtual void InitSections() {
+    InitToTextSection();
+  }
+
+  virtual void InitToTextSection() {
     // FIXME, this is MachO specific, but the testsuite
     // expects this.
-    SwitchSection(getContext().getMachOSection("__TEXT", "__text",
-                         MCSectionMachO::S_ATTR_PURE_INSTRUCTIONS,
-                         0, SectionKind::getText()));
+    SwitchSection(getContext().getMachOSection(
+                                      "__TEXT", "__text",
+                                      MCSectionMachO::S_ATTR_PURE_INSTRUCTIONS,
+                                      0, SectionKind::getText()));
   }
 
   virtual void EmitLabel(MCSymbol *Symbol);
@@ -260,7 +265,7 @@ public:
   virtual void EmitInstruction(const MCInst &Inst);
 
   virtual void EmitBundleAlignMode(unsigned AlignPow2);
-  virtual void EmitBundleLock();
+  virtual void EmitBundleLock(bool AlignToEnd);
   virtual void EmitBundleUnlock();
 
   /// EmitRawText - If this file is backed by an assembly streamer, this dumps
@@ -1370,8 +1375,10 @@ void MCAsmStreamer::EmitBundleAlignMode(unsigned AlignPow2) {
   EmitEOL();
 }
 
-void MCAsmStreamer::EmitBundleLock() {
+void MCAsmStreamer::EmitBundleLock(bool AlignToEnd) {
   OS << "\t.bundle_lock";
+  if (AlignToEnd)
+    OS << " align_to_end";
   EmitEOL();
 }
 

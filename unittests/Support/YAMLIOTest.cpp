@@ -782,11 +782,17 @@ namespace yaml {
   struct MappingTraits<KindAndFlags> {
     static void mapping(IO &io, KindAndFlags& kf) {
       io.mapRequired("kind",  kf.kind);
-      // type of flags field varies depending on kind field
-      if ( kf.kind == kindA )
-        io.mapRequired("flags", *((AFlags*)&kf.flags));
-      else
-        io.mapRequired("flags", *((BFlags*)&kf.flags));
+      // Type of "flags" field varies depending on "kind" field.
+      // Use memcpy here to avoid breaking strict aliasing rules.
+      if (kf.kind == kindA) {
+        AFlags aflags = static_cast<AFlags>(kf.flags);
+        io.mapRequired("flags", aflags);
+        kf.flags = aflags;
+      } else {
+        BFlags bflags = static_cast<BFlags>(kf.flags);
+        io.mapRequired("flags", bflags);
+        kf.flags = bflags;
+      }
     }
   };
 }

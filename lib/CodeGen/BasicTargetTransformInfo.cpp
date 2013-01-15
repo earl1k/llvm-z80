@@ -26,7 +26,7 @@ using namespace llvm;
 namespace {
 
 class BasicTTI : public ImmutablePass, public TargetTransformInfo {
-  const TargetLowering *TLI;
+  const TargetLoweringBase *TLI;
 
   /// Estimate the overhead of scalarizing an instruction. Insert and Extract
   /// are set if the result needs to be inserted and/or extracted from vectors.
@@ -37,7 +37,7 @@ public:
     llvm_unreachable("This pass cannot be directly constructed");
   }
 
-  BasicTTI(const TargetLowering *TLI) : ImmutablePass(ID), TLI(TLI) {
+  BasicTTI(const TargetLoweringBase *TLI) : ImmutablePass(ID), TLI(TLI) {
     initializeBasicTTIPass(*PassRegistry::getPassRegistry());
   }
 
@@ -83,6 +83,8 @@ public:
   /// @{
 
   virtual unsigned getNumberOfRegisters(bool Vector) const;
+  virtual unsigned getMaximumUnrollFactor() const;
+  virtual unsigned getRegisterBitWidth(bool Vector) const;
   virtual unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty) const;
   virtual unsigned getShuffleCost(ShuffleKind Kind, Type *Tp,
                                   int Index, Type *SubTp) const;
@@ -110,7 +112,7 @@ INITIALIZE_AG_PASS(BasicTTI, TargetTransformInfo, "basictti",
 char BasicTTI::ID = 0;
 
 ImmutablePass *
-llvm::createBasicTargetTransformInfoPass(const TargetLowering *TLI) {
+llvm::createBasicTargetTransformInfoPass(const TargetLoweringBase *TLI) {
   return new BasicTTI(TLI);
 }
 
@@ -126,7 +128,7 @@ bool BasicTTI::isLegalICmpImmediate(int64_t imm) const {
 bool BasicTTI::isLegalAddressingMode(Type *Ty, GlobalValue *BaseGV,
                                      int64_t BaseOffset, bool HasBaseReg,
                                      int64_t Scale) const {
-  AddrMode AM;
+  TargetLoweringBase::AddrMode AM;
   AM.BaseGV = BaseGV;
   AM.BaseOffs = BaseOffset;
   AM.HasBaseReg = HasBaseReg;
@@ -182,6 +184,14 @@ unsigned BasicTTI::getNumberOfRegisters(bool Vector) const {
   return 1;
 }
 
+unsigned BasicTTI::getRegisterBitWidth(bool Vector) const {
+  return 32;
+}
+
+unsigned BasicTTI::getMaximumUnrollFactor() const {
+  return 1;
+}
+
 unsigned BasicTTI::getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {
   // Check if any of the operands are vector operands.
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
@@ -231,19 +241,32 @@ unsigned BasicTTI::getCastInstrCost(unsigned Opcode, Type *Dst,
   std::pair<unsigned, MVT> SrcLT = TLI->getTypeLegalizationCost(Src);
   std::pair<unsigned, MVT> DstLT = TLI->getTypeLegalizationCost(Dst);
 
+  // Check for NOOP conversions.
+  if (SrcLT.first == DstLT.first &&
+      SrcLT.second.getSizeInBits() == DstLT.second.getSizeInBits()) {
+
+      // Bitcast between types that are legalized to the same type are free.
+      if (Opcode == Instruction::BitCast || Opcode == Instruction::Trunc)
+        return 0;
+  }
+
+  if (Opcode == Instruction::Trunc &&
+      TLI->isTruncateFree(SrcLT.second, DstLT.second))
+    return 0;
+
+  if (Opcode == Instruction::ZExt &&
+      TLI->isZExtFree(SrcLT.second, DstLT.second))
+    return 0;
+
+  // If the cast is marked as legal (or promote) then assume low cost.
+  if (TLI->isOperationLegalOrPromote(ISD, DstLT.second))
+    return 1;
+
   // Handle scalar conversions.
   if (!Src->isVectorTy() && !Dst->isVectorTy()) {
 
     // Scalar bitcasts are usually free.
     if (Opcode == Instruction::BitCast)
-      return 0;
-
-    if (Opcode == Instruction::Trunc &&
-        TLI->isTruncateFree(SrcLT.second, DstLT.second))
-      return 0;
-
-    if (Opcode == Instruction::ZExt &&
-        TLI->isZExtFree(SrcLT.second, DstLT.second))
       return 0;
 
     // Just check the op cost. If the operation is legal then assume it costs 1.
@@ -260,10 +283,6 @@ unsigned BasicTTI::getCastInstrCost(unsigned Opcode, Type *Dst,
     // If the cast is between same-sized registers, then the check is simple.
     if (SrcLT.first == DstLT.first &&
         SrcLT.second.getSizeInBits() == DstLT.second.getSizeInBits()) {
-
-      // Bitcast between types that are legalized to the same type are free.
-      if (Opcode == Instruction::BitCast || Opcode == Instruction::Trunc)
-        return 0;
 
       // Assume that Zext is done using AND.
       if (Opcode == Instruction::ZExt)

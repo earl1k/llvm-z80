@@ -13,8 +13,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_INTRINSICS_H
-#define LLVM_INTRINSICS_H
+#ifndef LLVM_IR_INTRINSICS_H
+#define LLVM_IR_INTRINSICS_H
 
 #include "llvm/ADT/ArrayRef.h"
 #include <string>
@@ -79,7 +79,7 @@ namespace Intrinsic {
   /// getIntrinsicInfoTableEntries.
   struct IITDescriptor {
     enum IITDescriptorKind {
-      Void, MMX, Metadata, Float, Double,
+      Void, MMX, Metadata, Half, Float, Double,
       Integer, Vector, Pointer, Struct,
       Argument, ExtendVecArgument, TruncVecArgument
     } Kind;

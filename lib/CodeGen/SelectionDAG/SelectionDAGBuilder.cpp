@@ -15,9 +15,9 @@
 #include "SelectionDAGBuilder.h"
 #include "SDNodeDbgValue.h"
 #include "llvm/ADT/BitVector.h"
-#include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/Analysis.h"
@@ -3259,7 +3259,8 @@ void SelectionDAGBuilder::visitAlloca(const AllocaInst &I) {
 
   // Inform the Frame Information that we have just allocated a variable-sized
   // object.
-  FuncInfo.MF->getFrameInfo()->CreateVariableSizedObject(Align ? Align : 1);
+  FuncInfo.MF->getFrameInfo()->CreateVariableSizedObject(Align ? Align : 1,
+                                 I.getAlignment(), &I);
 }
 
 void SelectionDAGBuilder::visitLoad(const LoadInst &I) {
@@ -5947,6 +5948,10 @@ void SelectionDAGBuilder::visitInlineAsm(ImmutableCallSite CS) {
     // Compute the constraint code and ConstraintType to use.
     TLI.ComputeConstraintToUse(OpInfo, OpInfo.CallOperand, &DAG);
 
+    if (OpInfo.ConstraintType == TargetLowering::C_Memory &&
+        OpInfo.Type == InlineAsm::isClobber)
+      continue;
+
     // If this is a memory input, and if the operand is not indirect, do what we
     // need to to provide an address for the memory input.
     if (OpInfo.ConstraintType == TargetLowering::C_Memory &&
@@ -6050,6 +6055,8 @@ void SelectionDAGBuilder::visitInlineAsm(ImmutableCallSite CS) {
         ExtraInfo |= InlineAsm::Extra_MayLoad;
       else if (OpInfo.Type == InlineAsm::isOutput)
         ExtraInfo |= InlineAsm::Extra_MayStore;
+      else if (OpInfo.Type == InlineAsm::isClobber)
+        ExtraInfo |= (InlineAsm::Extra_MayLoad | InlineAsm::Extra_MayStore);
     }
   }
 

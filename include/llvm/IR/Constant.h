@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CONSTANT_H
-#define LLVM_CONSTANT_H
+#ifndef LLVM_IR_CONSTANT_H
+#define LLVM_IR_CONSTANT_H
 
 #include "llvm/IR/User.h"
 
@@ -60,6 +60,9 @@ public:
   /// isNegativeZeroValue - Return true if the value is what would be returned 
   /// by getZeroValueForNegation.
   bool isNegativeZeroValue() const;
+
+  /// Return true if the value is negative zero or null value.
+  bool isZeroValue() const;
 
   /// canTrap - Return true if evaluation of this constant could trap.  This is
   /// true for things like constant expressions that could divide by zero.

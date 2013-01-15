@@ -182,7 +182,7 @@ namespace {
       const size_t TagHeaderSize = 1 + 4;
 
       Streamer.EmitIntValue(VendorHeaderSize + TagHeaderSize + ContentsSize, 4);
-      Streamer.EmitBytes(CurrentVendor, 0);
+      Streamer.EmitBytes(CurrentVendor);
       Streamer.EmitIntValue(0, 1); // '\0'
 
       Streamer.EmitIntValue(ARMBuildAttrs::File, 1);
@@ -192,14 +192,14 @@ namespace {
       // emit each field as its type (ULEB or String)
       for (unsigned int i=0; i<Contents.size(); ++i) {
         AttributeItemType item = Contents[i];
-        Streamer.EmitULEB128IntValue(item.Tag, 0);
+        Streamer.EmitULEB128IntValue(item.Tag);
         switch (item.Type) {
         default: llvm_unreachable("Invalid attribute type");
         case AttributeItemType::NumericAttribute:
-          Streamer.EmitULEB128IntValue(item.IntValue, 0);
+          Streamer.EmitULEB128IntValue(item.IntValue);
           break;
         case AttributeItemType::TextAttribute:
-          Streamer.EmitBytes(item.StringValue.upper(), 0);
+          Streamer.EmitBytes(item.StringValue.upper());
           Streamer.EmitIntValue(0, 1); // '\0'
           break;
         }
@@ -657,7 +657,7 @@ void ARMAsmPrinter::EmitEndOfAsmFile(Module &M) {
 
         if (MCSym.getInt())
           // External to current translation unit.
-          OutStreamer.EmitIntValue(0, 4/*size*/, 0/*addrspace*/);
+          OutStreamer.EmitIntValue(0, 4/*size*/);
         else
           // Internal to current translation unit.
           //
@@ -667,7 +667,7 @@ void ARMAsmPrinter::EmitEndOfAsmFile(Module &M) {
           // We need to fill in the value for the NLP in those cases.
           OutStreamer.EmitValue(MCSymbolRefExpr::Create(MCSym.getPointer(),
                                                         OutContext),
-                                4/*size*/, 0/*addrspace*/);
+                                4/*size*/);
       }
 
       Stubs.clear();
@@ -685,7 +685,7 @@ void ARMAsmPrinter::EmitEndOfAsmFile(Module &M) {
         OutStreamer.EmitValue(MCSymbolRefExpr::
                               Create(Stubs[i].second.getPointer(),
                                      OutContext),
-                              4/*size*/, 0/*addrspace*/);
+                              4/*size*/);
       }
 
       Stubs.clear();

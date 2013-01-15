@@ -24,6 +24,9 @@ namespace {
     /// @name MCStreamer Interface
     /// @{
 
+    virtual void InitToTextSection() {
+    }
+
     virtual void InitSections() {
     }
 
@@ -96,7 +99,7 @@ namespace {
     virtual void EmitInstruction(const MCInst &Inst) {}
 
     virtual void EmitBundleAlignMode(unsigned AlignPow2) {}
-    virtual void EmitBundleLock() {}
+    virtual void EmitBundleLock(bool AlignToEnd) {}
     virtual void EmitBundleUnlock() {}
 
     virtual void FinishImpl() {}

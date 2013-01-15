@@ -19,8 +19,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_ANALYSIS_TARGET_TRANSFORM_INTERFACE
-#define LLVM_ANALYSIS_TARGET_TRANSFORM_INTERFACE
+#ifndef LLVM_ANALYSIS_TARGETTRANSFORMINFO_H
+#define LLVM_ANALYSIS_TARGETTRANSFORMINFO_H
 
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Intrinsics.h"
@@ -147,6 +147,14 @@ public:
   /// If 'Vectors' is true, it returns the number of vector registers. If it is
   /// set to false, it returns the number of scalar registers.
   virtual unsigned getNumberOfRegisters(bool Vector) const;
+
+  /// \return The width of the largest scalar or vector register type.
+  virtual unsigned getRegisterBitWidth(bool Vector) const;
+
+  /// \return The maximum unroll factor that the vectorizer should try to
+  /// perform for this target. This number depends on the level of parallelism
+  /// and the number of execution units in the CPU.
+  virtual unsigned getMaximumUnrollFactor() const;
 
   /// \return The expected cost of arithmetic ops, such as mul, xor, fsub, etc.
   virtual unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty) const;

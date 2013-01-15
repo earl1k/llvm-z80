@@ -87,7 +87,7 @@ private:
                                         // anything other than to convey comment
                                         // information to AsmPrinter.
 
-  uint16_t NumMemRefs;                  // information on memory references
+  uint8_t NumMemRefs;                   // Information on memory references.
   mmo_iterator MemRefs;
 
   DebugLoc debugLoc;                    // Source line information.
@@ -313,11 +313,11 @@ public:
   /// The second argument indicates whether the query should look inside
   /// instruction bundles.
   bool hasProperty(unsigned MCFlag, QueryType Type = AnyInBundle) const {
-    // Inline the fast path.
-    if (Type == IgnoreBundle || !isBundle())
+    // Inline the fast path for unbundled or bundle-internal instructions.
+    if (Type == IgnoreBundle || !isBundled() || isBundledWithPred())
       return getDesc().getFlags() & (1 << MCFlag);
 
-    // If we have a bundle, take the slow path.
+    // If this is the first instruction in a bundle, take the slow path.
     return hasPropertyInBundle(1 << MCFlag, Type);
   }
 
@@ -699,7 +699,11 @@ public:
     }
   }
 
-  /// getBundleSize - Return the number of instructions inside the MI bundle.
+  /// Return the number of instructions inside the MI bundle, excluding the
+  /// bundle header.
+  ///
+  /// This is the number of instructions that MachineBasicBlock::iterator
+  /// skips, 0 for unbundled instructions.
   unsigned getBundleSize() const;
 
   /// readsRegister - Return true if the MachineInstr reads the specified
@@ -993,7 +997,8 @@ public:
   /// list. This does not transfer ownership.
   void setMemRefs(mmo_iterator NewMemRefs, mmo_iterator NewMemRefsEnd) {
     MemRefs = NewMemRefs;
-    NumMemRefs = NewMemRefsEnd - NewMemRefs;
+    NumMemRefs = uint8_t(NewMemRefsEnd - NewMemRefs);
+    assert(NumMemRefs == NewMemRefsEnd - NewMemRefs && "Too many memrefs");
   }
 
 private:

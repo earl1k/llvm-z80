@@ -65,6 +65,32 @@ AC_PROG_CC(clang llvm-gcc gcc)
 AC_PROG_CXX(clang++ llvm-g++ g++)
 AC_PROG_CPP
 
+dnl If CXX is Clang, check that it can find and parse C++ standard library
+dnl headers.
+if test "$CXX" = "clang++" ; then
+  AC_MSG_CHECKING([whether clang works])
+  AC_LANG_PUSH([C++])
+  dnl Note that space between 'include' and '(' is required.  There's a broken
+  dnl regex in aclocal that otherwise will think that we call m4's include
+  dnl builtin.
+  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <limits>
+#if __has_include (<cxxabi.h>)
+#include <cxxabi.h>
+#endif
+#if __has_include (<unwind.h>)
+#include <unwind.h>
+#endif
+]])],
+[
+  AC_MSG_RESULT([yes])
+],
+[
+  AC_MSG_RESULT([no])
+  AC_MSG_ERROR([Selected compiler could not find or parse C++ standard library headers.  Rerun with CC=c-compiler CXX=c++-compiler ./configure ...])
+])
+  AC_LANG_POP([C++])
+fi
+
 dnl Configure all of the projects present in our source tree. While we could
 dnl just AC_CONFIG_SUBDIRS on the set of directories in projects that have a
 dnl configure script, that usage of the AC_CONFIG_SUBDIRS macro is deprecated.
@@ -1231,7 +1257,27 @@ AC_MSG_CHECKING([optional compiler flags])
 CXX_FLAG_CHECK(NO_VARIADIC_MACROS, [-Wno-variadic-macros])
 CXX_FLAG_CHECK(NO_MISSING_FIELD_INITIALIZERS, [-Wno-missing-field-initializers])
 CXX_FLAG_CHECK(COVERED_SWITCH_DEFAULT, [-Wcovered-switch-default])
-AC_MSG_RESULT([$NO_VARIADIC_MACROS $NO_MISSING_FIELD_INITIALIZERS $COVERED_SWITCH_DEFAULT])
+dnl GCC's potential uninitialized use analysis is weak and presents lots of
+dnl false positives, so disable it.
+if test "$GXX" = "yes"
+then
+  CXX_FLAG_CHECK(NO_MAYBE_UNINITIALIZED, [-Wno-maybe-uninitialized])
+  dnl gcc 4.7 introduced -Wmaybe-uninitialized to distinguish cases which are
+  dnl known to be uninitialized from cases which might be uninitialized.  We 
+  dnl still want to catch the first kind of errors.
+  if test "$NO_MAYBE_UNINITIALIZED" != "-Wno-maybe-uninitialized"
+  then
+    CXX_FLAG_CHECK(NO_UNINITIALIZED, [-Wno-uninitialized])
+  else
+    dnl AC_SUBST doesn't work with empty strings.
+    NO_UNINITIALIZED=
+  fi
+else
+  NO_UNINITIALIZED=
+  NO_MAYBE_UNINITIALIZED=
+fi
+AC_MSG_RESULT([$NO_VARIADIC_MACROS $NO_MISSING_FIELD_INITIALIZERS $COVERED_SWITCH_DEFAULT $NO_UNINITIALIZED $NO_MAYBE_UNINITIALIZED])
+
 
 dnl===-----------------------------------------------------------------------===
 dnl===

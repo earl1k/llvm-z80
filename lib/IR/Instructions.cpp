@@ -1926,11 +1926,14 @@ bool BinaryOperator::isNeg(const Value *V) {
   return false;
 }
 
-bool BinaryOperator::isFNeg(const Value *V) {
+bool BinaryOperator::isFNeg(const Value *V, bool IgnoreZeroSign) {
   if (const BinaryOperator *Bop = dyn_cast<BinaryOperator>(V))
     if (Bop->getOpcode() == Instruction::FSub)
-      if (Constant* C = dyn_cast<Constant>(Bop->getOperand(0)))
-        return C->isNegativeZeroValue();
+      if (Constant* C = dyn_cast<Constant>(Bop->getOperand(0))) {
+        if (!IgnoreZeroSign)
+          IgnoreZeroSign = cast<Instruction>(V)->hasNoSignedZeros();
+        return !IgnoreZeroSign ? C->isNegativeZeroValue() : C->isZeroValue();
+      }
   return false;
 }
 
@@ -2621,6 +2624,11 @@ CastInst::castIsValid(Instruction::CastOps op, Value *S, Type *DstTy) {
 
   // Check for type sanity on the arguments
   Type *SrcTy = S->getType();
+
+  // If this is a cast to the same type then it's trivially true.
+  if (SrcTy == DstTy)
+    return true;
+
   if (!SrcTy->isFirstClassType() || !DstTy->isFirstClassType() ||
       SrcTy->isAggregateType() || DstTy->isAggregateType())
     return false;

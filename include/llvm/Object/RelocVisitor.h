@@ -13,8 +13,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef _LLVM_OBJECT_RELOCVISITOR
-#define _LLVM_OBJECT_RELOCVISITOR
+#ifndef LLVM_OBJECT_RELOCVISITOR_H
+#define LLVM_OBJECT_RELOCVISITOR_H
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Object/ELF.h"
@@ -40,7 +40,7 @@ struct RelocToApply {
 /// @brief Base class for object file relocation visitors.
 class RelocVisitor {
 public:
-  explicit RelocVisitor(llvm::StringRef FileFormat)
+  explicit RelocVisitor(StringRef FileFormat)
     : FileFormat(FileFormat), HasError(false) {}
 
   // TODO: Should handle multiple applied relocations via either passing in the
@@ -83,7 +83,7 @@ public:
   bool error() { return HasError; }
 
 private:
-  llvm::StringRef FileFormat;
+  StringRef FileFormat;
   bool HasError;
 
   /// Operations

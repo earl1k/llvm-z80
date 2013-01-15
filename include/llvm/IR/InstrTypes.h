@@ -13,8 +13,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_INSTRUCTION_TYPES_H
-#define LLVM_INSTRUCTION_TYPES_H
+#ifndef LLVM_IR_INSTRTYPES_H
+#define LLVM_IR_INSTRTYPES_H
 
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -309,7 +309,7 @@ public:
   /// NEG, FNeg, or NOT instruction.
   ///
   static bool isNeg(const Value *V);
-  static bool isFNeg(const Value *V);
+  static bool isFNeg(const Value *V, bool IgnoreZeroSign=false);
   static bool isNot(const Value *V);
 
   /// getNegArgument, getNotArgument - Helper functions to extract the

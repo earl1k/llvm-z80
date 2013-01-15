@@ -197,7 +197,6 @@ bool DIDescriptor::isCompositeType() const {
   case dwarf::DW_TAG_structure_type:
   case dwarf::DW_TAG_union_type:
   case dwarf::DW_TAG_enumeration_type:
-  case dwarf::DW_TAG_vector_type:
   case dwarf::DW_TAG_subroutine_type:
   case dwarf::DW_TAG_class_type:
     return true;
@@ -212,7 +211,6 @@ bool DIDescriptor::isVariable() const {
   switch (getTag()) {
   case dwarf::DW_TAG_auto_variable:
   case dwarf::DW_TAG_arg_variable:
-  case dwarf::DW_TAG_return_variable:
     return true;
   default:
     return false;
@@ -427,7 +425,7 @@ bool DIType::Verify() const {
       Tag != dwarf::DW_TAG_ptr_to_member_type &&
       Tag != dwarf::DW_TAG_reference_type &&
       Tag != dwarf::DW_TAG_rvalue_reference_type &&
-      Tag != dwarf::DW_TAG_restrict_type && Tag != dwarf::DW_TAG_vector_type &&
+      Tag != dwarf::DW_TAG_restrict_type &&
       Tag != dwarf::DW_TAG_array_type &&
       Tag != dwarf::DW_TAG_enumeration_type &&
       Tag != dwarf::DW_TAG_subroutine_type &&
@@ -1096,8 +1094,13 @@ void DIType::printInternal(raw_ostream &OS) const {
   else if (isProtected())
     OS << " [protected]";
 
+  if (isArtificial())
+    OS << " [artificial]";
+
   if (isForwardDecl())
     OS << " [fwd]";
+  if (isVector())
+    OS << " [vector]";
 }
 
 void DIDerivedType::printInternal(raw_ostream &OS) const {

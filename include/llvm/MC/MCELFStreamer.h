@@ -44,6 +44,7 @@ public:
   /// @{
 
   virtual void InitSections();
+  virtual void InitToTextSection();
   virtual void ChangeSection(const MCSection *Section);
   virtual void EmitLabel(MCSymbol *Symbol);
   virtual void EmitDebugLabel(MCSymbol *Symbol);
@@ -85,7 +86,7 @@ private:
   virtual void EmitInstToData(const MCInst &Inst);
 
   virtual void EmitBundleAlignMode(unsigned AlignPow2);
-  virtual void EmitBundleLock();
+  virtual void EmitBundleLock(bool AlignToEnd);
   virtual void EmitBundleUnlock();
 
   void fixSymbolsInTLSFixups(const MCExpr *expr);

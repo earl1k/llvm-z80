@@ -160,3 +160,195 @@ define double @select3(i32 %cond, double %x, double %y) {
 ; CHECK: @select3
 ; CHECK: fmul nnan nsz double %cond1, %x
 }
+
+; =========================================================================
+;
+;   Testing-cases about fmul begin
+;
+; =========================================================================
+
+; ((X*C1) + C2) * C3 => (X * (C1*C3)) + (C2*C3) (i.e. distribution)
+define float @fmul_distribute1(float %f1) {
+  %t1 = fmul float %f1, 6.0e+3
+  %t2 = fadd float %t1, 2.0e+3
+  %t3 = fmul fast float %t2, 5.0e+3
+  ret float %t3 
+; CHECK: @fmul_distribute1
+; CHECK: %1 = fmul fast float %f1, 3.000000e+07
+; CHECK: %t3 = fadd fast float %1, 1.000000e+07
+}
+
+; (X/C1 + C2) * C3 => X/(C1/C3) + C2*C3
+define double @fmul_distribute2(double %f1, double %f2) {
+  %t1 = fdiv double %f1, 3.0e+0
+  %t2 = fadd double %t1, 5.0e+1
+  ; 0x10000000000000 = DBL_MIN
+  %t3 = fmul fast double %t2, 0x10000000000000
+  ret double %t3
+
+; CHECK: @fmul_distribute2
+; CHECK: %1 = fdiv fast double %f1, 0x7FE8000000000000
+; CHECK: fadd fast double %1, 0x69000000000000
+}
+
+; 5.0e-1 * DBL_MIN yields denormal, so "(f1*3.0 + 5.0e-1) * DBL_MIN" cannot
+; be simplified into f1 * (3.0*DBL_MIN) + (5.0e-1*DBL_MIN)
+define double @fmul_distribute3(double %f1) {
+  %t1 = fdiv double %f1, 3.0e+0
+  %t2 = fadd double %t1, 5.0e-1
+  %t3 = fmul fast double %t2, 0x10000000000000
+  ret double %t3
+
+; CHECK: @fmul_distribute3
+; CHECK: fmul fast double %t2, 0x10000000000000
+}
+
+; C1/X * C2 => (C1*C2) / X
+define float @fmul2(float %f1) {
+  %t1 = fdiv float 2.0e+3, %f1 
+  %t3 = fmul fast float %t1, 6.0e+3
+  ret float %t3 
+; CHECK: @fmul2
+; CHECK: fdiv fast float 1.200000e+07, %f1
+}
+
+; X/C1 * C2 => X * (C2/C1) (if C2/C1 is normal Fp)
+define float @fmul3(float %f1, float %f2) {
+  %t1 = fdiv float %f1, 2.0e+3
+  %t3 = fmul fast float %t1, 6.0e+3
+  ret float %t3 
+; CHECK: @fmul3
+; CHECK: fmul fast float %f1, 3.000000e+00
+}
+
+; Rule "X/C1 * C2 => X * (C2/C1) is not applicable if C2/C1 is either a special
+; value of a denormal. The 0x3810000000000000 here take value FLT_MIN
+;
+define float @fmul4(float %f1, float %f2) {
+  %t1 = fdiv float %f1, 2.0e+3
+  %t3 = fmul fast float %t1, 0x3810000000000000
+  ret float %t3 
+; CHECK: @fmul4
+; CHECK: fmul fast float %t1, 0x3810000000000000
+}
+
+; X / C1 * C2 => X / (C2/C1) if  C1/C2 is either a special value of a denormal, 
+;  and C2/C1 is a normal value.
+; 
+define float @fmul5(float %f1, float %f2) {
+  %t1 = fdiv float %f1, 3.0e+0
+  %t3 = fmul fast float %t1, 0x3810000000000000
+  ret float %t3 
+; CHECK: @fmul5
+; CHECK: fdiv fast float %f1, 0x47E8000000000000
+}
+
+; =========================================================================
+;
+;   Testing-cases about negation
+;
+; =========================================================================
+define float @fneg1(float %f1, float %f2) {
+  %sub = fsub float -0.000000e+00, %f1
+  %sub1 = fsub nsz float 0.000000e+00, %f2
+  %mul = fmul float %sub, %sub1
+  ret float %mul
+; CHECK: @fneg1
+; CHECK: fmul float %f1, %f2
+}
+
+; =========================================================================
+;
+;   Testing-cases about div
+;
+; =========================================================================
+; X/C1 / C2 => X * (1/(C2*C1))
+
+define float @fdiv1(float %x) {
+  %div = fdiv float %x, 0x3FF3333340000000
+  %div1 = fdiv fast float %div, 0x4002666660000000
+  ret float %div1
+; 0x3FF3333340000000 = 1.2f
+; 0x4002666660000000 = 2.3f
+; 0x3FD7303B60000000 = 0.36231884057971014492
+; CHECK: @fdiv1
+; CHECK: fmul fast float %x, 0x3FD7303B60000000
+}
+
+; X*C1 / C2 => X * (C1/C2)
+define float @fdiv2(float %x) {
+  %mul = fmul float %x, 0x3FF3333340000000
+  %div1 = fdiv fast float %mul, 0x4002666660000000
+  ret float %div1
+
+; 0x3FF3333340000000 = 1.2f
+; 0x4002666660000000 = 2.3f
+; 0x3FE0B21660000000 = 0.52173918485641479492
+; CHECK: @fdiv2
+; CHECK: fmul fast float %x, 0x3FE0B21660000000
+}
+
+; "X/C1 / C2 => X * (1/(C2*C1))" is disabled (for now) is C2/C1 is a denormal
+; 
+define float @fdiv3(float %x) {
+  %div = fdiv float %x, 0x47EFFFFFE0000000
+  %div1 = fdiv fast float %div, 0x4002666660000000
+  ret float %div1
+; CHECK: @fdiv3
+; CHECK: fdiv float %x, 0x47EFFFFFE0000000
+}
+
+; "X*C1 / C2 => X * (C1/C2)" is disabled if C1/C2 is a denormal
+define float @fdiv4(float %x) {
+  %mul = fmul float %x, 0x47EFFFFFE0000000
+  %div = fdiv float %mul, 0x3FC99999A0000000
+  ret float %div
+; CHECK: @fdiv4
+; CHECK: fmul float %x, 0x47EFFFFFE0000000
+}
+
+; (X/Y)/Z = > X/(Y*Z)
+define float @fdiv5(float %f1, float %f2, float %f3) {
+  %t1 = fdiv float %f1, %f2
+  %t2 = fdiv fast float %t1, %f3
+  ret float %t2
+; CHECK: @fdiv5
+; CHECK: fmul float %f2, %f3
+}
+
+; Z/(X/Y) = > (Z*Y)/X
+define float @fdiv6(float %f1, float %f2, float %f3) {
+  %t1 = fdiv float %f1, %f2
+  %t2 = fdiv fast float %f3, %t1
+  ret float %t2
+; CHECK: @fdiv6
+; CHECK: fmul float %f3, %f2
+}
+
+; C1/(X*C2) => (C1/C2) / X
+define float @fdiv7(float %x) {
+  %t1 = fmul float %x, 3.0e0
+  %t2 = fdiv fast float 15.0e0, %t1
+  ret float %t2
+; CHECK: @fdiv7
+; CHECK: fdiv fast float 5.000000e+00, %x
+}
+
+; C1/(X/C2) => (C1*C2) / X
+define float @fdiv8(float %x) {
+  %t1 = fdiv float %x, 3.0e0
+  %t2 = fdiv fast float 15.0e0, %t1
+  ret float %t2
+; CHECK: @fdiv8
+; CHECK: fdiv fast float 4.500000e+01, %x
+}
+
+; C1/(C2/X) => (C1/C2) * X
+define float @fdiv9(float %x) {
+  %t1 = fdiv float 3.0e0, %x
+  %t2 = fdiv fast float 15.0e0, %t1
+  ret float %t2
+; CHECK: @fdiv9
+; CHECK: fmul fast float %x, 5.000000e+00
+}
+

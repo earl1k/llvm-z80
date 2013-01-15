@@ -21,12 +21,12 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/TypeFinder.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
-#include "llvm/TypeFinder.h"
 #include <cctype>
 using namespace llvm;
 
@@ -180,7 +180,7 @@ bool TypeMapTy::areTypesIsomorphic(Type *DstTy, Type *SrcTy) {
     if (DATy->getNumElements() != cast<ArrayType>(SrcTy)->getNumElements())
       return false;
   } else if (VectorType *DVTy = dyn_cast<VectorType>(DstTy)) {
-    if (DVTy->getNumElements() != cast<ArrayType>(SrcTy)->getNumElements())
+    if (DVTy->getNumElements() != cast<VectorType>(SrcTy)->getNumElements())
       return false;
   }
 

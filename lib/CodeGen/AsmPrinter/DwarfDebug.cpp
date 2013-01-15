@@ -155,15 +155,14 @@ DIType DbgVariable::getType() const {
 DwarfDebug::DwarfDebug(AsmPrinter *A, Module *M)
   : Asm(A), MMI(Asm->MMI), FirstCU(0),
     AbbreviationsSet(InitAbbreviationsSetSize),
-    SourceIdMap(DIEValueAllocator), InfoStringPool(DIEValueAllocator),
+    SourceIdMap(DIEValueAllocator),
     PrevLabel(NULL), GlobalCUIndexCount(0),
-    InfoHolder(A, &AbbreviationsSet, &Abbreviations,
-               &InfoStringPool, "info_string"),
+    InfoHolder(A, &AbbreviationsSet, &Abbreviations, "info_string",
+               DIEValueAllocator),
     SkeletonCU(0),
     SkeletonAbbrevSet(InitAbbreviationsSetSize),
-    SkeletonStringPool(DIEValueAllocator),
-    SkeletonHolder(A, &SkeletonAbbrevSet, &SkeletonAbbrevs,
-                   &SkeletonStringPool, "skel_string") {
+    SkeletonHolder(A, &SkeletonAbbrevSet, &SkeletonAbbrevs, "skel_string",
+                   DIEValueAllocator) {
 
   DwarfInfoSectionSym = DwarfAbbrevSectionSym = 0;
   DwarfStrSectionSym = TextSectionSym = 0;
@@ -221,11 +220,21 @@ MCSymbol *DwarfUnits::getStringPoolSym() {
 
 MCSymbol *DwarfUnits::getStringPoolEntry(StringRef Str) {
   std::pair<MCSymbol*, unsigned> &Entry =
-    StringPool->GetOrCreateValue(Str).getValue();
+    StringPool.GetOrCreateValue(Str).getValue();
   if (Entry.first) return Entry.first;
 
   Entry.second = NextStringPoolNumber++;
   return Entry.first = Asm->GetTempSymbol(StringPref, Entry.second);
+}
+
+unsigned DwarfUnits::getStringPoolIndex(StringRef Str) {
+  std::pair<MCSymbol*, unsigned> &Entry =
+    StringPool.GetOrCreateValue(Str).getValue();
+  if (Entry.first) return Entry.second;
+
+  Entry.second = NextStringPoolNumber++;
+  Entry.first = Asm->GetTempSymbol(StringPref, Entry.second);
+  return Entry.second;
 }
 
 // Define a unique number for the abbreviation.
@@ -1933,8 +1942,7 @@ void DwarfDebug::emitEndOfLineMatrix(unsigned SectionEnd) {
   Asm->OutStreamer.AddComment("Section end label");
 
   Asm->OutStreamer.EmitSymbolValue(Asm->GetTempSymbol("section_end",SectionEnd),
-                                   Asm->getDataLayout().getPointerSize(),
-                                   0/*AddrSpace*/);
+                                   Asm->getDataLayout().getPointerSize());
 
   // Mark end of matrix.
   Asm->OutStreamer.AddComment("DW_LNE_end_sequence");
@@ -2105,7 +2113,7 @@ void DwarfDebug::emitDebugPubTypes() {
 
       if (Asm->isVerbose()) Asm->OutStreamer.AddComment("External Name");
       // Emit the name with a terminating null byte.
-      Asm->OutStreamer.EmitBytes(StringRef(Name, GI->getKeyLength()+1), 0);
+      Asm->OutStreamer.EmitBytes(StringRef(Name, GI->getKeyLength()+1));
     }
 
     Asm->OutStreamer.AddComment("End Mark");
@@ -2116,20 +2124,22 @@ void DwarfDebug::emitDebugPubTypes() {
 }
 
 // Emit strings into a string section.
-void DwarfUnits::emitStrings(const MCSection *Section) {
+void DwarfUnits::emitStrings(const MCSection *StrSection,
+                             const MCSection *OffsetSection = NULL,
+                             const MCSymbol *StrSecSym = NULL) {
 
-  if (StringPool->empty()) return;
+  if (StringPool.empty()) return;
 
   // Start the dwarf str section.
-  Asm->OutStreamer.SwitchSection(Section);
+  Asm->OutStreamer.SwitchSection(StrSection);
 
   // Get all of the string pool entries and put them in an array by their ID so
   // we can sort them.
   SmallVector<std::pair<unsigned,
-                        StringMapEntry<std::pair<MCSymbol*, unsigned> >*>, 64> Entries;
+                 StringMapEntry<std::pair<MCSymbol*, unsigned> >*>, 64> Entries;
 
   for (StringMap<std::pair<MCSymbol*, unsigned> >::iterator
-         I = StringPool->begin(), E = StringPool->end();
+         I = StringPool.begin(), E = StringPool.end();
        I != E; ++I)
     Entries.push_back(std::make_pair(I->second.second, &*I));
 
@@ -2141,8 +2151,18 @@ void DwarfUnits::emitStrings(const MCSection *Section) {
 
     // Emit the string itself with a terminating null byte.
     Asm->OutStreamer.EmitBytes(StringRef(Entries[i].second->getKeyData(),
-                                         Entries[i].second->getKeyLength()+1),
-                               0/*addrspace*/);
+                                         Entries[i].second->getKeyLength()+1));
+  }
+
+  // If we've got an offset section go ahead and emit that now as well.
+  if (OffsetSection) {
+    Asm->OutStreamer.SwitchSection(OffsetSection);
+    unsigned offset = 0;
+    unsigned size = 4;
+    for (unsigned i = 0, e = Entries.size(); i != e; ++i) {
+      Asm->OutStreamer.EmitIntValue(offset, size);
+      offset += Entries[i].second->getKeyLength() + 1;
+    }
   }
 }
 
@@ -2177,12 +2197,12 @@ void DwarfDebug::emitDebugLoc() {
     DotDebugLocEntry &Entry = *I;
     if (Entry.isMerged()) continue;
     if (Entry.isEmpty()) {
-      Asm->OutStreamer.EmitIntValue(0, Size, /*addrspace*/0);
-      Asm->OutStreamer.EmitIntValue(0, Size, /*addrspace*/0);
+      Asm->OutStreamer.EmitIntValue(0, Size);
+      Asm->OutStreamer.EmitIntValue(0, Size);
       Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("debug_loc", index));
     } else {
-      Asm->OutStreamer.EmitSymbolValue(Entry.Begin, Size, 0);
-      Asm->OutStreamer.EmitSymbolValue(Entry.End, Size, 0);
+      Asm->OutStreamer.EmitSymbolValue(Entry.Begin, Size);
+      Asm->OutStreamer.EmitSymbolValue(Entry.End, Size);
       DIVariable DV(Entry.Variable);
       Asm->OutStreamer.AddComment("Loc expr size");
       MCSymbol *begin = Asm->OutStreamer.getContext().CreateTempSymbol();
@@ -2268,9 +2288,9 @@ void DwarfDebug::emitDebugRanges() {
          I = DebugRangeSymbols.begin(), E = DebugRangeSymbols.end();
        I != E; ++I) {
     if (*I)
-      Asm->OutStreamer.EmitSymbolValue(const_cast<MCSymbol*>(*I), Size, 0);
+      Asm->OutStreamer.EmitSymbolValue(const_cast<MCSymbol*>(*I), Size);
     else
-      Asm->OutStreamer.EmitIntValue(0, Size, /*addrspace*/0);
+      Asm->OutStreamer.EmitIntValue(0, Size);
   }
 }
 
@@ -2354,7 +2374,7 @@ void DwarfDebug::emitDebugInlineInfo() {
 
       if (Asm->isVerbose()) Asm->OutStreamer.AddComment("low_pc");
       Asm->OutStreamer.EmitSymbolValue(LI->first,
-                                       Asm->getDataLayout().getPointerSize(),0);
+                                       Asm->getDataLayout().getPointerSize());
     }
   }
 
@@ -2377,7 +2397,7 @@ CompileUnit *DwarfDebug::constructSkeletonCU(const MDNode *N) {
                                        DIUnit.getLanguage(), Die, Asm,
                                        this, &SkeletonHolder);
   // FIXME: This should be the .dwo file.
-  NewCU->addString(Die, dwarf::DW_AT_GNU_dwo_name, FN);
+  NewCU->addLocalString(Die, dwarf::DW_AT_GNU_dwo_name, FN);
 
   // FIXME: We also need DW_AT_addr_base and DW_AT_dwo_id.
 
@@ -2393,7 +2413,7 @@ CompileUnit *DwarfDebug::constructSkeletonCU(const MDNode *N) {
     NewCU->addUInt(Die, dwarf::DW_AT_stmt_list, dwarf::DW_FORM_data4, 0);
 
   if (!CompilationDir.empty())
-    NewCU->addString(Die, dwarf::DW_AT_comp_dir, CompilationDir);
+    NewCU->addLocalString(Die, dwarf::DW_AT_comp_dir, CompilationDir);
 
   SkeletonHolder.addUnit(NewCU);
 
@@ -2458,5 +2478,9 @@ void DwarfDebug::emitDebugAbbrevDWO() {
 // sections.
 void DwarfDebug::emitDebugStrDWO() {
   assert(useSplitDwarf() && "No split dwarf?");
-  InfoHolder.emitStrings(Asm->getObjFileLowering().getDwarfStrDWOSection());
+  const MCSection *OffSec = Asm->getObjFileLowering()
+                            .getDwarfStrOffDWOSection();
+  const MCSymbol *StrSym = DwarfStrSectionSym;
+  InfoHolder.emitStrings(Asm->getObjFileLowering().getDwarfStrDWOSection(),
+                         OffSec, StrSym);
 }

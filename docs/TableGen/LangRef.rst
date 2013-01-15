@@ -74,6 +74,11 @@ TableGen also has two string-like literals:
    TokString: '"' <non-'"' characters and C-like escapes> '"'
    TokCodeFragment: "[{" <shortest text not containing "}]"> "}]"
 
+.. note::
+   The current implementation accepts the following C-like escapes::
+
+      \\ \' \" \t \n
+
 TableGen also has the following keywords::
 
    bit   bits      class   code         dag
@@ -81,11 +86,13 @@ TableGen also has the following keywords::
    int   let       list    multiclass   string
 
 TableGen also has "bang operators" which have a
-wide variety of meanings::
+wide variety of meanings:
 
-   !eq     !if      !head    !tail      !con
-   !shl    !sra     !srl
-   !cast   !empty   !subst   !foreach   !strconcat
+.. productionlist::
+   BangOperator: one of
+               :!eq     !if      !head    !tail      !con
+               :!shl    !sra     !srl
+               :!cast   !empty   !subst   !foreach   !strconcat
 
 Syntax
 ======
@@ -293,12 +300,12 @@ Bodies
    ObjectBody: `BaseClassList` `Body`
    BaseClassList: [`BaseClassListNE`]
    BaseClassListNE: `SubClassRef` ("," `SubClassRef`)*
-   SubClassRef: (`ClassID` | `DefmID`) ["<" `ValueList` ">"]
+   SubClassRef: (`ClassID` | `MultiClassID`) ["<" `ValueList` ">"]
    DefmID: `TokIdentifier`
 
-The version with the :token:`DefmID` is only valid in the
+The version with the :token:`MultiClassID` is only valid in the
 :token:`BaseClassList` of a ``defm``.
-The :token:`DefmID` should be the name of a ``multiclass``.
+The :token:`MultiClassID` should be the name of a ``multiclass``.
 
 .. put this somewhere else
 
@@ -370,6 +377,7 @@ applied at the end of parsing the base classes of a record.
 
 .. productionlist::
    MultiClass: "multiclass" `TokIdentifier` [`TemplateArgList`]
-             : [":" `BaseMultiClassList`] "{" `MultiClassDef`+ "}"
+             : [":" `BaseMultiClassList`] "{" `MultiClassObject`+ "}"
    BaseMultiClassList: `MultiClassID` ("," `MultiClassID`)*
    MultiClassID: `TokIdentifier`
+   MultiClassObject: `Def` | `Defm` | `Let` | `Foreach`

@@ -100,7 +100,7 @@ void OcamlGCMetadataPrinter::finishAssembly(AsmPrinter &AP) {
   EmitCamlGlobal(getModule(), AP, "data_end");
 
   // FIXME: Why does ocaml emit this??
-  AP.OutStreamer.EmitIntValue(0, IntPtrSize, 0);
+  AP.OutStreamer.EmitIntValue(0, IntPtrSize);
 
   AP.OutStreamer.SwitchSection(AP.getObjFileLowering().getDataSection());
   EmitCamlGlobal(getModule(), AP, "frametable");
@@ -145,7 +145,7 @@ void OcamlGCMetadataPrinter::finishAssembly(AsmPrinter &AP) {
                            "Live root count "+Twine(LiveCount)+" >= 65536.");
       }
 
-      AP.OutStreamer.EmitSymbolValue(J->Label, IntPtrSize, 0);
+      AP.OutStreamer.EmitSymbolValue(J->Label, IntPtrSize);
       AP.EmitInt16(FrameSize);
       AP.EmitInt16(LiveCount);
 

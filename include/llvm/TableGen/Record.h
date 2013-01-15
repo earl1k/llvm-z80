@@ -1387,12 +1387,14 @@ class Record {
   SmallVector<SMLoc, 4> Locs;
   std::vector<Init *> TemplateArgs;
   std::vector<RecordVal> Values;
-  std::vector<Record*> SuperClasses;
+  std::vector<Record *> SuperClasses;
+  std::vector<SMRange> SuperClassRanges;
 
   // Tracks Record instances. Not owned by Record.
   RecordKeeper &TrackedRecords;
 
   DefInit *TheInit;
+  bool IsAnonymous;
 
   void init();
   void checkName();
@@ -1401,14 +1403,15 @@ public:
 
   // Constructs a record.
   explicit Record(const std::string &N, ArrayRef<SMLoc> locs,
-                  RecordKeeper &records) :
+                  RecordKeeper &records, bool Anonymous = false) :
     ID(LastID++), Name(StringInit::get(N)), Locs(locs.begin(), locs.end()),
-    TrackedRecords(records), TheInit(0) {
+    TrackedRecords(records), TheInit(0), IsAnonymous(Anonymous) {
     init();
   }
-  explicit Record(Init *N, ArrayRef<SMLoc> locs, RecordKeeper &records) :
+  explicit Record(Init *N, ArrayRef<SMLoc> locs, RecordKeeper &records,
+                  bool Anonymous = false) :
     ID(LastID++), Name(N), Locs(locs.begin(), locs.end()),
-    TrackedRecords(records), TheInit(0) {
+    TrackedRecords(records), TheInit(0), IsAnonymous(Anonymous) {
     init();
   }
 
@@ -1417,7 +1420,8 @@ public:
   Record(const Record &O) :
     ID(LastID++), Name(O.Name), Locs(O.Locs), TemplateArgs(O.TemplateArgs),
     Values(O.Values), SuperClasses(O.SuperClasses),
-    TrackedRecords(O.TrackedRecords), TheInit(O.TheInit) { }
+    SuperClassRanges(O.SuperClassRanges), TrackedRecords(O.TrackedRecords),
+    TheInit(O.TheInit), IsAnonymous(O.IsAnonymous) { }
 
   ~Record() {}
 
@@ -1448,6 +1452,7 @@ public:
   }
   const std::vector<RecordVal> &getValues() const { return Values; }
   const std::vector<Record*>   &getSuperClasses() const { return SuperClasses; }
+  ArrayRef<SMRange> getSuperClassRanges() const { return SuperClassRanges; }
 
   bool isTemplateArg(Init *Name) const {
     for (unsigned i = 0, e = TemplateArgs.size(); i != e; ++i)
@@ -1522,9 +1527,10 @@ public:
     return false;
   }
 
-  void addSuperClass(Record *R) {
+  void addSuperClass(Record *R, SMRange Range) {
     assert(!isSubClassOf(R) && "Already subclassing record!");
     SuperClasses.push_back(R);
+    SuperClassRanges.push_back(Range);
   }
 
   /// resolveReferences - If there are any field references that refer to fields
@@ -1539,6 +1545,10 @@ public:
 
   RecordKeeper &getRecords() const {
     return TrackedRecords;
+  }
+
+  bool isAnonymous() const {
+    return IsAnonymous;
   }
 
   void dump() const;

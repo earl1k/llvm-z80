@@ -95,6 +95,12 @@
 #define LLVM_OVERRIDE
 #endif
 
+#if __has_feature(cxx_constexpr) || defined(__GXX_EXPERIMENTAL_CXX0X__)
+# define LLVM_CONSTEXPR constexpr
+#else
+# define LLVM_CONSTEXPR
+#endif
+
 /// LLVM_LIBRARY_VISIBILITY - If a class marked with this attribute is linked
 /// into a shared library, then the class should be private to the library and
 /// not accessible from outside it.  Can also be used to mark variables and
@@ -247,6 +253,15 @@
            (((uintptr_t(p) % (a)) == 0) ? (p) : (LLVM_BUILTIN_UNREACHABLE, (p)))
 #else
 # define LLVM_ASSUME_ALIGNED(p, a) (p)
+#endif
+
+/// \macro LLVM_FUNCTION_NAME
+/// \brief Expands to __func__ on compilers which support it.  Otherwise,
+/// expands to a compiler-dependent replacement.
+#if defined(_MSC_VER)
+# define LLVM_FUNCTION_NAME __FUNCTION__
+#else
+# define LLVM_FUNCTION_NAME __func__
 #endif
 
 #endif

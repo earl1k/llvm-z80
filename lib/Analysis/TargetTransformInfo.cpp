@@ -92,6 +92,14 @@ unsigned TargetTransformInfo::getNumberOfRegisters(bool Vector) const {
   return PrevTTI->getNumberOfRegisters(Vector);
 }
 
+unsigned TargetTransformInfo::getRegisterBitWidth(bool Vector) const {
+  return PrevTTI->getRegisterBitWidth(Vector);
+}
+
+unsigned TargetTransformInfo::getMaximumUnrollFactor() const {
+  return PrevTTI->getMaximumUnrollFactor();
+}
+
 unsigned TargetTransformInfo::getArithmeticInstrCost(unsigned Opcode,
                                                      Type *Ty) const {
   return PrevTTI->getArithmeticInstrCost(Opcode, Ty);
@@ -179,7 +187,9 @@ struct NoTTI : ImmutablePass, TargetTransformInfo {
 
   bool isLegalAddressingMode(Type *Ty, GlobalValue *BaseGV, int64_t BaseOffset,
                              bool HasBaseReg, int64_t Scale) const {
-    return false;
+    // Guess that reg+reg addressing is allowed. This heuristic is taken from
+    // the implementation of LSR.
+    return !BaseGV && BaseOffset == 0 && Scale <= 1;
   }
 
   bool isTruncateFree(Type *Ty1, Type *Ty2) const {
@@ -212,6 +222,14 @@ struct NoTTI : ImmutablePass, TargetTransformInfo {
 
   unsigned getNumberOfRegisters(bool Vector) const {
     return 8;
+  }
+
+  unsigned  getRegisterBitWidth(bool Vector) const {
+    return 32;
+  }
+
+  unsigned getMaximumUnrollFactor() const {
+    return 1;
   }
 
   unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty) const {

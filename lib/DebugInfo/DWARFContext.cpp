@@ -152,7 +152,8 @@ void DWARFContext::parseCompileUnits() {
   while (DIData.isValidOffset(offset)) {
     CUs.push_back(DWARFCompileUnit(getDebugAbbrev(), getInfoSection(),
                                    getAbbrevSection(), getRangeSection(),
-                                   getStringSection(), &infoRelocMap(),
+                                   getStringSection(), "",
+                                   &infoRelocMap(),
                                    isLittleEndian()));
     if (!CUs.back().extract(DIData, &offset)) {
       CUs.pop_back();
@@ -172,6 +173,7 @@ void DWARFContext::parseDWOCompileUnits() {
                                       getAbbrevDWOSection(),
                                       getRangeDWOSection(),
                                       getStringDWOSection(),
+                                      getStringOffsetDWOSection(),
                                       &infoDWORelocMap(),
                                       isLittleEndian()));
     if (!DWOCUs.back().extract(DIData, &offset)) {
@@ -350,7 +352,7 @@ DIInliningInfo DWARFContext::getInliningInfoForAddress(uint64_t Address,
 }
 
 DWARFContextInMemory::DWARFContextInMemory(object::ObjectFile *Obj) :
-  IsLittleEndian(true /* FIXME */) {
+  IsLittleEndian(Obj->isLittleEndian()) {
   error_code ec;
   for (object::section_iterator i = Obj->begin_sections(),
          e = Obj->end_sections();
@@ -382,6 +384,8 @@ DWARFContextInMemory::DWARFContextInMemory(object::ObjectFile *Obj) :
       AbbrevDWOSection = data;
     else if (name == "debug_str.dwo")
       StringDWOSection = data;
+    else if (name == "debug_str_offsets.dwo")
+      StringOffsetDWOSection = data;
     // Any more debug info sections go here.
     else
       continue;
