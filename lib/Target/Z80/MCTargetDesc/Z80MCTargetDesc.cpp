@@ -91,4 +91,8 @@ extern "C" void LLVMInitializeZ80TargetMC() {
   // Register the MCCodeEmitter
   TargetRegistry::RegisterMCCodeEmitter(TheZ80Target,
     createZ80MCCodeEmitter);
+
+  // Register the MCAsmBackend
+  TargetRegistry::RegisterMCAsmBackend(TheZ80Target,
+    createZ80AsmBackend);
 }

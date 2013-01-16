@@ -101,6 +101,9 @@ unsigned Z80MCCodeEmitter::getBREncoding(const MCInst &MI, unsigned OpNo,
   const MCOperand &MO = MI.getOperand(OpNo);
   if (MO.isReg() || MO.isImm()) return getMachineOpValue(MI, MO, Fixups);
 
+  // Add a fixup for the branch target.
+  Fixups.push_back(MCFixup::Create(1, MO.getExpr(), FK_PCRel_2));
+
   return 0;
 }
 
