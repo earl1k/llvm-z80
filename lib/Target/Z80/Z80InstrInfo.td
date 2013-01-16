@@ -18,6 +18,15 @@
 include "Z80InstrFormats.td"
 
 //===----------------------------------------------------------------------===//
+// Z80 Type Profiles.
+//===----------------------------------------------------------------------===//
+def SDT_Z80Cp       : SDTypeProfile<0, 2, [SDTCisSameAs<0, 1>]>;
+def SDT_Z80SelectCC : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
+                                           SDTCisSameAs<1, 2>,
+                                           SDTCisVT<3, i8>]>;
+def SDT_Z80BrCC     : SDTypeProfile<0, 2, [SDTCisVT<0, i8>,
+                                           SDTCisVT<1, OtherVT>]>;
+//===----------------------------------------------------------------------===//
 // Z80 Specific Node Definitions.
 //===----------------------------------------------------------------------===//
 def Z80ret       : SDNode<"Z80ISD::RET", SDTNone,
@@ -33,16 +42,45 @@ def Z80sla       : SDNode<"Z80ISD::SLA", SDTIntUnaryOp, [SDNPOutGlue]>;
 def Z80sra       : SDNode<"Z80ISD::SRA", SDTIntUnaryOp, [SDNPOutGlue]>;
 def Z80sll       : SDNode<"Z80ISD::SLL", SDTIntUnaryOp, [SDNPOutGlue]>;
 def Z80srl       : SDNode<"Z80ISD::SRL", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80cp        : SDNode<"Z80ISD::CP", SDT_Z80Cp, [SDNPOutGlue]>;
+def Z80selectcc  : SDNode<"Z80ISD::SELECT_CC", SDT_Z80SelectCC,
+                 [SDNPInGlue]>;
+def Z80brcc      : SDNode<"Z80ISD::BR_CC", SDT_Z80BrCC,
+                 [SDNPHasChain, SDNPInGlue]>;
+//===----------------------------------------------------------------------===//
+// Operand Definitions.
+//===----------------------------------------------------------------------===//
+
+def brtarget : Operand<OtherVT> {
+  let EncoderMethod = "getBREncoding";
+}
+
+def cc : Operand<i8> {
+  let PrintMethod = "printCCOperand";
+}
 
 //===----------------------------------------------------------------------===//
 // Instruction list.
 //===----------------------------------------------------------------------===//
 
+let usesCustomInserter = 1 in {
+  def SELECT8 : PseudoI<(outs GR8:$dst), (ins GR8:$src, GR8:$src2, cc:$cc),
+    [(set GR8:$dst, (Z80selectcc GR8:$src, GR8:$src2, imm:$cc))]>;
+}
 //===----------------------------------------------------------------------===//
 // Control Flow Instructions.
 //===----------------------------------------------------------------------===//
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RET : I<0xC9, (outs), (ins), "ret", [(Z80ret)]>;
+
+let isBranch = 1, isTerminator = 1 in {
+  let isBarrier = 1 in
+  def JP : II16<0xC3, (outs), (ins brtarget:$dst),
+    "jp\t{$dst}", [(br bb:$dst)]>;
+  let Uses = [FLAGS] in
+  def JPCC : IRyI16<0xC2, (outs), (ins cc:$cc, brtarget:$dst),
+    "jp\t{$cc, $dst}", [(Z80brcc imm:$cc, bb:$dst)]>;
+}
 
 //===----------------------------------------------------------------------===//
 // Load Instructions.
@@ -74,24 +112,27 @@ def ALU_SBC : ALUOpType<3, sube>;
 def ALU_AND : ALUOpType<4, and>;
 def ALU_XOR : ALUOpType<5, xor>;
 def ALU_OR  : ALUOpType<6, or>;
-def ALU_CP  : ALUOpType<7, undef>;
+def ALU_CP  : ALUOpType<7, Z80cp>;
 
-class ALUIr<ALUOpType alu, string asmstr>
-  : IRz<0x80, (outs), (ins GR8:$src), asmstr,
-  [(set A, (alu.Node A, GR8:$src))]> {
+class ALUIr<ALUOpType alu, string asmstr, list<dag> pattern>
+  : IRz<0x80, (outs), (ins GR8:$src), asmstr, pattern> {
   ALUOpType aluType = alu;
   let Inst{5-3} = aluType.Value;
 }
-class ALUIi<ALUOpType alu, string asmstr>
-  : II8<0xC6, (outs), (ins i8imm:$src), asmstr,
-  [(set A, (alu.Node A, imm:$src))]> {
+class ALUIi<ALUOpType alu, string asmstr, list<dag> pattern>
+  : II8<0xC6, (outs), (ins i8imm:$src), asmstr, pattern> {
   ALUOpType aluType = alu;
   let Inst{5-3} = aluType.Value;
 }
 
 multiclass ALUI<ALUOpType alu, string asmstr> {
-  def r : ALUIr<alu, asmstr>;
-  def i : ALUIi<alu, asmstr>;
+  def r : ALUIr<alu, asmstr, [(set A, (alu.Node A, GR8:$src))]>;
+  def i : ALUIi<alu, asmstr, [(set A, (alu.Node A, imm:$src))]>;
+}
+
+multiclass ALUICP<ALUOpType alu, string asmstr> {
+  def r : ALUIr<alu, asmstr, [(Z80cp A, GR8:$src)]>;
+  def i : ALUIi<alu, asmstr, [(Z80cp A, imm:$src)]>;
 }
 
 class RSOpType<bits<3> val, SDNode ops> {
@@ -131,6 +172,8 @@ let Uses = [A], Defs = [A, FLAGS] in {
   defm SUB8 : ALUI<ALU_SUB, "sub\t{$src}">;
   let Uses = [A, FLAGS] in
   defm SBC8 : ALUI<ALU_SBC, "sbc\t{a, $src}">;
+  let Defs = [FLAGS] in
+  defm CP8  : ALUICP<ALU_CP, "cp\t{a, $src}">;
 }
 
 let Defs = [FLAGS] in {

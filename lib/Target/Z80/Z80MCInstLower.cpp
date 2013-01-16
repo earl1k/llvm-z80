@@ -14,6 +14,7 @@
 
 #include "Z80MCInstLower.h"
 #include "Z80AsmPrinter.h"
+#include "llvm/MC/MCExpr.h"
 using namespace llvm;
 
 Z80MCInstLower::Z80MCInstLower(Mangler *mang, const MachineFunction &mf,
@@ -43,6 +44,10 @@ void Z80MCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const
       break;
     case MachineOperand::MO_Immediate:
       MCOp = MCOperand::CreateImm(MO.getImm());
+      break;
+    case MachineOperand::MO_MachineBasicBlock:
+      MCOp = MCOperand::CreateExpr(MCSymbolRefExpr::Create(
+        MO.getMBB()->getSymbol(), Ctx));
       break;
     }
     OutMI.addOperand(MCOp);

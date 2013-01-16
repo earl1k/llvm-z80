@@ -30,6 +30,7 @@ namespace llvm {
     static const char *getRegisterName(unsigned RegNo);
 
     void printOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+    void printCCOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   }; // end class Z80InstPrinter
 } // end namespace llvm
 

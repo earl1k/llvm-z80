@@ -27,7 +27,10 @@ namespace llvm {
       FIRST_NUMBER = ISD::BUILTIN_OP_END,
       RET,
       SET_FLAGS,
-      RLC, RRC, RL, RR, SLA, SRA, SLL, SRL
+      RLC, RRC, RL, RR, SLA, SRA, SLL, SRL,
+      CP,
+      SELECT_CC,
+      BR_CC
     }; // end NodeType
   } // end namespace Z80ISD
 
@@ -50,6 +53,12 @@ namespace llvm {
     SDValue LowerSUB(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerShifts(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBinaryOp(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerSelectCC(SDValue Op, SelectionDAG &DAG) const;
+
+    MachineBasicBlock* EmitInstrWithCustomInserter(MachineInstr *MI,
+      MachineBasicBlock *MBB) const;
+    MachineBasicBlock* EmitSelectInstr(MachineInstr *MI,
+      MachineBasicBlock *MBB) const;
   private:
     virtual SDValue
       LowerFormalArguments(SDValue Chain,
@@ -63,6 +72,12 @@ namespace llvm {
         const SmallVectorImpl<ISD::OutputArg> &Outs,
         const SmallVectorImpl<SDValue> &OutVals,
         DebugLoc dl, SelectionDAG &DAG) const;
+
+    // Emit nodes that will be selected as "cp Op0, Op1", or something
+    // equivalent, for use with given LLVM condition code and return
+    // equivalent Z80 condition code.
+    SDValue EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &Z80CC,
+      ISD::CondCode CC, DebugLoc dl, SelectionDAG &DAG) const;
   }; // end class Z80TargetLowering
 } // end namespace llvm
 

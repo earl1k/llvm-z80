@@ -22,6 +22,20 @@
 #include "Z80GenInstrInfo.inc"
 
 namespace llvm {
+  namespace Z80 {
+    enum CondCode {
+      COND_NZ = 0,
+      COND_Z  = 1,
+      COND_NC = 2,
+      COND_C  = 3,
+      COND_PO = 4,
+      COND_PE = 5,
+      COND_P  = 6,
+      COND_M  = 7,
+
+      COND_INVALID
+    };
+  } // end namespace Z80
   class Z80InstrInfo : public Z80GenInstrInfo {
     const Z80RegisterInfo RI;
     Z80TargetMachine &TM;

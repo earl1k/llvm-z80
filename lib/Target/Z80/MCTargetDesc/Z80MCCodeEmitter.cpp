@@ -13,6 +13,7 @@
 
 #include "MCTargetDesc/Z80MCTargetDesc.h"
 #include "MCTargetDesc/Z80BaseInfo.h"
+#include "MCTargetDesc/Z80FixupKinds.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInstrInfo.h"
@@ -50,6 +51,9 @@ namespace llvm {
 
     // getMachineOpValue - Return binary encoding of operand.
     unsigned getMachineOpValue(const MCInst &MI, const MCOperand &MO,
+      SmallVectorImpl<MCFixup> &Fixups) const;
+    // getBREncoding
+    unsigned getBREncoding(const MCInst &MI, unsigned OpNo,
       SmallVectorImpl<MCFixup> &Fixups) const;
   }; // end class Z80MCCodeEmitter
 } // end namespace llvm
@@ -89,6 +93,15 @@ unsigned Z80MCCodeEmitter::getMachineOpValue(const MCInst &MI,
   {
     return static_cast<unsigned>(MO.getImm());
   }
+}
+
+unsigned Z80MCCodeEmitter::getBREncoding(const MCInst &MI, unsigned OpNo,
+  SmallVectorImpl<MCFixup> &Fixups) const
+{
+  const MCOperand &MO = MI.getOperand(OpNo);
+  if (MO.isReg() || MO.isImm()) return getMachineOpValue(MI, MO, Fixups);
+
+  return 0;
 }
 
 #include "Z80GenMCCodeEmitter.inc"

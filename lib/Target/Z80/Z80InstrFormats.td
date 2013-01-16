@@ -60,6 +60,12 @@ class Z80Inst<dag outs, dag ins, string asmstr>
   let AsmString = asmstr;
 }
 
+class PseudoI<dag outs, dag ins, list<dag> pattern>
+  : Z80Inst<outs, ins, ""> {
+  let isPseudo = 1;
+  let Pattern = pattern;
+}
+
 //===----------------------------------------------------------------------===//
 // Simple Instruction
 //===----------------------------------------------------------------------===//
@@ -89,6 +95,16 @@ class IRyI8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   : IRy<opc, outs, ins, asmstr, pattern, 2> {
   bits<8> imm;
   let Inst{15-8} = imm;
+}
+
+//===----------------------------------------------------------------------===//
+// Simple Instruction with R[y], I[16]
+//===----------------------------------------------------------------------===//
+
+class IRyI16<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+  : IRy<opc, outs, ins, asmstr, pattern, 3> {
+  bits<16> imm;
+  let Inst{23-8} = imm;
 }
 
 //===----------------------------------------------------------------------===//
@@ -135,8 +151,18 @@ class IRpI16<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
 // Simple Instruction with I[8]
 //===----------------------------------------------------------------------===//
 
-class II8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern,
-  int size = 1> : I<opc, outs, ins, asmstr, pattern, 2> {
+class II8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+  : I<opc, outs, ins, asmstr, pattern, 2> {
   bits<8> imm;
   let Inst{15-8} = imm;
+}
+
+//===----------------------------------------------------------------------===//
+// Simple Instruction with I[16]
+//===----------------------------------------------------------------------===//
+
+class II16<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+  : I<opc, outs, ins, asmstr, pattern, 3> {
+  bits<16> imm;
+  let Inst{23-8} = imm;
 }

@@ -15,6 +15,7 @@
 #include "Z80ISelLowering.h"
 #include "Z80.h"
 #include "Z80TargetMachine.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/Support/raw_ostream.h"
@@ -43,6 +44,8 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
   setOperationAction(ISD::AND,  MVT::i16, Custom);
   setOperationAction(ISD::OR,   MVT::i16, Custom);
   setOperationAction(ISD::XOR,  MVT::i16, Custom);
+
+  setOperationAction(ISD::SELECT_CC, MVT::i8, Custom);
 }
 
 //===----------------------------------------------------------------------===//
@@ -169,6 +172,7 @@ SDValue Z80TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const
   case ISD::AND:
   case ISD::OR:
   case ISD::XOR:         return LowerBinaryOp(Op, DAG);
+  case ISD::SELECT_CC:   return LowerSelectCC(Op, DAG);
   default:
     llvm_unreachable("unimplemented operation");
   }
@@ -189,6 +193,9 @@ const char *Z80TargetLowering::getTargetNodeName(unsigned Opcode) const
   case Z80ISD::SRA:       return "Z80ISD::SRA";
   case Z80ISD::SLL:       return "Z80ISD::SLL";
   case Z80ISD::SRL:       return "Z80ISD::SRL";
+  case Z80ISD::CP:        return "Z80ISD::CP";
+  case Z80ISD::SELECT_CC: return "Z80ISD::SELECT_CC";
+  case Z80ISD::BR_CC:     return "Z80ISD::BR_CC";
   }
 }
 
@@ -333,4 +340,103 @@ SDValue Z80TargetLowering::LowerBinaryOp(SDValue Op, SelectionDAG &DAG) const
   Res = DAG.getTargetInsertSubreg(Z80::subreg_hi, dl, VT, Res, HI);
 
   return Res;
+}
+
+SDValue Z80TargetLowering::EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &Z80CC,
+  ISD::CondCode CC, DebugLoc dl, SelectionDAG &DAG) const
+{
+  assert(!LHS.getValueType().isFloatingPoint() && "We don't handle FP yet");
+
+  Z80::CondCode TCC = Z80::COND_INVALID;
+  switch (CC)
+  {
+  case ISD::SETUNE:
+  case ISD::SETNE:
+    TCC = Z80::COND_NZ;
+    break;
+  case ISD::SETUEQ:
+  case ISD::SETEQ:
+    TCC = Z80::COND_Z;
+    break;
+  case ISD::SETUGT:
+    std::swap(LHS, RHS);
+  case ISD::SETULT:
+    TCC = Z80::COND_C;
+    break;
+  case ISD::SETULE:
+    std::swap(LHS, RHS);
+  case ISD::SETUGE:
+    TCC = Z80::COND_NC;
+    break;
+  default: llvm_unreachable("Invalid integer condition!");
+  }
+  Z80CC = DAG.getConstant(TCC, MVT::i8);
+  return DAG.getNode(Z80ISD::CP, dl, MVT::Glue, LHS, RHS);
+}
+
+SDValue Z80TargetLowering::LowerSelectCC(SDValue Op, SelectionDAG &DAG) const
+{
+  DebugLoc dl      = Op.getDebugLoc();
+  EVT VT           = Op.getValueType();
+  SDValue LHS      = Op.getOperand(0);
+  SDValue RHS      = Op.getOperand(1);
+  SDValue TrueV    = Op.getOperand(2);
+  SDValue FalseV   = Op.getOperand(3);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
+
+  SDValue Z80CC;
+  SDValue Flag = EmitCMP(LHS, RHS, Z80CC, CC, dl, DAG);
+
+  return DAG.getNode(Z80ISD::SELECT_CC, dl, VT, TrueV, FalseV, Z80CC, Flag);
+}
+
+MachineBasicBlock* Z80TargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
+  MachineBasicBlock *MBB) const
+{
+  unsigned Opc = MI->getOpcode();
+
+  switch (Opc)
+  {
+  case Z80::SELECT8: return EmitSelectInstr(MI, MBB);
+  default: llvm_unreachable("Invalid Custom Inserter Instruction");
+  }
+}
+
+MachineBasicBlock* Z80TargetLowering::EmitSelectInstr(MachineInstr *MI,
+  MachineBasicBlock *MBB) const
+{
+  DebugLoc dl = MI->getDebugLoc();
+  const TargetInstrInfo &TII = *getTargetMachine().getInstrInfo();
+
+  const BasicBlock *LLVM_BB = MBB->getBasicBlock();
+  MachineFunction::iterator I = MBB;
+  I++;
+
+  MachineBasicBlock *thisMBB = MBB;
+  MachineFunction *MF = MBB->getParent();
+  MachineBasicBlock *copy0MBB = MF->CreateMachineBasicBlock(LLVM_BB);
+  MachineBasicBlock *copy1MBB = MF->CreateMachineBasicBlock(LLVM_BB);
+  MF->insert(I, copy0MBB);
+  MF->insert(I, copy1MBB);
+
+  copy1MBB->splice(copy1MBB->begin(), MBB,
+    llvm::next(MachineBasicBlock::iterator(MI)), MBB->end());
+  MBB->addSuccessor(copy0MBB);
+  MBB->addSuccessor(copy1MBB);
+
+  BuildMI(MBB, dl, TII.get(Z80::JPCC))
+    .addImm(MI->getOperand(3).getImm())
+    .addMBB(copy1MBB);
+
+  MBB = copy0MBB;
+  MBB->addSuccessor(copy1MBB);
+
+  MBB = copy1MBB;
+  BuildMI(*MBB, MBB->begin(), dl, TII.get(Z80::PHI),
+    MI->getOperand(0).getReg())
+    .addReg(MI->getOperand(1).getReg()).addMBB(thisMBB)
+    .addReg(MI->getOperand(2).getReg()).addMBB(copy0MBB);
+
+  MI->eraseFromParent();
+  return MBB;
 }
