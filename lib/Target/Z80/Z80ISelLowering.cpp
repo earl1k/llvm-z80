@@ -184,7 +184,8 @@ const char *Z80TargetLowering::getTargetNodeName(unsigned Opcode) const
   {
   default: return NULL;
   case Z80ISD::RET:       return "Z80ISD::RET";
-  case Z80ISD::SET_FLAGS: return "Z80ISD::SET_FLAGS";
+  case Z80ISD::SCF:       return "Z80ISD::SCF";
+  case Z80ISD::CCF:       return "Z80ISD::CCF";
   case Z80ISD::RLC:       return "Z80ISD::RLC";
   case Z80ISD::RRC:       return "Z80ISD::RRC";
   case Z80ISD::RL:        return "Z80ISD::RL";
@@ -245,11 +246,12 @@ SDValue Z80TargetLowering::LowerSUB(SDValue Op, SelectionDAG &DAG) const
   assert(VT == MVT::i16 && "Only i16 SUB can by lowered");
 
   // Generating next code:
-  // AND A - clear carry flag (SET_FLAGS Node)
+  // SCF, CCF - clear carry flag (FIXME: must be replaced by AND A)
   // SBC HL, $Rp - sub without carry
-  SDValue Flag = DAG.getNode(Z80ISD::SET_FLAGS, dl, DAG.getVTList(MVT::i8, MVT::Glue)).getValue(1);
-  SDValue Sub  = DAG.getNode(ISD::SUBE, dl, VT, Op0, Op1, Flag);
-  return Sub;
+  SDValue Flag;
+  Flag = DAG.getNode(Z80ISD::SCF, dl, MVT::Glue);
+  Flag = DAG.getNode(Z80ISD::CCF, dl, MVT::Glue, Flag);
+  return DAG.getNode(ISD::SUBE, dl, VT, Op0, Op1, Flag);
 }
 
 SDValue Z80TargetLowering::LowerShifts(SDValue Op, SelectionDAG &DAG) const

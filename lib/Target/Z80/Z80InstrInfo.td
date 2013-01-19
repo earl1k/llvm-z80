@@ -31,7 +31,6 @@ def SDT_Z80BrCC     : SDTypeProfile<0, 2, [SDTCisVT<0, i8>,
 //===----------------------------------------------------------------------===//
 def Z80ret       : SDNode<"Z80ISD::RET", SDTNone,
                  [SDNPHasChain, SDNPOptInGlue]>;
-def Z80set_flags : SDNode<"Z80ISD::SET_FLAGS", SDTNone, [SDNPOutGlue]>;
 def Z80rlc       : SDNode<"Z80ISD::RLC", SDTIntUnaryOp, [SDNPOutGlue]>;
 def Z80rrc       : SDNode<"Z80ISD::RRC", SDTIntUnaryOp, [SDNPOutGlue]>;
 def Z80rl        : SDNode<"Z80ISD::RL",  SDTIntUnaryOp,
@@ -47,6 +46,8 @@ def Z80selectcc  : SDNode<"Z80ISD::SELECT_CC", SDT_Z80SelectCC,
                  [SDNPInGlue]>;
 def Z80brcc      : SDNode<"Z80ISD::BR_CC", SDT_Z80BrCC,
                  [SDNPHasChain, SDNPInGlue]>;
+def Z80scf       : SDNode<"Z80ISD::SCF", SDTNone, [SDNPOutGlue]>;
+def Z80ccf       : SDNode<"Z80ISD::CCF", SDTNone, [SDNPOutGlue, SDNPInGlue]>;
 //===----------------------------------------------------------------------===//
 // Operand Definitions.
 //===----------------------------------------------------------------------===//
@@ -62,6 +63,12 @@ def cc : Operand<i8> {
 //===----------------------------------------------------------------------===//
 // Instruction list.
 //===----------------------------------------------------------------------===//
+
+let Defs = [FLAGS] in {
+  def SCF : I<0x37, (outs), (ins), "scf", [(Z80scf)]>;
+  let Uses = [FLAGS] in
+  def CCF : I<0x3F, (outs), (ins), "ccf", [(Z80ccf)]>;
+}
 
 let usesCustomInserter = 1 in {
   def SELECT8 : PseudoI<(outs GR8:$dst), (ins GR8:$src, GR8:$src2, cc:$cc),
@@ -209,8 +216,6 @@ def : Pat<(addc HL, GR16:$src), (ADD16r GR16:$src)>;
 
 def : Pat<(subc A, GR8:$src), (SUB8r GR8:$src)>;
 def : Pat<(subc A, imm:$src), (SUB8r imm:$src)>;
-
-def : Pat<(Z80set_flags), (AND8r A)>;
 
 //===----------------------------------------------------------------------===//
 // Non-Instruction Patterns.

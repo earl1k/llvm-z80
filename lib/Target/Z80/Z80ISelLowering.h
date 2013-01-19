@@ -26,7 +26,7 @@ namespace llvm {
     enum NodeType {
       FIRST_NUMBER = ISD::BUILTIN_OP_END,
       RET,
-      SET_FLAGS,
+      SCF, CCF,
       RLC, RRC, RL, RR, SLA, SRA, SLL, SRL,
       CP,
       SELECT_CC,
