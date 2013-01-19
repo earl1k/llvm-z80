@@ -16,6 +16,10 @@
 
 #include "llvm/Support/SwapByteOrder.h"
 
+#ifdef _MSC_VER
+# include <intrin.h>
+#endif
+
 namespace llvm {
 
 // NOTE: The following support functions use the _32/_64 extensions instead of

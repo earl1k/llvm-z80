@@ -148,20 +148,20 @@ symbol table entries. Here is an example of the "hello world" module:
 
 .. code-block:: llvm
 
-    ; Declare the string constant as a global constant. 
-    @.str = private unnamed_addr constant [13 x i8] c"hello world\0A\00" 
+    ; Declare the string constant as a global constant. 
+    @.str = private unnamed_addr constant [13 x i8] c"hello world\0A\00" 
 
-    ; External declaration of the puts function 
-    declare i32 @puts(i8* nocapture) nounwind 
+    ; External declaration of the puts function 
+    declare i32 @puts(i8* nocapture) nounwind 
 
     ; Definition of main function
-    define i32 @main() {   ; i32()*  
-      ; Convert [13 x i8]* to i8  *... 
+    define i32 @main() {   ; i32()*  
+      ; Convert [13 x i8]* to i8  *... 
       %cast210 = getelementptr [13 x i8]* @.str, i64 0, i64 0
 
-      ; Call puts function to write out the string to stdout. 
+      ; Call puts function to write out the string to stdout. 
       call i32 @puts(i8* %cast210)
-      ret i32 0 
+      ret i32 0 
     }
 
     ; Named metadata
@@ -1554,7 +1554,7 @@ Examples:
 +---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | ``i32 (i32)``                   | function taking an ``i32``, returning an ``i32``                                                                                                                    |
 +---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``float (i16, i32 *) *``        | :ref:`Pointer <t_pointer>` to a function that takes an ``i16`` and a :ref:`pointer <t_pointer>` to ``i32``, returning ``float``.                                    |
+| ``float (i16, i32 *) *``        | :ref:`Pointer <t_pointer>` to a function that takes an ``i16`` and a :ref:`pointer <t_pointer>` to ``i32``, returning ``float``.                                    |
 +---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | ``i32 (i8*, ...)``              | A vararg function that takes at least one :ref:`pointer <t_pointer>` to ``i8`` (char in C), which returns an integer. This is the signature for ``printf`` in LLVM. |
 +---------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -1605,7 +1605,7 @@ Examples:
 +------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | ``{ i32, i32, i32 }``        | A triple of three ``i32`` values                                                                                                                                                      |
 +------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``{ float, i32 (i32) * }``   | A pair, where the first element is a ``float`` and the second element is a :ref:`pointer <t_pointer>` to a :ref:`function <t_function>` that takes an ``i32``, returning an ``i32``.  |
+| ``{ float, i32 (i32) * }``   | A pair, where the first element is a ``float`` and the second element is a :ref:`pointer <t_pointer>` to a :ref:`function <t_function>` that takes an ``i32``, returning an ``i32``.  |
 +------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | ``<{ i8, i32 }>``            | A packed struct known to be 5 bytes in size.                                                                                                                                          |
 +------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -1754,7 +1754,7 @@ and disassembly do not cause any bits to change in the constants.
 When using the hexadecimal form, constants of types half, float, and
 double are represented using the 16-digit form shown above (which
 matches the IEEE754 representation for double); half and float values
-must, however, be exactly representable as IEE754 half and single
+must, however, be exactly representable as IEEE 754 half and single
 precision, respectively. Hexadecimal format is always used for long
 double, and there are three forms of long double. The 80-bit format used
 by x86 is represented as ``0xK`` followed by 20 hexadecimal digits. The
@@ -2508,6 +2508,16 @@ The following behaviors are supported:
            other module. If both modules specify **Override**, but the values
            differ, an error will be emitted.
 
+   * - 5
+     - **Append**
+           Appends the two values, which are required to be metadata nodes.
+
+   * - 6
+     - **AppendUnique**
+           Appends the two values, which are required to be metadata
+           nodes. However, duplicate entries in the second list are dropped
+           during the append operation.
+
 It is an error for a particular unique flag ID to have multiple behaviors,
 except in the case of **Require** (which adds restrictions on another metadata
 value) or **Override**.
@@ -2568,25 +2578,25 @@ following key-value pairs:
    * - Key
      - Value
 
-   * - ``Objective-C Version``
+   * - ``Objective-C Version``
      - **[Required]** — The Objective-C ABI version. Valid values are 1 and 2.
 
-   * - ``Objective-C Image Info Version``
+   * - ``Objective-C Image Info Version``
      - **[Required]** — The version of the image info section. Currently
        always 0.
 
-   * - ``Objective-C Image Info Section``
+   * - ``Objective-C Image Info Section``
      - **[Required]** — The section to place the metadata. Valid values are
        ``"__OBJC, __image_info, regular"`` for Objective-C ABI version 1, and
        ``"__DATA,__objc_imageinfo, regular, no_dead_strip"`` for
        Objective-C ABI version 2.
 
-   * - ``Objective-C Garbage Collection``
+   * - ``Objective-C Garbage Collection``
      - **[Required]** — Specifies whether garbage collection is supported or
        not. Valid values are 0, for no garbage collection, and 2, for garbage
        collection supported.
 
-   * - ``Objective-C GC Only``
+   * - ``Objective-C GC Only``
      - **[Optional]** — Specifies that only garbage collection is supported.
        If present, its value must be 6. This flag requires that the
        ``Objective-C Garbage Collection`` flag have the value 2.
@@ -2599,6 +2609,40 @@ Some important flag interactions:
    ``Objective-C Garbage Collection`` flag set to 0.
 -  A module with ``Objective-C Garbage Collection`` set to 0 cannot be
    merged with a module with ``Objective-C GC Only`` set to 6.
+
+Automatic Linker Flags Module Flags Metadata
+--------------------------------------------
+
+Some targets support embedding flags to the linker inside individual object
+files. Typically this is used in conjunction with language extensions which
+allow source files to explicitly declare the libraries they depend on, and have
+these automatically be transmitted to the linker via object files.
+
+These flags are encoded in the IR using metadata in the module flags section,
+using the ``Linker Options`` key. The merge behavior for this flag is required
+to be ``AppendUnique``, and the value for the key is expected to be a metadata
+node which should be a list of other metadata nodes, each of which should be a
+list of metadata strings defining linker options.
+
+For example, the following metadata section specifies two separate sets of
+linker options, presumably to link against ``libz`` and the ``Cocoa``
+framework::
+
+    !0 = metadata !{ i32 6, metadata !"Linker Options", 
+       metadata !{
+          metadata !{ metadata !"-lz" },
+          metadata !{ metadata !"-framework", metadata !"Cocoa" } } }
+    !llvm.module.flags = !{ !0 }
+
+The metadata encoding as lists of lists of options, as opposed to a collapsed
+list of options, is chosen so that the IR encoding can use multiple option
+strings to specify e.g., a single library, while still having that specifier be
+preserved as an atomic element that can be recognized by a target specific
+assembly writer or object file emitter.
+
+Each individual option is required to be either a valid option for the target's
+linker, or an option that is reserved by the target specific assembly writer or
+object file emitter. No other aspect of these options is defined by the IR.
 
 Intrinsic Global Variables
 ==========================
@@ -7679,8 +7723,10 @@ Overview:
 """""""""
 
 The '``llvm.fmuladd.*``' intrinsic functions represent multiply-add
-expressions that can be fused if the code generator determines that the
-fused expression would be legal and efficient.
+expressions that can be fused if the code generator determines that (a) the
+target instruction set has support for a fused operation, and (b) that the
+fused operation is more efficient than the equivalent, separate pair of mul
+and add instructions.
 
 Arguments:
 """"""""""

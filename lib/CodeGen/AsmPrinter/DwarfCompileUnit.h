@@ -86,6 +86,9 @@ class CompileUnit {
   /// DWARF version doesn't handle the language, return -1.
   int64_t getDefaultLowerBound() const;
 
+  /// getOrCreateContextDIE - Get context owner's DIE.
+  DIE *getOrCreateContextDIE(DIDescriptor Context);
+
 public:
   CompileUnit(unsigned UID, unsigned L, DIE *D, AsmPrinter *A, DwarfDebug *DW,
               DwarfUnits *);
@@ -206,6 +209,16 @@ public:
   ///
   void addLabel(DIE *Die, unsigned Attribute, unsigned Form,
                 const MCSymbol *Label);
+
+  /// addLabelAddress - Add a dwarf label attribute data and value using
+  /// either DW_FORM_addr or DW_FORM_GNU_addr_index.
+  ///
+  void addLabelAddress(DIE *Die, unsigned Attribute, MCSymbol *Label);
+
+  /// addOpAddress - Add a dwarf op address data and value using the
+  /// form given and an op of either DW_FORM_addr or DW_FORM_GNU_addr_index.
+  ///
+  void addOpAddress(DIE *Die, MCSymbol *Label);
 
   /// addDelta - Add a label delta attribute data and value.
   ///
@@ -338,6 +351,9 @@ public:
 
   /// createMemberDIE - Create new member DIE.
   DIE *createMemberDIE(DIDerivedType DT);
+
+  /// createStaticMemberDIE - Create new static data member DIE.
+  DIE *createStaticMemberDIE(DIDerivedType DT);
 
 private:
 

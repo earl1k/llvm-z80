@@ -21,19 +21,68 @@
 
 ; CHECK: .debug_info contents:
 ; CHECK: DW_TAG_compile_unit
-; CHECK: DW_AT_GNU_dwo_name [DW_FORM_strp] ( .debug_str[0x00000000] = "baz.c")
+; CHECK: DW_AT_GNU_dwo_name [DW_FORM_strp] ( .debug_str[0x00000000] = "baz.dwo")
+; CHECK: DW_AT_GNU_addr_base [DW_FORM_sec_offset]                   (0x00000000)
 ; CHECK: DW_AT_low_pc [DW_FORM_addr]       (0x0000000000000000)
-; CHECK: DW_AT_stmt_list [DW_FORM_data4]   (0x00000000)
-; CHECK: DW_AT_comp_dir [DW_FORM_strp]     ( .debug_str[0x00000006] = "/usr/local/google/home/echristo/tmp")
+; CHECK: DW_AT_stmt_list [DW_FORM_sec_offset]   (0x00000000)
+; CHECK: DW_AT_comp_dir [DW_FORM_strp]     ( .debug_str[0x00000008] = "/usr/local/google/home/echristo/tmp")
+
+; CHECK: .debug_str contents:
+; CHECK: 0x00000000: "baz.dwo"
+; CHECK: 0x00000008: "/usr/local/google/home/echristo/tmp"
+
+; Check that we're using the right forms.
+; CHECK: .debug_abbrev.dwo contents:
+; CHECK: Abbrev table for offset: 0x00000000
+; CHECK: [1] DW_TAG_compile_unit DW_CHILDREN_yes
+; CHECK: DW_AT_producer  DW_FORM_GNU_str_index
+; CHECK: DW_AT_language  DW_FORM_data2
+; CHECK: DW_AT_name      DW_FORM_GNU_str_index
+; CHECK: DW_AT_low_pc    DW_FORM_GNU_addr_index
+; CHECK: DW_AT_stmt_list DW_FORM_data4
+; CHECK: DW_AT_comp_dir  DW_FORM_GNU_str_index
+
+; CHECK: [2] DW_TAG_base_type    DW_CHILDREN_no
+; CHECK: DW_AT_name      DW_FORM_GNU_str_index
+; CHECK: DW_AT_encoding  DW_FORM_data1
+; CHECK: DW_AT_byte_size DW_FORM_data1
+
+; CHECK: [3] DW_TAG_variable     DW_CHILDREN_no
+; CHECK: DW_AT_name      DW_FORM_GNU_str_index
+; CHECK: DW_AT_type      DW_FORM_ref4
+; CHECK: DW_AT_external  DW_FORM_flag_present
+; CHECK: DW_AT_decl_file DW_FORM_data1
+; CHECK: DW_AT_decl_line DW_FORM_data1
+; CHECK: DW_AT_location  DW_FORM_block1
 
 ; Check that the rest of the compile units have information.
-; FIXME: Strings will ultimately be a different form.
 ; CHECK: .debug_info.dwo contents:
 ; CHECK: DW_TAG_compile_unit
 ; CHECK: DW_AT_producer [DW_FORM_GNU_str_index] ( indexed (00000000) string = "clang version 3.3 (trunk 169021) (llvm/trunk 169020)")
 ; CHECK: DW_AT_language [DW_FORM_data2]        (0x000c)
 ; CHECK: DW_AT_name [DW_FORM_GNU_str_index]    ( indexed (00000001) string = "baz.c")
+; CHECK: DW_AT_low_pc [DW_FORM_GNU_addr_index]     ( indexed (00000000) address = 0x0000000000000000)
 ; CHECK: DW_TAG_base_type
 ; CHECK: DW_AT_name [DW_FORM_GNU_str_index]     ( indexed (00000004) string = "int")
 ; CHECK: DW_TAG_variable
 ; CHECK: DW_AT_name [DW_FORM_GNU_str_index]     ( indexed (00000003) string = "a")
+; CHECK: DW_AT_type [DW_FORM_ref4]       (cu + 0x0016 => {0x00000016})
+; CHECK: DW_AT_external [DW_FORM_flag_present]   (true)
+; CHECK: DW_AT_decl_file [DW_FORM_data1] (0x01)
+; CHECK: DW_AT_decl_line [DW_FORM_data1] (0x01)
+; CHECK: DW_AT_location [DW_FORM_block1] (<0x02> fb 01 )
+
+
+; CHECK: .debug_str.dwo contents:
+; CHECK: 0x00000000: "clang version 3.3 (trunk 169021) (llvm/trunk 169020)"
+; CHECK: 0x00000035: "baz.c"
+; CHECK: 0x0000003b: "/usr/local/google/home/echristo/tmp"
+; CHECK: 0x0000005f: "a"
+; CHECK: 0x00000061: "int"
+
+; CHECK: .debug_str_offsets.dwo contents:
+; CHECK: 0x00000000: 00000000
+; CHECK: 0x00000004: 00000035
+; CHECK: 0x00000008: 0000003b
+; CHECK: 0x0000000c: 0000005f
+; CHECK: 0x00000010: 00000061

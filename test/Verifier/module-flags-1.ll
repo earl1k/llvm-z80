@@ -31,7 +31,30 @@
 !8 = metadata !{ i32 2, metadata !"foo", i32 50 }
 ; CHECK-NOT: module flag identifiers must be unique
 !9 = metadata !{ i32 2, metadata !"bar", i32 51 }
-!10 = metadata !{ i32 3, metadata !"bar", i32 51 }
+!10 = metadata !{ i32 3, metadata !"bar", metadata !{ metadata !"bar", i32 51 } }
+
+; Check that any 'append'-type module flags are valid.
+; CHECK: invalid value for 'append'-type module flag (expected a metadata node)
+!16 = metadata !{ i32 5, metadata !"flag-2", i32 56 }
+; CHECK: invalid value for 'append'-type module flag (expected a metadata node)
+!17 = metadata !{ i32 5, metadata !"flag-3", i32 57 }
+; CHECK-NOT: invalid value for 'append'-type module flag (expected a metadata node)
+!18 = metadata !{ i32 5, metadata !"flag-4", metadata !{ i32 57 } }
+
+; Check that any 'require' module flags are valid.
+; CHECK: invalid requirement on flag, flag is not present in module
+!11 = metadata !{ i32 3, metadata !"bar",
+     metadata !{ metadata !"no-such-flag", i32 52 } }
+; CHECK: invalid requirement on flag, flag does not have the required value
+!12 = metadata !{ i32 1, metadata !"flag-0", i32 53 }
+!13 = metadata !{ i32 3, metadata !"bar",
+     metadata !{ metadata !"flag-0", i32 54 } }
+; CHECK-NOT: invalid requirement on flag, flag is not present in module
+; CHECK-NOT: invalid requirement on flag, flag does not have the required value
+!14 = metadata !{ i32 1, metadata !"flag-1", i32 55 }
+!15 = metadata !{ i32 3, metadata !"bar",
+     metadata !{ metadata !"flag-1", i32 55 } }
 
 !llvm.module.flags = !{
-  !0, !1, !2, !3, !4, !5, !6, !7, !8, !9, !10 }
+  !0, !1, !2, !3, !4, !5, !6, !7, !8, !9, !10, !11, !12, !13, !14, !15,
+  !16, !17, !18 }

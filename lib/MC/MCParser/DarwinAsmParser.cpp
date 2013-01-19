@@ -26,10 +26,11 @@ namespace {
 /// \brief Implementation of directive handling which is shared across all
 /// Darwin targets.
 class DarwinAsmParser : public MCAsmParserExtension {
-  template<bool (DarwinAsmParser::*Handler)(StringRef, SMLoc)>
+  template<bool (DarwinAsmParser::*HandlerMethod)(StringRef, SMLoc)>
   void AddDirectiveHandler(StringRef Directive) {
-    getParser().AddDirectiveHandler(this, Directive,
-                                    HandleDirective<DarwinAsmParser, Handler>);
+    MCAsmParser::ExtensionDirectiveHandler Handler = std::make_pair(
+        this, HandleDirective<DarwinAsmParser, HandlerMethod>);
+    getParser().AddDirectiveHandler(Directive, Handler);
   }
 
   bool ParseSectionSwitch(const char *Segment, const char *Section,
@@ -50,8 +51,10 @@ public:
     AddDirectiveHandler<&DarwinAsmParser::ParseDirectiveDumpOrLoad>(".dump");
     AddDirectiveHandler<&DarwinAsmParser::ParseDirectiveDumpOrLoad>(".load");
     AddDirectiveHandler<&DarwinAsmParser::ParseDirectiveSection>(".section");
-    AddDirectiveHandler<&DarwinAsmParser::ParseDirectivePushSection>(".pushsection");
-    AddDirectiveHandler<&DarwinAsmParser::ParseDirectivePopSection>(".popsection");
+    AddDirectiveHandler<&DarwinAsmParser::ParseDirectivePushSection>(
+      ".pushsection");
+    AddDirectiveHandler<&DarwinAsmParser::ParseDirectivePopSection>(
+      ".popsection");
     AddDirectiveHandler<&DarwinAsmParser::ParseDirectivePrevious>(".previous");
     AddDirectiveHandler<&DarwinAsmParser::ParseDirectiveSecureLogUnique>(
       ".secure_log_unique");
@@ -60,52 +63,100 @@ public:
     AddDirectiveHandler<&DarwinAsmParser::ParseDirectiveTBSS>(".tbss");
     AddDirectiveHandler<&DarwinAsmParser::ParseDirectiveZerofill>(".zerofill");
 
-    AddDirectiveHandler<&DarwinAsmParser::ParseDirectiveDataRegion>(".data_region");
-    AddDirectiveHandler<&DarwinAsmParser::ParseDirectiveDataRegionEnd>(".end_data_region");
+    AddDirectiveHandler<&DarwinAsmParser::ParseDirectiveDataRegion>(
+      ".data_region");
+    AddDirectiveHandler<&DarwinAsmParser::ParseDirectiveDataRegionEnd>(
+      ".end_data_region");
 
     // Special section directives.
     AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveConst>(".const");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveConstData>(".const_data");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveConstructor>(".constructor");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveCString>(".cstring");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveConstData>(
+      ".const_data");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveConstructor>(
+      ".constructor");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveCString>(
+      ".cstring");
     AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveData>(".data");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveDestructor>(".destructor");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveDestructor>(
+      ".destructor");
     AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveDyld>(".dyld");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveFVMLibInit0>(".fvmlib_init0");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveFVMLibInit1>(".fvmlib_init1");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveLazySymbolPointers>(".lazy_symbol_pointer");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveLiteral16>(".literal16");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveLiteral4>(".literal4");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveLiteral8>(".literal8");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveModInitFunc>(".mod_init_func");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveModTermFunc>(".mod_term_func");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveNonLazySymbolPointers>(".non_lazy_symbol_pointer");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCCatClsMeth>(".objc_cat_cls_meth");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCCatInstMeth>(".objc_cat_inst_meth");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCCategory>(".objc_category");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCClass>(".objc_class");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCClassNames>(".objc_class_names");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCClassVars>(".objc_class_vars");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCClsMeth>(".objc_cls_meth");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCClsRefs>(".objc_cls_refs");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCInstMeth>(".objc_inst_meth");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCInstanceVars>(".objc_instance_vars");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCMessageRefs>(".objc_message_refs");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCMetaClass>(".objc_meta_class");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCMethVarNames>(".objc_meth_var_names");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCMethVarTypes>(".objc_meth_var_types");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCModuleInfo>(".objc_module_info");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCProtocol>(".objc_protocol");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCSelectorStrs>(".objc_selector_strs");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCStringObject>(".objc_string_object");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCSymbols>(".objc_symbols");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectivePICSymbolStub>(".picsymbol_stub");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveStaticConst>(".static_const");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveStaticData>(".static_data");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveSymbolStub>(".symbol_stub");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveFVMLibInit0>(
+      ".fvmlib_init0");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveFVMLibInit1>(
+      ".fvmlib_init1");
+    AddDirectiveHandler<
+      &DarwinAsmParser::ParseSectionDirectiveLazySymbolPointers>(
+        ".lazy_symbol_pointer");
+    AddDirectiveHandler<&DarwinAsmParser::ParseDirectiveLinkerOption>(
+      ".linker_option");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveLiteral16>(
+      ".literal16");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveLiteral4>(
+      ".literal4");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveLiteral8>(
+      ".literal8");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveModInitFunc>(
+      ".mod_init_func");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveModTermFunc>(
+      ".mod_term_func");
+    AddDirectiveHandler<
+      &DarwinAsmParser::ParseSectionDirectiveNonLazySymbolPointers>(
+        ".non_lazy_symbol_pointer");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCCatClsMeth>(
+      ".objc_cat_cls_meth");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCCatInstMeth>(
+      ".objc_cat_inst_meth");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCCategory>(
+      ".objc_category");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCClass>(
+      ".objc_class");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCClassNames>(
+      ".objc_class_names");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCClassVars>(
+      ".objc_class_vars");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCClsMeth>(
+      ".objc_cls_meth");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCClsRefs>(
+      ".objc_cls_refs");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCInstMeth>(
+      ".objc_inst_meth");
+    AddDirectiveHandler<
+      &DarwinAsmParser::ParseSectionDirectiveObjCInstanceVars>(
+        ".objc_instance_vars");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCMessageRefs>(
+      ".objc_message_refs");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCMetaClass>(
+      ".objc_meta_class");
+    AddDirectiveHandler<
+      &DarwinAsmParser::ParseSectionDirectiveObjCMethVarNames>(
+        ".objc_meth_var_names");
+    AddDirectiveHandler<
+      &DarwinAsmParser::ParseSectionDirectiveObjCMethVarTypes>(
+        ".objc_meth_var_types");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCModuleInfo>(
+      ".objc_module_info");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCProtocol>(
+      ".objc_protocol");
+    AddDirectiveHandler<
+      &DarwinAsmParser::ParseSectionDirectiveObjCSelectorStrs>(
+        ".objc_selector_strs");
+    AddDirectiveHandler<
+      &DarwinAsmParser::ParseSectionDirectiveObjCStringObject>(
+        ".objc_string_object");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveObjCSymbols>(
+      ".objc_symbols");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectivePICSymbolStub>(
+      ".picsymbol_stub");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveStaticConst>(
+      ".static_const");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveStaticData>(
+      ".static_data");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveSymbolStub>(
+      ".symbol_stub");
     AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveTData>(".tdata");
     AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveText>(".text");
-    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveThreadInitFunc>(".thread_init_func");
+    AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveThreadInitFunc>(
+      ".thread_init_func");
     AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveTLV>(".tlv");
 
     AddDirectiveHandler<&DarwinAsmParser::ParseSectionDirectiveIdent>(".ident");
@@ -114,6 +165,7 @@ public:
   bool ParseDirectiveDesc(StringRef, SMLoc);
   bool ParseDirectiveDumpOrLoad(StringRef, SMLoc);
   bool ParseDirectiveLsym(StringRef, SMLoc);
+  bool ParseDirectiveLinkerOption(StringRef, SMLoc);
   bool ParseDirectiveSection(StringRef, SMLoc);
   bool ParseDirectivePushSection(StringRef, SMLoc);
   bool ParseDirectivePopSection(StringRef, SMLoc);
@@ -384,6 +436,33 @@ bool DarwinAsmParser::ParseDirectiveDumpOrLoad(StringRef Directive,
     return Warning(IDLoc, "ignoring directive .dump for now");
   else
     return Warning(IDLoc, "ignoring directive .load for now");
+}
+
+/// ParseDirectiveLinkerOption
+///  ::= .linker_option "string" ( , "string" )*
+bool DarwinAsmParser::ParseDirectiveLinkerOption(StringRef IDVal, SMLoc) {
+  SmallVector<std::string, 4> Args;
+  for (;;) {
+    if (getLexer().isNot(AsmToken::String))
+      return TokError("expected string in '" + Twine(IDVal) + "' directive");
+
+    std::string Data;
+    if (getParser().ParseEscapedString(Data))
+      return true;
+
+    Args.push_back(Data);
+
+    Lex();
+    if (getLexer().is(AsmToken::EndOfStatement))
+      break;
+
+    if (getLexer().isNot(AsmToken::Comma))
+      return TokError("unexpected token in '" + Twine(IDVal) + "' directive");
+    Lex();
+  }
+
+  getStreamer().EmitLinkerOptions(Args);
+  return false;
 }
 
 /// ParseDirectiveLsym

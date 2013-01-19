@@ -243,7 +243,8 @@ namespace {
     void visitNamedMDNode(NamedMDNode &NMD);
     void visitMDNode(MDNode &MD, Function *F);
     void visitModuleFlags(Module &M);
-    void visitModuleFlag(MDNode *Op, SmallSetVector<MDString*, 16> &SeenIDs);
+    void visitModuleFlag(MDNode *Op, DenseMap<MDString*, MDNode*> &SeenIDs,
+                         SmallVectorImpl<MDNode*> &Requirements);
     void visitFunction(Function &F);
     void visitBasicBlock(BasicBlock &BB);
     using InstVisitor<Verifier>::visit;
@@ -529,15 +530,37 @@ void Verifier::visitModuleFlags(Module &M) {
   const NamedMDNode *Flags = M.getModuleFlagsMetadata();
   if (!Flags) return;
 
-  // Scan each flag.
-  SmallSetVector<MDString*, 16> SeenIDs;
+  // Scan each flag, and track the flags and requirements.
+  DenseMap<MDString*, MDNode*> SeenIDs;
+  SmallVector<MDNode*, 16> Requirements;
   for (unsigned I = 0, E = Flags->getNumOperands(); I != E; ++I) {
-    visitModuleFlag(Flags->getOperand(I), SeenIDs);
+    visitModuleFlag(Flags->getOperand(I), SeenIDs, Requirements);
+  }
+
+  // Validate that the requirements in the module are valid.
+  for (unsigned I = 0, E = Requirements.size(); I != E; ++I) {
+    MDNode *Requirement = Requirements[I];
+    MDString *Flag = cast<MDString>(Requirement->getOperand(0));
+    Value *ReqValue = Requirement->getOperand(1);
+
+    MDNode *Op = SeenIDs.lookup(Flag);
+    if (!Op) {
+      CheckFailed("invalid requirement on flag, flag is not present in module",
+                  Flag);
+      continue;
+    }
+
+    if (Op->getOperand(2) != ReqValue) {
+      CheckFailed(("invalid requirement on flag, "
+                   "flag does not have the required value"),
+                  Flag);
+      continue;
+    }
   }
 }
 
-void Verifier::visitModuleFlag(MDNode *Op, 
-                               SmallSetVector<MDString*, 16> &SeenIDs) {
+void Verifier::visitModuleFlag(MDNode *Op, DenseMap<MDString*, MDNode*>&SeenIDs,
+                               SmallVectorImpl<MDNode*> &Requirements) {
   // Each module flag should have three arguments, the merge behavior (a
   // constant int), the flag ID (an MDString), and the value.
   Assert1(Op->getNumOperands() == 3,
@@ -548,23 +571,25 @@ void Verifier::visitModuleFlag(MDNode *Op,
           "invalid behavior operand in module flag (expected constant integer)",
           Op->getOperand(0));
   unsigned BehaviorValue = Behavior->getZExtValue();
-  Assert1((Module::Error <= BehaviorValue &&
-           BehaviorValue <= Module::Override),
-          "invalid behavior operand in module flag (unexpected constant)",
-          Op->getOperand(0));
   Assert1(ID,
           "invalid ID operand in module flag (expected metadata string)",
           Op->getOperand(1));
 
-  // Unless this is a "requires" flag, check the ID is unique.
-  if (BehaviorValue != Module::Require) {
-    Assert1(SeenIDs.insert(ID),
-            "module flag identifiers must be unique (or of 'require' type)",
-            ID);
-  }
+  // Sanity check the values for behaviors with additional requirements.
+  switch (BehaviorValue) {
+  default:
+    Assert1(false,
+            "invalid behavior operand in module flag (unexpected constant)",
+            Op->getOperand(0));
+    break;
 
-  // If this is a "requires" flag, sanity check the value.
-  if (BehaviorValue == Module::Require) {
+  case Module::Error:
+  case Module::Warning:
+  case Module::Override:
+    // These behavior types accept any value.
+    break;
+
+  case Module::Require: {
     // The value should itself be an MDNode with two operands, a flag ID (an
     // MDString), and a value.
     MDNode *Value = dyn_cast<MDNode>(Op->getOperand(2));
@@ -575,6 +600,29 @@ void Verifier::visitModuleFlag(MDNode *Op,
             ("invalid value for 'require' module flag "
              "(first value operand should be a string)"),
             Value->getOperand(0));
+
+    // Append it to the list of requirements, to check once all module flags are
+    // scanned.
+    Requirements.push_back(Value);
+    break;
+  }
+
+  case Module::Append:
+  case Module::AppendUnique: {
+    // These behavior types require the operand be an MDNode.
+    Assert1(isa<MDNode>(Op->getOperand(2)),
+            "invalid value for 'append'-type module flag "
+            "(expected a metadata node)", Op->getOperand(2));
+    break;
+  }
+  }
+
+  // Unless this is a "requires" flag, check the ID is unique.
+  if (BehaviorValue != Module::Require) {
+    bool Inserted = SeenIDs.insert(std::make_pair(ID, Op)).second;
+    Assert1(Inserted,
+            "module flag identifiers must be unique (or of 'require' type)",
+            ID);
   }
 }
 
@@ -691,41 +739,61 @@ void Verifier::VerifyFunctionAttrs(FunctionType *FT,
       Assert1(Attr.Index == 1, "Attribute sret is not on first parameter!", V);
   }
 
-  Attribute FAttrs = Attrs.getFnAttributes();
-  AttrBuilder NotFn(FAttrs);
+  if (!Attrs.hasAttributes(AttributeSet::FunctionIndex))
+    return;
+
+  AttrBuilder NotFn(Attrs, AttributeSet::FunctionIndex);
   NotFn.removeFunctionOnlyAttrs();
   Assert1(!NotFn.hasAttributes(), "Attribute '" +
           Attribute::get(V->getContext(), NotFn).getAsString() +
           "' do not apply to the function!", V);
 
   // Check for mutually incompatible attributes.
-  Assert1(!((FAttrs.hasAttribute(Attribute::ByVal) &&
-             FAttrs.hasAttribute(Attribute::Nest)) ||
-            (FAttrs.hasAttribute(Attribute::ByVal) &&
-             FAttrs.hasAttribute(Attribute::StructRet)) ||
-            (FAttrs.hasAttribute(Attribute::Nest) &&
-             FAttrs.hasAttribute(Attribute::StructRet))), "Attributes "
-          "'byval, nest, and sret' are incompatible!", V);
+  Assert1(!((Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                                Attribute::ByVal) &&
+             Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                                Attribute::Nest)) ||
+            (Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                                Attribute::ByVal) &&
+             Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                                Attribute::StructRet)) ||
+            (Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                                Attribute::Nest) &&
+             Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                                Attribute::StructRet))),
+          "Attributes 'byval, nest, and sret' are incompatible!", V);
 
-  Assert1(!((FAttrs.hasAttribute(Attribute::ByVal) &&
-             FAttrs.hasAttribute(Attribute::Nest)) ||
-            (FAttrs.hasAttribute(Attribute::ByVal) &&
-             FAttrs.hasAttribute(Attribute::InReg)) ||
-            (FAttrs.hasAttribute(Attribute::Nest) &&
-             FAttrs.hasAttribute(Attribute::InReg))), "Attributes "
-          "'byval, nest, and inreg' are incompatible!", V);
+  Assert1(!((Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                                Attribute::ByVal) &&
+             Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                                Attribute::Nest)) ||
+            (Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                                Attribute::ByVal) &&
+             Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                                Attribute::InReg)) ||
+            (Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                                Attribute::Nest) &&
+             Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                                Attribute::InReg))),
+          "Attributes 'byval, nest, and inreg' are incompatible!", V);
 
-  Assert1(!(FAttrs.hasAttribute(Attribute::ZExt) &&
-            FAttrs.hasAttribute(Attribute::SExt)), "Attributes "
-          "'zeroext and signext' are incompatible!", V);
+  Assert1(!(Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                               Attribute::ZExt) &&
+            Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                               Attribute::SExt)),
+          "Attributes 'zeroext and signext' are incompatible!", V);
 
-  Assert1(!(FAttrs.hasAttribute(Attribute::ReadNone) &&
-            FAttrs.hasAttribute(Attribute::ReadOnly)), "Attributes "
-          "'readnone and readonly' are incompatible!", V);
+  Assert1(!(Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                               Attribute::ReadNone) &&
+            Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                               Attribute::ReadOnly)),
+          "Attributes 'readnone and readonly' are incompatible!", V);
 
-  Assert1(!(FAttrs.hasAttribute(Attribute::NoInline) &&
-            FAttrs.hasAttribute(Attribute::AlwaysInline)), "Attributes "
-          "'noinline and alwaysinline' are incompatible!", V);
+  Assert1(!(Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                               Attribute::NoInline) &&
+            Attrs.hasAttribute(AttributeSet::FunctionIndex,
+                               Attribute::AlwaysInline)),
+          "Attributes 'noinline and alwaysinline' are incompatible!", V);
 }
 
 static bool VerifyAttributeCount(const AttributeSet &Attrs, unsigned Params) {
