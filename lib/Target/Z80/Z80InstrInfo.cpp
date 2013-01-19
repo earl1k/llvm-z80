@@ -80,6 +80,8 @@ MachineInstr *Z80InstrInfo::commuteInstruction(MachineInstr *MI,
   unsigned reg[2], arg[] = { 0, 0 };
 
   MachineInstr *MILoadReg = MI->getPrevNode();
+  if (MILoadReg == NULL || MILoadReg->getOpcode() != Z80::COPY) return NULL;
+
   MachineOperand &MO0 = MI->getOperand(0);
   MachineOperand &MO1 = MILoadReg->getOperand(1);
   reg[0] = MO0.getReg();

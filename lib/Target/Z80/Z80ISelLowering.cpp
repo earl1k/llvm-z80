@@ -251,7 +251,7 @@ SDValue Z80TargetLowering::LowerSUB(SDValue Op, SelectionDAG &DAG) const
   SDValue Flag;
   Flag = DAG.getNode(Z80ISD::SCF, dl, MVT::Glue);
   Flag = DAG.getNode(Z80ISD::CCF, dl, MVT::Glue, Flag);
-  return DAG.getNode(ISD::SUBE, dl, VT, Op0, Op1, Flag);
+  return DAG.getNode(ISD::SUBE, dl, DAG.getVTList(VT, MVT::Glue), Op0, Op1, Flag);
 }
 
 SDValue Z80TargetLowering::LowerShifts(SDValue Op, SelectionDAG &DAG) const
@@ -347,7 +347,10 @@ SDValue Z80TargetLowering::LowerBinaryOp(SDValue Op, SelectionDAG &DAG) const
 SDValue Z80TargetLowering::EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &Z80CC,
   ISD::CondCode CC, DebugLoc dl, SelectionDAG &DAG) const
 {
-  assert(!LHS.getValueType().isFloatingPoint() && "We don't handle FP yet");
+  EVT VT = LHS.getValueType();
+
+  assert(!VT.isFloatingPoint() && "We don't handle FP yet");
+  assert((VT == MVT::i8 || VT == MVT::i16) && "Invalid type in EmitCMP");
 
   Z80::CondCode TCC = Z80::COND_INVALID;
   switch (CC)
@@ -373,7 +376,11 @@ SDValue Z80TargetLowering::EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &Z80CC,
   default: llvm_unreachable("Invalid integer condition!");
   }
   Z80CC = DAG.getConstant(TCC, MVT::i8);
-  return DAG.getNode(Z80ISD::CP, dl, MVT::Glue, LHS, RHS);
+
+  if (VT == MVT::i8)
+    return DAG.getNode(Z80ISD::CP, dl, MVT::Glue, LHS, RHS);
+  else // MVT::i16
+    return DAG.getNode(ISD::SUBC, dl, DAG.getVTList(VT, MVT::Glue), LHS, RHS).getValue(1);
 }
 
 SDValue Z80TargetLowering::LowerSelectCC(SDValue Op, SelectionDAG &DAG) const
