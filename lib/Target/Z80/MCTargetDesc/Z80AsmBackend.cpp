@@ -56,7 +56,7 @@ namespace {
       // FIXME: Zero fill for now. That's not right, but at least will get the
       // section size right.
       for (uint64_t i = 0; i < Count; i++)
-        //OW->Write8(0);
+        OW->Write8(0);
       return true;
     }
     MCObjectWriter *createObjectWriter(raw_ostream &OS) const {
