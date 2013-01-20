@@ -71,8 +71,10 @@ let Defs = [FLAGS] in {
 }
 
 let usesCustomInserter = 1 in {
-  def SELECT8 : PseudoI<(outs GR8:$dst), (ins GR8:$src, GR8:$src2, cc:$cc),
-    [(set GR8:$dst, (Z80selectcc GR8:$src, GR8:$src2, imm:$cc))]>;
+  def SELECT8  : PseudoI<(outs GR8:$dst),  (ins GR8:$src,  GR8:$src2,  cc:$cc),
+    [(set GR8:$dst,  (Z80selectcc GR8:$src,  GR8:$src2,  imm:$cc))]>;
+  def SELECT16 : PseudoI<(outs GR16:$dst), (ins GR16:$src, GR16:$src2, cc:$cc),
+    [(set GR16:$dst, (Z80selectcc GR16:$src, GR16:$src2, imm:$cc))]>;
 }
 //===----------------------------------------------------------------------===//
 // Control Flow Instructions.

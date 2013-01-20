@@ -46,6 +46,7 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
   setOperationAction(ISD::XOR,  MVT::i16, Custom);
 
   setOperationAction(ISD::SELECT_CC, MVT::i8, Custom);
+  setOperationAction(ISD::SELECT_CC, MVT::i16, Custom);
 }
 
 //===----------------------------------------------------------------------===//
@@ -406,7 +407,8 @@ MachineBasicBlock* Z80TargetLowering::EmitInstrWithCustomInserter(MachineInstr *
 
   switch (Opc)
   {
-  case Z80::SELECT8: return EmitSelectInstr(MI, MBB);
+  case Z80::SELECT8:
+  case Z80::SELECT16: return EmitSelectInstr(MI, MBB);
   default: llvm_unreachable("Invalid Custom Inserter Instruction");
   }
 }
