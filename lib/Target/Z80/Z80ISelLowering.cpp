@@ -47,6 +47,8 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
 
   setOperationAction(ISD::SELECT_CC, MVT::i8, Custom);
   setOperationAction(ISD::SELECT_CC, MVT::i16, Custom);
+  setOperationAction(ISD::BR_CC, MVT::i8, Custom);
+  setOperationAction(ISD::BR_CC, MVT::i16, Custom);
 }
 
 //===----------------------------------------------------------------------===//
@@ -174,6 +176,7 @@ SDValue Z80TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const
   case ISD::OR:
   case ISD::XOR:         return LowerBinaryOp(Op, DAG);
   case ISD::SELECT_CC:   return LowerSelectCC(Op, DAG);
+  case ISD::BR_CC:       return LowerBrCC(Op, DAG);
   default:
     llvm_unreachable("unimplemented operation");
   }
@@ -398,6 +401,22 @@ SDValue Z80TargetLowering::LowerSelectCC(SDValue Op, SelectionDAG &DAG) const
   SDValue Flag = EmitCMP(LHS, RHS, Z80CC, CC, dl, DAG);
 
   return DAG.getNode(Z80ISD::SELECT_CC, dl, VT, TrueV, FalseV, Z80CC, Flag);
+}
+
+SDValue Z80TargetLowering::LowerBrCC(SDValue Op, SelectionDAG &DAG) const
+{
+  DebugLoc dl      = Op.getDebugLoc();
+  EVT VT           = Op.getValueType();
+  SDValue Chain    = Op.getOperand(0);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
+  SDValue LHS      = Op.getOperand(2);
+  SDValue RHS      = Op.getOperand(3);
+  SDValue Dest     = Op.getOperand(4);
+
+  SDValue Z80CC;
+  SDValue Flag = EmitCMP(LHS, RHS, Z80CC, CC, dl, DAG);
+
+  return DAG.getNode(Z80ISD::BR_CC, dl, VT, Chain, Z80CC, Dest, Flag);
 }
 
 MachineBasicBlock* Z80TargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,

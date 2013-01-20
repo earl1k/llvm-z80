@@ -130,3 +130,131 @@ MachineInstr *Z80InstrInfo::commuteInstruction(MachineInstr *MI,
   else DEBUG(dbgs() << "COMMUTING NOT NEEDED\n");
   return NULL;
 }
+
+bool Z80InstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
+  MachineBasicBlock *&TBB, MachineBasicBlock *&FBB,
+  SmallVectorImpl<MachineOperand> &Cond, bool AllowModify = false) const
+{
+  // Start from the bottom of the block and work up, examining the
+  // terminator instructions.
+  MachineBasicBlock::iterator I = MBB.end();
+
+  while (I != MBB.begin())
+  {
+    I--;
+    if (I->isDebugValue())
+      continue;
+
+    // Working from the bottom, when we see a non-terminator
+    // instruction, we're done.
+    if (!isUnpredicatedTerminator(I))
+      break;
+
+    // A terminator that isn't a branch can't easily be handled
+    // by this analisys.
+    if (!I->isBranch())
+      return true;
+
+    // Handle unconditional branches.
+    if (I->getOpcode() == Z80::JP)
+    {
+      if (!AllowModify)
+      {
+        TBB = I->getOperand(0).getMBB();
+        continue;
+      }
+
+      // If the block has any instructions after a JP, delete them.
+      while (llvm::next(I) != MBB.end())
+        llvm::next(I)->eraseFromParent();
+
+      Cond.clear();
+      FBB = 0;
+
+      // Delete the JP if it's equivalent to a fall-through.
+      if (MBB.isLayoutSuccessor(I->getOperand(0).getMBB()))
+      {
+        TBB = 0;
+        I->eraseFromParent();
+        I = MBB.end();
+        continue;
+      }
+      // TBB is used to indicate the unconditional destination.
+      TBB = I->getOperand(0).getMBB();
+      continue;
+    }
+
+    // Handle conditional branches.
+    assert(I->getOpcode() == Z80::JPCC && "Invalid conditional branch");
+    Z80::CondCode Z80CC = static_cast<Z80::CondCode>(I->getOperand(0).getImm());
+    if (Z80CC == Z80::COND_INVALID)
+      return true;
+
+    // Working from the bottom, handle the first conditional branch.
+    if (Cond.empty())
+    {
+      FBB = TBB;
+      TBB = I->getOperand(1).getMBB();
+      Cond.push_back(MachineOperand::CreateImm(Z80CC));
+      continue;
+    }
+
+    // Handle subsequent conditional branches.
+    assert(0 && "Not implemented yet!");
+  }
+  return false;
+}
+
+unsigned Z80InstrInfo::RemoveBranch(MachineBasicBlock &MBB) const
+{
+  MachineBasicBlock::iterator I = MBB.end();
+  unsigned Count = 0;
+
+  while (I != MBB.begin())
+  {
+    I--;
+    if (I->isDebugValue())
+      continue;
+    if (I->getOpcode() != Z80::JP &&
+        I->getOpcode() != Z80::JPCC)
+        break;
+    // Remove branch.
+    I->eraseFromParent();
+    I = MBB.end();
+    Count++;
+  }
+  return Count;
+}
+
+unsigned Z80InstrInfo::InsertBranch(MachineBasicBlock &MBB,
+  MachineBasicBlock *TBB, MachineBasicBlock *FBB,
+  const SmallVectorImpl<MachineOperand> &Cond,
+  DebugLoc DL) const
+{
+  // Shouldn't be a fall through.
+  assert(TBB && "InsertBranch must not be told to insert a fallthrough");
+  assert((Cond.size() == 0 || Cond.size() == 1) &&
+    "Z80 branch conditions must have one component!");
+
+  if (Cond.empty())
+  {
+    // Unconditional branch?
+    assert(FBB && "Unconditional branch with multiple successors!");
+    BuildMI(&MBB, DL, get(Z80::JP)).addMBB(TBB);
+  }
+
+  // Conditional branch.
+  unsigned Count = 0;
+  BuildMI(&MBB, DL, get(Z80::JPCC))
+    .addImm(Cond[0].getImm())
+    .addMBB(TBB);
+  Count++;
+
+  if (FBB)
+  {
+    // Two-way conditional branch. Insert the second branch.
+    BuildMI(&MBB, DL, get(Z80::JP)).addMBB(FBB);
+    Count++;
+  }
+  return Count;
+}
