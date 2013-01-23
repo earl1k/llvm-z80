@@ -16,8 +16,11 @@ namespace llvm {
   class MCAsmInfo;
   class MCContext;
   class MCInst;
+  class MCOperand;
+  class MCSymbol;
   class MachineFunction;
   class MachineInstr;
+  class MachineOperand;
   class Mangler;
   class TargetMachine;
   class Z80AsmPrinter;
@@ -33,6 +36,11 @@ namespace llvm {
     Z80MCInstLower(Mangler *mang, const MachineFunction &mf,
       Z80AsmPrinter &asmprinter);
     void Lower(const MachineInstr *MI, MCInst &OutMI) const;
+
+    MCOperand LowerSymbolOperand(const MachineOperand &MO, MCSymbol *Sym) const;
+
+    MCSymbol *GetGlobalAddressSymbol(const MachineOperand &MO) const;
+    MCSymbol *GetExternalSymbolSymbol(const MachineOperand &MO) const;
   }; // end class Z80MCInstLower
 } // end namespace llvm
 

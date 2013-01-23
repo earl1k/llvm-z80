@@ -15,6 +15,7 @@
 #include "Z80MCInstLower.h"
 #include "Z80AsmPrinter.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/Target/Mangler.h"
 using namespace llvm;
 
 Z80MCInstLower::Z80MCInstLower(Mangler *mang, const MachineFunction &mf,
@@ -49,7 +50,39 @@ void Z80MCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const
       MCOp = MCOperand::CreateExpr(MCSymbolRefExpr::Create(
         MO.getMBB()->getSymbol(), Ctx));
       break;
+    case MachineOperand::MO_GlobalAddress:
+      MCOp = LowerSymbolOperand(MO, GetGlobalAddressSymbol(MO));
+      break;
+    case MachineOperand::MO_ExternalSymbol:
+      MCOp = LowerSymbolOperand(MO, GetExternalSymbolSymbol(MO));
+      break;
     }
     OutMI.addOperand(MCOp);
   }
+}
+
+MCOperand Z80MCInstLower::LowerSymbolOperand(const MachineOperand &MO,
+  MCSymbol *Sym) const
+{
+  if (MO.getTargetFlags() != 0)
+    llvm_unreachable("Unknown target flag on GV operand");
+
+  const MCExpr *Expr = MCSymbolRefExpr::Create(Sym, Ctx);
+  return MCOperand::CreateExpr(Expr);
+}
+
+MCSymbol *Z80MCInstLower::GetGlobalAddressSymbol(
+  const MachineOperand &MO) const
+{
+  if (MO.getTargetFlags() != 0)
+    llvm_unreachable("Unknown target flag on GV operand");
+  return AsmPrinter.Mang->getSymbol(MO.getGlobal());
+}
+
+MCSymbol *Z80MCInstLower::GetExternalSymbolSymbol(
+  const MachineOperand &MO) const
+{
+  if (MO.getTargetFlags() != 0)
+    llvm_unreachable("Unknown target flag on GV operand");
+  return AsmPrinter.GetExternalSymbolSymbol(MO.getSymbolName());
 }

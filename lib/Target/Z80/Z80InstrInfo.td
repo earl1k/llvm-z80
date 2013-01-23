@@ -20,39 +20,53 @@ include "Z80InstrFormats.td"
 //===----------------------------------------------------------------------===//
 // Z80 Type Profiles.
 //===----------------------------------------------------------------------===//
-def SDT_Z80Cp       : SDTypeProfile<0, 2, [SDTCisSameAs<0, 1>]>;
-def SDT_Z80SelectCC : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
-                                           SDTCisSameAs<1, 2>,
-                                           SDTCisVT<3, i8>]>;
-def SDT_Z80BrCC     : SDTypeProfile<0, 2, [SDTCisVT<0, i8>,
+def SDT_Z80Call         : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
+def SDT_Z80CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i16>]>;
+def SDT_Z80CallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
+def SDT_Z80Cp           : SDTypeProfile<0, 2, [SDTCisSameAs<0, 1>]>;
+def SDT_Z80SelectCC     : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
+                                               SDTCisSameAs<1, 2>,
+                                               SDTCisVT<3, i8>]>;
+def SDT_Z80BrCC         : SDTypeProfile<0, 2, [SDTCisVT<0, i8>,
                                            SDTCisVT<1, OtherVT>]>;
 //===----------------------------------------------------------------------===//
 // Z80 Specific Node Definitions.
 //===----------------------------------------------------------------------===//
-def Z80ret       : SDNode<"Z80ISD::RET", SDTNone,
-                 [SDNPHasChain, SDNPOptInGlue]>;
-def Z80rlc       : SDNode<"Z80ISD::RLC", SDTIntUnaryOp, [SDNPOutGlue]>;
-def Z80rrc       : SDNode<"Z80ISD::RRC", SDTIntUnaryOp, [SDNPOutGlue]>;
-def Z80rl        : SDNode<"Z80ISD::RL",  SDTIntUnaryOp,
-                 [SDNPOutGlue, SDNPInGlue]>;
-def Z80rr        : SDNode<"Z80ISD::RR",  SDTIntUnaryOp, 
-                 [SDNPOutGlue, SDNPInGlue]>;
-def Z80sla       : SDNode<"Z80ISD::SLA", SDTIntUnaryOp, [SDNPOutGlue]>;
-def Z80sra       : SDNode<"Z80ISD::SRA", SDTIntUnaryOp, [SDNPOutGlue]>;
-def Z80sll       : SDNode<"Z80ISD::SLL", SDTIntUnaryOp, [SDNPOutGlue]>;
-def Z80srl       : SDNode<"Z80ISD::SRL", SDTIntUnaryOp, [SDNPOutGlue]>;
-def Z80cp        : SDNode<"Z80ISD::CP", SDT_Z80Cp, [SDNPOutGlue]>;
-def Z80selectcc  : SDNode<"Z80ISD::SELECT_CC", SDT_Z80SelectCC,
-                 [SDNPInGlue]>;
-def Z80brcc      : SDNode<"Z80ISD::BR_CC", SDT_Z80BrCC,
-                 [SDNPHasChain, SDNPInGlue]>;
-def Z80scf       : SDNode<"Z80ISD::SCF", SDTNone, [SDNPOutGlue]>;
-def Z80ccf       : SDNode<"Z80ISD::CCF", SDTNone, [SDNPOutGlue, SDNPInGlue]>;
+def Z80call          : SDNode<"Z80ISD::CALL", SDT_Z80Call,
+                     [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue, SDNPVariadic]>;
+def Z80callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_Z80CallSeqStart,
+                     [SDNPHasChain, SDNPOutGlue]>;
+def Z80callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_Z80CallSeqEnd,
+                     [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
+def Z80ret           : SDNode<"Z80ISD::RET", SDTNone,
+                     [SDNPHasChain, SDNPOptInGlue]>;
+def Z80rlc           : SDNode<"Z80ISD::RLC", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80rrc           : SDNode<"Z80ISD::RRC", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80rl            : SDNode<"Z80ISD::RL",  SDTIntUnaryOp,
+                     [SDNPOutGlue, SDNPInGlue]>;
+def Z80rr            : SDNode<"Z80ISD::RR",  SDTIntUnaryOp, 
+                     [SDNPOutGlue, SDNPInGlue]>;
+def Z80sla           : SDNode<"Z80ISD::SLA", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80sra           : SDNode<"Z80ISD::SRA", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80sll           : SDNode<"Z80ISD::SLL", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80srl           : SDNode<"Z80ISD::SRL", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80cp            : SDNode<"Z80ISD::CP", SDT_Z80Cp, [SDNPOutGlue]>;
+def Z80selectcc      : SDNode<"Z80ISD::SELECT_CC", SDT_Z80SelectCC,
+                     [SDNPInGlue]>;
+def Z80brcc          : SDNode<"Z80ISD::BR_CC", SDT_Z80BrCC,
+                     [SDNPHasChain, SDNPInGlue]>;
+def Z80scf           : SDNode<"Z80ISD::SCF", SDTNone, [SDNPOutGlue]>;
+def Z80ccf           : SDNode<"Z80ISD::CCF", SDTNone,
+                     [SDNPOutGlue, SDNPInGlue]>;
 //===----------------------------------------------------------------------===//
 // Operand Definitions.
 //===----------------------------------------------------------------------===//
 
 def brtarget : Operand<OtherVT> {
+  let EncoderMethod = "getBREncoding";
+}
+
+def calltarget : Operand<iPTR> {
   let EncoderMethod = "getBREncoding";
 }
 
@@ -63,11 +77,17 @@ def cc : Operand<i8> {
 //===----------------------------------------------------------------------===//
 // Instruction list.
 //===----------------------------------------------------------------------===//
-
 let Defs = [FLAGS] in {
   def SCF : I<0x37, (outs), (ins), "scf", [(Z80scf)]>;
   let Uses = [FLAGS] in
   def CCF : I<0x3F, (outs), (ins), "ccf", [(Z80ccf)]>;
+}
+
+let Defs = [SP], Uses = [SP] in {
+  def ADJCALLSTACKDOWN : PseudoI<(outs), (ins i16imm:$amt),
+    [(Z80callseq_start timm:$amt)]>;
+  def ADJCALLSTACKUP   : PseudoI<(outs), (ins i16imm:$amt1, i16imm:$amt2),
+    [(Z80callseq_end timm:$amt1, timm:$amt2)]>;
 }
 
 let usesCustomInserter = 1 in {
@@ -79,6 +99,14 @@ let usesCustomInserter = 1 in {
 //===----------------------------------------------------------------------===//
 // Control Flow Instructions.
 //===----------------------------------------------------------------------===//
+let isCall = 1, Uses = [SP], Defs = [A, HL] in {
+  def CALL : II16<0xCD, (outs), (ins calltarget:$dst, variable_ops),
+    "call\t{$dst}", [(Z80call imm:$dst)]>;
+}
+
+def : Pat<(Z80call (i16 tglobaladdr:$dst)), (CALL tglobaladdr:$dst)>;
+def : Pat<(Z80call (i16 texternalsym:$dst)), (CALL texternalsym:$dst)>;
+
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RET : I<0xC9, (outs), (ins), "ret", [(Z80ret)]>;
 

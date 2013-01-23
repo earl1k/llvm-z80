@@ -30,7 +30,8 @@ namespace llvm {
       RLC, RRC, RL, RR, SLA, SRA, SLL, SRL,
       CP,
       SELECT_CC,
-      BR_CC
+      BR_CC,
+      CALL
     }; // end NodeType
   } // end namespace Z80ISD
 
@@ -61,6 +62,13 @@ namespace llvm {
     MachineBasicBlock* EmitSelectInstr(MachineInstr *MI,
       MachineBasicBlock *MBB) const;
   private:
+    SDValue
+      LowerCallResult(SDValue Chain, SDValue Flag,
+        CallingConv::ID CallConv, bool isVarArg,
+        const SmallVectorImpl<ISD::InputArg> &Ins,
+        DebugLoc dl, SelectionDAG &DAG,
+        SmallVectorImpl<SDValue> &InVals) const;
+
     virtual SDValue
       LowerFormalArguments(SDValue Chain,
         CallingConv::ID CallConv, bool isVarArg,
@@ -73,6 +81,9 @@ namespace llvm {
         const SmallVectorImpl<ISD::OutputArg> &Outs,
         const SmallVectorImpl<SDValue> &OutVals,
         DebugLoc dl, SelectionDAG &DAG) const;
+    virtual SDValue
+      LowerCall(TargetLowering::CallLoweringInfo &CLI,
+        SmallVectorImpl<SDValue> &InVals) const;
 
     // Emit nodes that will be selected as "cp Op0, Op1", or something
     // equivalent, for use with given LLVM condition code and return
