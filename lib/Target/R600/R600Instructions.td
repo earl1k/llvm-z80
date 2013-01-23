@@ -70,6 +70,11 @@ class InstFlag<string PM = "printOperand", int Default = 0>
   let PrintMethod = PM;
 }
 
+// src_sel for ALU src operands, see also ALU_CONST, ALU_PARAM registers 
+def SEL : OperandWithDefaultOps <i32, (ops (i32 -1))> {
+  let PrintMethod = "printSel";
+}
+
 def LITERAL : InstFlag<"printLiteral">;
 
 def WRITE : InstFlag <"printWrite", 1>;
@@ -89,6 +94,8 @@ def LAST : InstFlag<"printLast", 1>;
 def ADDRParam : ComplexPattern<i32, 2, "SelectADDRParam", [], []>;
 def ADDRDWord : ComplexPattern<i32, 1, "SelectADDRDWord", [], []>;
 def ADDRVTX_READ : ComplexPattern<i32, 2, "SelectADDRVTX_READ", [], []>;
+def ADDRGA_CONST_OFFSET : ComplexPattern<i32, 1, "SelectGlobalValueConstantOffset", [], []>;
+def ADDRGA_VAR_OFFSET : ComplexPattern<i32, 2, "SelectGlobalValueVariableOffset", [], []>;
 
 class R600ALU_Word0 {
   field bits<32> Word0;
@@ -173,6 +180,55 @@ class R600ALU_Word1_OP3 <bits<5> alu_inst> : R600ALU_Word1{
   let Word1{17-13} = alu_inst;
 }
 
+class VTX_WORD0 {
+  field bits<32> Word0;
+  bits<7> SRC_GPR;
+  bits<5> VC_INST;
+  bits<2> FETCH_TYPE;
+  bits<1> FETCH_WHOLE_QUAD;
+  bits<8> BUFFER_ID;
+  bits<1> SRC_REL;
+  bits<2> SRC_SEL_X;
+  bits<6> MEGA_FETCH_COUNT;
+
+  let Word0{4-0}   = VC_INST;
+  let Word0{6-5}   = FETCH_TYPE;
+  let Word0{7}     = FETCH_WHOLE_QUAD;
+  let Word0{15-8}  = BUFFER_ID;
+  let Word0{22-16} = SRC_GPR;
+  let Word0{23}    = SRC_REL;
+  let Word0{25-24} = SRC_SEL_X;
+  let Word0{31-26} = MEGA_FETCH_COUNT;
+}
+
+class VTX_WORD1_GPR {
+  field bits<32> Word1;
+  bits<7> DST_GPR;
+  bits<1> DST_REL;
+  bits<3> DST_SEL_X;
+  bits<3> DST_SEL_Y;
+  bits<3> DST_SEL_Z;
+  bits<3> DST_SEL_W;
+  bits<1> USE_CONST_FIELDS;
+  bits<6> DATA_FORMAT;
+  bits<2> NUM_FORMAT_ALL;
+  bits<1> FORMAT_COMP_ALL;
+  bits<1> SRF_MODE_ALL;
+
+  let Word1{6-0} = DST_GPR;
+  let Word1{7}    = DST_REL;
+  let Word1{8}    = 0; // Reserved
+  let Word1{11-9} = DST_SEL_X;
+  let Word1{14-12} = DST_SEL_Y;
+  let Word1{17-15} = DST_SEL_Z;
+  let Word1{20-18} = DST_SEL_W;
+  let Word1{21}    = USE_CONST_FIELDS;
+  let Word1{27-22} = DATA_FORMAT;
+  let Word1{29-28} = NUM_FORMAT_ALL;
+  let Word1{30}    = FORMAT_COMP_ALL;
+  let Word1{31}    = SRF_MODE_ALL;
+}
+
 /*
 XXX: R600 subtarget uses a slightly different encoding than the other
 subtargets.  We currently handle this in R600MCCodeEmitter, but we may
@@ -214,11 +270,11 @@ class R600_1OP <bits<11> inst, string opName, list<dag> pattern,
     InstR600 <0,
               (outs R600_Reg32:$dst),
               (ins WRITE:$write, OMOD:$omod, REL:$dst_rel, CLAMP:$clamp,
-                   R600_Reg32:$src0, NEG:$src0_neg, REL:$src0_rel, ABS:$src0_abs,
+                   R600_Reg32:$src0, NEG:$src0_neg, REL:$src0_rel, ABS:$src0_abs, SEL:$src0_sel,
                    LAST:$last, R600_Pred:$pred_sel, LITERAL:$literal),
               !strconcat(opName,
                    "$clamp $dst$write$dst_rel$omod, "
-                   "$src0_neg$src0_abs$src0$src0_abs$src0_rel, "
+                   "$src0_neg$src0_abs$src0$src0_sel$src0_abs$src0_rel, "
                    "$literal $pred_sel$last"),
               pattern,
               itin>,
@@ -254,13 +310,13 @@ class R600_2OP <bits<11> inst, string opName, list<dag> pattern,
           (outs R600_Reg32:$dst),
           (ins UEM:$update_exec_mask, UP:$update_pred, WRITE:$write,
                OMOD:$omod, REL:$dst_rel, CLAMP:$clamp,
-               R600_Reg32:$src0, NEG:$src0_neg, REL:$src0_rel, ABS:$src0_abs,
-               R600_Reg32:$src1, NEG:$src1_neg, REL:$src1_rel, ABS:$src1_abs,
+               R600_Reg32:$src0, NEG:$src0_neg, REL:$src0_rel, ABS:$src0_abs, SEL:$src0_sel,
+               R600_Reg32:$src1, NEG:$src1_neg, REL:$src1_rel, ABS:$src1_abs, SEL:$src1_sel,
                LAST:$last, R600_Pred:$pred_sel, LITERAL:$literal),
           !strconcat(opName,
                 "$clamp $update_exec_mask$update_pred$dst$write$dst_rel$omod, "
-                "$src0_neg$src0_abs$src0$src0_abs$src0_rel, "
-                "$src1_neg$src1_abs$src1$src1_abs$src1_rel, "
+                "$src0_neg$src0_abs$src0$src0_sel$src0_abs$src0_rel, "
+                "$src1_neg$src1_abs$src1$src1_sel$src1_abs$src1_rel, "
                 "$literal $pred_sel$last"),
           pattern,
           itin>,
@@ -291,14 +347,14 @@ class R600_3OP <bits<5> inst, string opName, list<dag> pattern,
   InstR600 <0,
           (outs R600_Reg32:$dst),
           (ins REL:$dst_rel, CLAMP:$clamp,
-               R600_Reg32:$src0, NEG:$src0_neg, REL:$src0_rel,
-               R600_Reg32:$src1, NEG:$src1_neg, REL:$src1_rel,
-               R600_Reg32:$src2, NEG:$src2_neg, REL:$src2_rel,
+               R600_Reg32:$src0, NEG:$src0_neg, REL:$src0_rel, SEL:$src0_sel,
+               R600_Reg32:$src1, NEG:$src1_neg, REL:$src1_rel, SEL:$src1_sel,
+               R600_Reg32:$src2, NEG:$src2_neg, REL:$src2_rel, SEL:$src2_sel,
                LAST:$last, R600_Pred:$pred_sel, LITERAL:$literal),
           !strconcat(opName, "$clamp $dst$dst_rel, "
-                             "$src0_neg$src0$src0_rel, "
-                             "$src1_neg$src1$src1_rel, "
-                             "$src2_neg$src2$src2_rel, "
+                             "$src0_neg$src0$src0_sel$src0_rel, "
+                             "$src1_neg$src1$src1_sel$src1_rel, "
+                             "$src2_neg$src2$src2_sel$src2_rel, "
                              "$literal $pred_sel$last"),
           pattern,
           itin>,
@@ -339,6 +395,13 @@ def TEX_SHADOW : PatLeaf<
   (imm),
   [{uint32_t TType = (uint32_t)N->getZExtValue();
     return (TType >= 6 && TType <= 8) || (TType >= 11 && TType <= 13);
+  }]
+>;
+
+def TEX_RECT : PatLeaf<
+  (imm),
+  [{uint32_t TType = (uint32_t)N->getZExtValue();
+    return TType == 5;
   }]
 >;
 
@@ -414,7 +477,7 @@ def isR600toCayman : Predicate<
                      "Subtarget.device()->getGeneration() <= AMDGPUDeviceInfo::HD6XXX">;
 
 //===----------------------------------------------------------------------===//
-// Interpolation Instructions
+// R600 SDNodes
 //===----------------------------------------------------------------------===//
 
 def INTERP: SDNode<"AMDGPUISD::INTERP",
@@ -424,6 +487,15 @@ def INTERP: SDNode<"AMDGPUISD::INTERP",
 def INTERP_P0: SDNode<"AMDGPUISD::INTERP_P0",
   SDTypeProfile<1, 1, [SDTCisFP<0>, SDTCisInt<1>]>
   >;
+
+def CONST_ADDRESS: SDNode<"AMDGPUISD::CONST_ADDRESS",
+  SDTypeProfile<1, 1, [SDTCisInt<0>, SDTCisPtrTy<1>]>,
+  [SDNPMayLoad]
+>;
+
+//===----------------------------------------------------------------------===//
+// Interpolation Instructions
+//===----------------------------------------------------------------------===//
 
 let usesCustomInserter = 1 in {
 def input_perspective :  AMDGPUShaderInst <
@@ -1228,37 +1300,30 @@ def RAT_WRITE_CACHELESS_128_eg : RAT_WRITE_CACHELESS_eg <
 >;
 
 class VTX_READ_eg <string name, bits<8> buffer_id, dag outs, list<dag> pattern>
-    : InstR600ISA <outs, (ins MEMxi:$ptr), name#" $dst, $ptr", pattern> {
-
-  // Operands
-  bits<7> DST_GPR;
-  bits<7> SRC_GPR;
+    : InstR600ISA <outs, (ins MEMxi:$ptr), name#" $dst, $ptr", pattern>,
+      VTX_WORD1_GPR, VTX_WORD0 {
 
   // Static fields
-  bits<5> VC_INST = 0;
-  bits<2> FETCH_TYPE = 2;
-  bits<1> FETCH_WHOLE_QUAD = 0;
-  bits<8> BUFFER_ID = buffer_id;
-  bits<1> SRC_REL = 0;
+  let VC_INST = 0;
+  let FETCH_TYPE = 2;
+  let FETCH_WHOLE_QUAD = 0;
+  let BUFFER_ID = buffer_id;
+  let SRC_REL = 0;
   // XXX: We can infer this field based on the SRC_GPR.  This would allow us
   // to store vertex addresses in any channel, not just X.
-  bits<2> SRC_SEL_X = 0;
-  bits<6> MEGA_FETCH_COUNT;
-  bits<1> DST_REL = 0;
-  bits<3> DST_SEL_X;
-  bits<3> DST_SEL_Y;
-  bits<3> DST_SEL_Z;
-  bits<3> DST_SEL_W;
+  let SRC_SEL_X = 0;
+  let DST_REL = 0;
   // The docs say that if this bit is set, then DATA_FORMAT, NUM_FORMAT_ALL,
   // FORMAT_COMP_ALL, SRF_MODE_ALL, and ENDIAN_SWAP fields will be ignored,
   // however, based on my testing if USE_CONST_FIELDS is set, then all
   // these fields need to be set to 0.
-  bits<1> USE_CONST_FIELDS = 0;
-  bits<6> DATA_FORMAT;
-  bits<2> NUM_FORMAT_ALL = 1;
-  bits<1> FORMAT_COMP_ALL = 0;
-  bits<1> SRF_MODE_ALL = 0;
+  let USE_CONST_FIELDS = 0;
+  let NUM_FORMAT_ALL = 1;
+  let FORMAT_COMP_ALL = 0;
+  let SRF_MODE_ALL = 0;
 
+  let Inst{31-0} = Word0;
+  let Inst{63-32} = Word1;
   // LLVM can only encode 64-bit instructions, so these fields are manually
   // encoded in R600CodeEmitter
   //
@@ -1269,29 +1334,7 @@ class VTX_READ_eg <string name, bits<8> buffer_id, dag outs, list<dag> pattern>
   // bits<1>  ALT_CONST = 0;
   // bits<2>  BUFFER_INDEX_MODE = 0;
 
-  // VTX_WORD0
-  let Inst{4-0}   = VC_INST;
-  let Inst{6-5}   = FETCH_TYPE;
-  let Inst{7}     = FETCH_WHOLE_QUAD;
-  let Inst{15-8}  = BUFFER_ID;
-  let Inst{22-16} = SRC_GPR;
-  let Inst{23}    = SRC_REL;
-  let Inst{25-24} = SRC_SEL_X;
-  let Inst{31-26} = MEGA_FETCH_COUNT;
 
-  // VTX_WORD1_GPR
-  let Inst{38-32} = DST_GPR;
-  let Inst{39}    = DST_REL;
-  let Inst{40}    = 0; // Reserved
-  let Inst{43-41} = DST_SEL_X;
-  let Inst{46-44} = DST_SEL_Y;
-  let Inst{49-47} = DST_SEL_Z;
-  let Inst{52-50} = DST_SEL_W;
-  let Inst{53}    = USE_CONST_FIELDS;
-  let Inst{59-54} = DATA_FORMAT;
-  let Inst{61-60} = NUM_FORMAT_ALL;
-  let Inst{62}    = FORMAT_COMP_ALL;
-  let Inst{63}    = SRF_MODE_ALL;
 
   // VTX_WORD2 (LLVM can only encode 64-bit instructions, so WORD2 encoding
   // is done in R600CodeEmitter
@@ -1502,12 +1545,6 @@ def MASK_WRITE : AMDGPUShaderInst <
 
 } // End mayLoad = 0, mayStore = 0, hasSideEffects = 1
 
-def R600_LOAD_CONST : AMDGPUShaderInst <
-  (outs R600_Reg32:$dst),
-  (ins i32imm:$src0),
-  "R600_LOAD_CONST $dst, $src0",
-  [(set R600_Reg32:$dst, (int_AMDGPU_load_const imm:$src0))]
->;
 
 def RESERVE_REG : AMDGPUShaderInst <
   (outs),
@@ -1515,7 +1552,6 @@ def RESERVE_REG : AMDGPUShaderInst <
   "RESERVE_REG $src",
   [(int_AMDGPU_reserve_reg imm:$src)]
 >;
-
 def TXD: AMDGPUShaderInst <
   (outs R600_Reg128:$dst),
   (ins R600_Reg128:$src0, R600_Reg128:$src1, R600_Reg128:$src2, i32imm:$resourceId, i32imm:$samplerId, i32imm:$textureTarget),
@@ -1544,6 +1580,78 @@ let isTerminator = 1, isReturn = 1, isBarrier = 1, hasCtrlDep = 1 in {
   def RETURN          : ILFormat<(outs), (ins variable_ops),
       "RETURN", [(IL_retflag)]>;
 }
+
+
+//===----------------------------------------------------------------------===//
+// Constant Buffer Addressing Support
+//===----------------------------------------------------------------------===//
+
+let isCodeGenOnly = 1, isPseudo = 1, Namespace = "AMDGPU"  in {
+def CONST_COPY : Instruction {
+  let OutOperandList = (outs R600_Reg32:$dst);
+  let InOperandList = (ins i32imm:$src);
+  let Pattern = [(set R600_Reg32:$dst, (CONST_ADDRESS ADDRGA_CONST_OFFSET:$src))];
+  let AsmString = "CONST_COPY";
+  let neverHasSideEffects = 1;
+  let isAsCheapAsAMove = 1;
+  let Itinerary = NullALU;
+}
+} // end isCodeGenOnly = 1, isPseudo = 1, Namespace = "AMDGPU"
+
+def TEX_VTX_CONSTBUF :
+  InstR600ISA <(outs R600_Reg128:$dst), (ins MEMxi:$ptr), "VTX_READ_eg $dst, $ptr",
+      [(set R600_Reg128:$dst, (CONST_ADDRESS ADDRGA_VAR_OFFSET:$ptr))]>,
+  VTX_WORD1_GPR, VTX_WORD0 {
+
+  let VC_INST = 0;
+  let FETCH_TYPE = 2;
+  let FETCH_WHOLE_QUAD = 0;
+  let BUFFER_ID = 0;
+  let SRC_REL = 0;
+  let SRC_SEL_X = 0;
+  let DST_REL = 0;
+  let USE_CONST_FIELDS = 0;
+  let NUM_FORMAT_ALL = 2;
+  let FORMAT_COMP_ALL = 1;
+  let SRF_MODE_ALL = 1;
+  let MEGA_FETCH_COUNT = 16;
+  let DST_SEL_X        = 0;
+  let DST_SEL_Y        = 1;
+  let DST_SEL_Z        = 2;
+  let DST_SEL_W        = 3;
+  let DATA_FORMAT      = 35;
+
+  let Inst{31-0} = Word0;
+  let Inst{63-32} = Word1;
+
+// LLVM can only encode 64-bit instructions, so these fields are manually
+// encoded in R600CodeEmitter
+//
+// bits<16> OFFSET;
+// bits<2>  ENDIAN_SWAP = 0;
+// bits<1>  CONST_BUF_NO_STRIDE = 0;
+// bits<1>  MEGA_FETCH = 0;
+// bits<1>  ALT_CONST = 0;
+// bits<2>  BUFFER_INDEX_MODE = 0;
+
+
+
+// VTX_WORD2 (LLVM can only encode 64-bit instructions, so WORD2 encoding
+// is done in R600CodeEmitter
+//
+// Inst{79-64} = OFFSET;
+// Inst{81-80} = ENDIAN_SWAP;
+// Inst{82}    = CONST_BUF_NO_STRIDE;
+// Inst{83}    = MEGA_FETCH;
+// Inst{84}    = ALT_CONST;
+// Inst{86-85} = BUFFER_INDEX_MODE;
+// Inst{95-86} = 0; Reserved
+
+// VTX_WORD3 (Padding)
+//
+// Inst{127-96} = 0;
+}
+
 
 //===--------------------------------------------------------------------===//
 // Instructions support

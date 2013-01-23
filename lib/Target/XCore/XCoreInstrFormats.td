@@ -33,44 +33,114 @@ class PseudoInstXCore<dag outs, dag ins, string asmstr, list<dag> pattern>
 // Instruction formats
 //===----------------------------------------------------------------------===//
 
-class _F3R<dag outs, dag ins, string asmstr, list<dag> pattern>
+class _F3R<bits<5> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstXCore<2, outs, ins, asmstr, pattern> {
+  let Inst{15-11} = opc;
+  let DecoderMethod = "Decode3RInstruction";
 }
 
-class _FL3R<dag outs, dag ins, string asmstr, list<dag> pattern>
+class _FL3R<bits<9> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstXCore<4, outs, ins, asmstr, pattern> {
+  let Inst{31-27} = opc{8-4};
+  let Inst{26-20} = 0b1111110;
+  let Inst{19-16} = opc{3-0};
+
+  let Inst{15-11} = 0b11111;
+  let DecoderMethod = "DecodeL3RInstruction";
 }
 
-class _F2RUS<dag outs, dag ins, string asmstr, list<dag> pattern>
+// L3R with first operand as both a source and a destination.
+class _FL3RSrcDst<bits<9> opc, dag outs, dag ins, string asmstr,
+                  list<dag> pattern> : _FL3R<opc, outs, ins, asmstr, pattern> {
+  let DecoderMethod = "DecodeL3RSrcDstInstruction";
+}
+
+class _F2RUS<bits<5> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstXCore<2, outs, ins, asmstr, pattern> {
+  let Inst{15-11} = opc;
+  let DecoderMethod = "Decode2RUSInstruction";
 }
 
-class _FL2RUS<dag outs, dag ins, string asmstr, list<dag> pattern>
+// 2RUS with bitp operand
+class _F2RUSBitp<bits<5> opc, dag outs, dag ins, string asmstr,
+                 list<dag> pattern>
+    : _F2RUS<opc, outs, ins, asmstr, pattern> {
+  let DecoderMethod = "Decode2RUSBitpInstruction";
+}
+
+class _FL2RUS<bits<9> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstXCore<4, outs, ins, asmstr, pattern> {
+  let Inst{31-27} = opc{8-4};
+  let Inst{26-20} = 0b1111110;
+  let Inst{19-16} = opc{3-0};
+
+  let Inst{15-11} = 0b11111;
+  let DecoderMethod = "DecodeL2RUSInstruction";
 }
 
-class _FRU6<dag outs, dag ins, string asmstr, list<dag> pattern>
+// L2RUS with bitp operand
+class _FL2RUSBitp<bits<9> opc, dag outs, dag ins, string asmstr,
+                  list<dag> pattern>
+    : _FL2RUS<opc, outs, ins, asmstr, pattern> {
+  let DecoderMethod = "DecodeL2RUSBitpInstruction";
+}
+
+class _FRU6<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstXCore<2, outs, ins, asmstr, pattern> {
+  bits<4> a;
+  bits<6> b;
+
+  let Inst{15-10} = opc;
+  let Inst{9-6} = a;
+  let Inst{5-0} = b;
 }
 
-class _FLRU6<dag outs, dag ins, string asmstr, list<dag> pattern>
+class _FLRU6<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstXCore<4, outs, ins, asmstr, pattern> {
+  bits<4> a;
+  bits<16> b;
+
+  let Inst{31-26} = opc;
+  let Inst{25-22} = a;
+  let Inst{21-16} = b{5-0};
+  let Inst{15-10} = 0b111100;
+  let Inst{9-0} = b{15-6};
 }
 
-class _FU6<dag outs, dag ins, string asmstr, list<dag> pattern>
+class _FU6<bits<10> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstXCore<2, outs, ins, asmstr, pattern> {
+  bits<6> a;
+
+  let Inst{15-6} = opc;
+  let Inst{5-0} = a;
 }
 
-class _FLU6<dag outs, dag ins, string asmstr, list<dag> pattern>
+class _FLU6<bits<10> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstXCore<4, outs, ins, asmstr, pattern> {
+  bits<16> a;
+
+  let Inst{31-22} = opc;
+  let Inst{21-16} = a{5-0};
+  let Inst{15-10} = 0b111100;
+  let Inst{9-0} = a{15-6};
 }
 
-class _FU10<dag outs, dag ins, string asmstr, list<dag> pattern>
+class _FU10<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstXCore<2, outs, ins, asmstr, pattern> {
+  bits<10> a;
+
+  let Inst{15-10} = opc;
+  let Inst{9-0} = a;
 }
 
-class _FLU10<dag outs, dag ins, string asmstr, list<dag> pattern>
+class _FLU10<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstXCore<4, outs, ins, asmstr, pattern> {
+  bits<20> a;
+
+  let Inst{31-26} = opc;
+  let Inst{25-16} = a{9-0};
+  let Inst{15-10} = 0b111100;
+  let Inst{9-0} = a{19-10};
 }
 
 class _F2R<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>

@@ -112,6 +112,7 @@ public:
     GNU,
     GNUEABI,
     GNUEABIHF,
+    GNUX32,
     EABI,
     MachO,
     Android,

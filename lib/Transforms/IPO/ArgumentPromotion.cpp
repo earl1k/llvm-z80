@@ -519,7 +519,8 @@ CallGraphNode *ArgPromotion::DoPromotion(Function *F,
 
   // Add any return attributes.
   if (PAL.hasAttributes(AttributeSet::ReturnIndex))
-    AttributesVec.push_back(AttributeWithIndex::get(AttributeSet::ReturnIndex,
+    AttributesVec.push_back(AttributeWithIndex::get(F->getContext(),
+                                                    AttributeSet::ReturnIndex,
                                                     PAL.getRetAttributes()));
 
   // First, determine the new argument list
@@ -591,7 +592,8 @@ CallGraphNode *ArgPromotion::DoPromotion(Function *F,
 
   // Add any function attributes.
   if (PAL.hasAttributes(AttributeSet::FunctionIndex))
-    AttributesVec.push_back(AttributeWithIndex::get(AttributeSet::FunctionIndex,
+    AttributesVec.push_back(AttributeWithIndex::get(FTy->getContext(),
+                                                    AttributeSet::FunctionIndex,
                                                     PAL.getFnAttributes()));
 
   Type *RetTy = FTy->getReturnType();
@@ -638,7 +640,8 @@ CallGraphNode *ArgPromotion::DoPromotion(Function *F,
 
     // Add any return attributes.
     if (CallPAL.hasAttributes(AttributeSet::ReturnIndex))
-      AttributesVec.push_back(AttributeWithIndex::get(AttributeSet::ReturnIndex,
+      AttributesVec.push_back(AttributeWithIndex::get(F->getContext(),
+                                                      AttributeSet::ReturnIndex,
                                                       CallPAL.getRetAttributes()));
 
     // Loop over the operands, inserting GEP and loads in the caller as
@@ -719,7 +722,8 @@ CallGraphNode *ArgPromotion::DoPromotion(Function *F,
 
     // Add any function attributes.
     if (CallPAL.hasAttributes(AttributeSet::FunctionIndex))
-      AttributesVec.push_back(AttributeWithIndex::get(AttributeSet::FunctionIndex,
+      AttributesVec.push_back(AttributeWithIndex::get(Call->getContext(),
+                                                      AttributeSet::FunctionIndex,
                                                       CallPAL.getFnAttributes()));
 
     Instruction *New;

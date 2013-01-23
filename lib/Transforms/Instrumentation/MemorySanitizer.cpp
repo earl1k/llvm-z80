@@ -71,7 +71,6 @@
 #define DEBUG_TYPE "msan"
 
 #include "llvm/Transforms/Instrumentation.h"
-#include "llvm/Transforms/Utils/BlackList.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
@@ -91,6 +90,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils/BlackList.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 
@@ -361,6 +361,9 @@ bool MemorySanitizer::doInitialization(Module &M) {
   new GlobalVariable(M, IRB.getInt32Ty(), true, GlobalValue::WeakODRLinkage,
                      IRB.getInt32(TrackOrigins), "__msan_track_origins");
 
+  new GlobalVariable(M, IRB.getInt32Ty(), true, GlobalValue::WeakODRLinkage,
+                     IRB.getInt32(ClKeepGoing), "__msan_keep_going");
+
   return true;
 }
 
@@ -451,9 +454,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
         IRB.CreateAlignedStore(Shadow, ShadowPtr, I.getAlignment());
       DEBUG(dbgs() << "  STORE: " << *NewSI << "\n");
       (void)NewSI;
-      // If the store is volatile, add a check.
-      if (I.isVolatile())
-        insertCheck(Val, &I);
+
       if (ClCheckAccessAddress)
         insertCheck(Addr, &I);
 
@@ -847,7 +848,6 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
   ///
   /// Stores the corresponding shadow and (optionally) origin.
   /// Optionally, checks that the store address is fully defined.
-  /// Volatile stores check that the value being stored is fully defined.
   void visitStoreInst(StoreInst &I) {
     StoreList.push_back(&I);
   }
@@ -1461,8 +1461,10 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
         AttrBuilder B;
         B.addAttribute(Attribute::ReadOnly)
           .addAttribute(Attribute::ReadNone);
-        Func->removeAttribute(AttributeSet::FunctionIndex,
-                              Attribute::get(Func->getContext(), B));
+        Func->removeAttributes(AttributeSet::FunctionIndex,
+                               AttributeSet::get(Func->getContext(),
+                                                 AttributeSet::FunctionIndex,
+                                                 B));
       }
     }
     IRBuilder<> IRB(&I);
@@ -1853,8 +1855,9 @@ bool MemorySanitizer::runOnFunction(Function &F) {
   AttrBuilder B;
   B.addAttribute(Attribute::ReadOnly)
     .addAttribute(Attribute::ReadNone);
-  F.removeAttribute(AttributeSet::FunctionIndex,
-                    Attribute::get(F.getContext(), B));
+  F.removeAttributes(AttributeSet::FunctionIndex,
+                     AttributeSet::get(F.getContext(),
+                                       AttributeSet::FunctionIndex, B));
 
   return Visitor.runOnFunction();
 }

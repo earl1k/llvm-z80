@@ -125,12 +125,18 @@ bool Argument::hasStructRetAttr() const {
 
 /// addAttr - Add a Attribute to an argument
 void Argument::addAttr(Attribute attr) {
-  getParent()->addAttribute(getArgNo() + 1, attr);
+  AttrBuilder B(attr);
+  getParent()->addAttributes(getArgNo() + 1,
+                             AttributeSet::get(getParent()->getContext(),
+                                               getArgNo() + 1, B));
 }
 
 /// removeAttr - Remove a Attribute from an argument
 void Argument::removeAttr(Attribute attr) {
-  getParent()->removeAttribute(getArgNo() + 1, attr);
+  AttrBuilder B(attr);
+  getParent()->removeAttributes(getArgNo() + 1,
+                                AttributeSet::get(getParent()->getContext(),
+                                                  getArgNo() + 1, B));
 }
 
 
@@ -248,15 +254,21 @@ void Function::dropAllReferences() {
     BasicBlocks.begin()->eraseFromParent();
 }
 
-void Function::addAttribute(unsigned i, Attribute attr) {
+void Function::addAttribute(unsigned i, Attribute::AttrKind attr) {
   AttributeSet PAL = getAttributes();
-  PAL = PAL.addAttr(getContext(), i, attr);
+  PAL = PAL.addAttribute(getContext(), i, attr);
   setAttributes(PAL);
 }
 
-void Function::removeAttribute(unsigned i, Attribute attr) {
+void Function::addAttributes(unsigned i, AttributeSet attrs) {
   AttributeSet PAL = getAttributes();
-  PAL = PAL.removeAttr(getContext(), i, attr);
+  PAL = PAL.addAttributes(getContext(), i, attrs);
+  setAttributes(PAL);
+}
+
+void Function::removeAttributes(unsigned i, AttributeSet attrs) {
+  AttributeSet PAL = getAttributes();
+  PAL = PAL.removeAttributes(getContext(), i, attrs);
   setAttributes(PAL);
 }
 
