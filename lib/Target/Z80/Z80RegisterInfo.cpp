@@ -32,6 +32,11 @@ const uint16_t* Z80RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) c
   return CalleeSavedRegs;
 }
 
+const uint32_t* Z80RegisterInfo::getCallPreservedMask(CallingConv::ID CallConv) const
+{
+  return CSR_DE_RegMask;
+}
+
 BitVector Z80RegisterInfo::getReservedRegs(const MachineFunction &MF) const
 {
   BitVector Reserved(getNumRegs());

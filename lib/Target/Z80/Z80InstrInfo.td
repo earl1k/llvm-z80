@@ -99,7 +99,7 @@ let usesCustomInserter = 1 in {
 //===----------------------------------------------------------------------===//
 // Control Flow Instructions.
 //===----------------------------------------------------------------------===//
-let isCall = 1, Uses = [SP], Defs = [A, HL] in {
+let isCall = 1, Uses = [SP] in {
   def CALL : II16<0xCD, (outs), (ins calltarget:$dst, variable_ops),
     "call\t{$dst}", [(Z80call imm:$dst)]>;
 }

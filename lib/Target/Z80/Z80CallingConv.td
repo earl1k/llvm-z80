@@ -34,3 +34,11 @@ def CC_Z80 : CallingConv<[
   // Assign i16 arguments in registers
   CCIfType<[i16], CCAssignToReg<[HL, BC, DE]>>
 ]>;
+
+//===----------------------------------------------------------------------===//
+// Callee-saved Registers.
+//===----------------------------------------------------------------------===//
+
+def CSR_NoRegs : CalleeSavedRegs<(add)>;
+
+def CSR_DE : CalleeSavedRegs<(add DE)>;
