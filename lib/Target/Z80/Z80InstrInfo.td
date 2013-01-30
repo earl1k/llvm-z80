@@ -77,12 +77,6 @@ def cc : Operand<i8> {
 //===----------------------------------------------------------------------===//
 // Instruction list.
 //===----------------------------------------------------------------------===//
-let Defs = [FLAGS] in {
-  def SCF : I<0x37, (outs), (ins), "scf", [(Z80scf)]>;
-  let Uses = [FLAGS] in
-  def CCF : I<0x3F, (outs), (ins), "ccf", [(Z80ccf)]>;
-}
-
 let Defs = [SP], Uses = [SP] in {
   def ADJCALLSTACKDOWN : PseudoI<(outs), (ins i16imm:$amt),
     [(Z80callseq_start timm:$amt)]>;
@@ -95,6 +89,21 @@ let usesCustomInserter = 1 in {
     [(set GR8:$dst,  (Z80selectcc GR8:$src,  GR8:$src2,  imm:$cc))]>;
   def SELECT16 : PseudoI<(outs GR16:$dst), (ins GR16:$src, GR16:$src2, cc:$cc),
     [(set GR16:$dst, (Z80selectcc GR16:$src, GR16:$src2, imm:$cc))]>;
+}
+//===----------------------------------------------------------------------===//
+//  Miscellaneous Instructions.
+//===----------------------------------------------------------------------===//
+let Defs = [FLAGS] in {
+  def SCF : I<0x37, (outs), (ins), "scf", [(Z80scf)]>;
+  let Uses = [FLAGS] in
+  def CCF : I<0x3F, (outs), (ins), "ccf", [(Z80ccf)]>;
+}
+
+let Defs = [SP], Uses = [SP] in {
+  let mayLoad = 1 in
+    def POP16r  : IRp<0xC1, (outs GR16:$reg), (ins), "pop\t{$reg}", []>;
+  let mayStore = 1 in
+    def PUSH16r : IRp<0xC5, (outs), (ins GR16:$reg), "push\t{$reg}", []>;
 }
 //===----------------------------------------------------------------------===//
 // Control Flow Instructions.

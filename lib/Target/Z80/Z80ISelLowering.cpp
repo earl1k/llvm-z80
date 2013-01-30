@@ -567,6 +567,10 @@ SDValue Z80TargetLowering::LowerBrCC(SDValue Op, SelectionDAG &DAG) const
   return DAG.getNode(Z80ISD::BR_CC, dl, VT, Chain, Z80CC, Dest, Flag);
 }
 
+//===----------------------------------------------------------------------===//
+//                   Instructions With Custom Inserter
+//===----------------------------------------------------------------------===//
+
 MachineBasicBlock* Z80TargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
   MachineBasicBlock *MBB) const
 {
