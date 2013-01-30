@@ -113,9 +113,6 @@ let isCall = 1, Uses = [SP] in {
     "call\t{$dst}", [(Z80call imm:$dst)]>;
 }
 
-def : Pat<(Z80call (i16 tglobaladdr:$dst)), (CALL tglobaladdr:$dst)>;
-def : Pat<(Z80call (i16 texternalsym:$dst)), (CALL texternalsym:$dst)>;
-
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RET : I<0xC9, (outs), (ins), "ret", [(Z80ret)]>;
 
@@ -248,13 +245,18 @@ let Uses = [HL], Defs = [HL, FLAGS] in {
     "sbc\t{hl, $src}", [(set HL, (sube HL, GR16:$src))]>, ED;
 }
 
-def : Pat<(addc A, GR8:$src), (ADD8r GR8:$src)>;
-def : Pat<(addc A, imm:$src), (ADD8r imm:$src)>;
-
-def : Pat<(addc HL, GR16:$src), (ADD16r GR16:$src)>;
-
-def : Pat<(subc A, GR8:$src), (SUB8r GR8:$src)>;
-def : Pat<(subc A, imm:$src), (SUB8r imm:$src)>;
+let Constraints = "$src = $dst" in {
+  let Defs = [FLAGS] in {
+    def INC8r : IRy<0x04, (outs GR8:$dst), (ins GR8:$src),
+      "inc\t{$src}", [(set GR8:$dst, (add GR8:$src, 1))]>;
+    def DEC8r : IRy<0x05, (outs GR8:$dst), (ins GR8:$src),
+      "dec\t{$src}", [(set GR8:$dst, (add GR8:$src, -1))]>;
+  }
+  def INC16r : IRp<0x03, (outs GR16:$dst), (ins GR16:$src),
+    "inc\t{$src}", [(set GR16:$dst, (add GR16:$src, 1))]>;
+  def DEC16r : IRp<0x0B, (outs GR16:$dst), (ins GR16:$src),
+    "dec\t{$src}", [(set GR16:$dst, (add GR16:$src, -1))]>;
+}
 
 //===----------------------------------------------------------------------===//
 // Non-Instruction Patterns.
@@ -266,3 +268,17 @@ def : Pat<(i16 (anyext GR8:$src)),
 
 // trunc
 def : Pat<(i8 (trunc GR16:$src)), (EXTRACT_SUBREG GR16:$src, subreg_lo)>;
+
+// add, sub
+def : Pat<(addc A, GR8:$src), (ADD8r GR8:$src)>;
+def : Pat<(addc A, imm:$src), (ADD8r imm:$src)>;
+
+def : Pat<(addc HL, GR16:$src), (ADD16r GR16:$src)>;
+
+def : Pat<(subc A, GR8:$src), (SUB8r GR8:$src)>;
+def : Pat<(subc A, imm:$src), (SUB8r imm:$src)>;
+
+// calls
+def : Pat<(Z80call (i16 tglobaladdr:$dst)), (CALL tglobaladdr:$dst)>;
+def : Pat<(Z80call (i16 texternalsym:$dst)), (CALL texternalsym:$dst)>;
+
