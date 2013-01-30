@@ -294,7 +294,7 @@ namespace llvm {
       TESTP,
 
       // Several flavors of instructions with vector shuffle behaviors.
-      PALIGN,
+      PALIGNR,
       PSHUFD,
       PSHUFHW,
       PSHUFLW,
@@ -838,8 +838,8 @@ namespace llvm {
     SDValue LowerFLT_ROUNDS_(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerShift(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSDIV(SDValue Op, SelectionDAG &DAG) const;
-
     SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const;
 
     // Utility functions to help LowerVECTOR_SHUFFLE & LowerBUILD_VECTOR
     SDValue LowerVectorBroadcast(SDValue Op, SelectionDAG &DAG) const;

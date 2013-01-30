@@ -994,6 +994,12 @@ namespace {
       unsigned JCost = getInstrCost(J->getOpcode(), JT1, JT2);
       Type *VT1 = getVecTypeForPair(IT1, JT1),
            *VT2 = getVecTypeForPair(IT2, JT2);
+
+      // Note that this procedure is incorrect for insert and extract element
+      // instructions (because combining these often results in a shuffle),
+      // but this cost is ignored (because insert and extract element
+      // instructions are assigned a zero depth factor and are not really
+      // fused in general).
       unsigned VCost = getInstrCost(I->getOpcode(), VT1, VT2);
 
       if (VCost > ICost + JCost)
@@ -1367,7 +1373,7 @@ namespace {
       IsInPair.insert(C->second);
     }
 
-    // Iterate through the basic block, recording all Users of each
+    // Iterate through the basic block, recording all users of each
     // pairable instruction.
 
     BasicBlock::iterator E = BB.end();
@@ -1818,6 +1824,16 @@ namespace {
                   R->second == PairConnectionSplat) {
                 int ESContrib = (int) getInstrCost(Instruction::ShuffleVector,
                                                    VTy, VTy);
+
+                if (VTy->getVectorNumElements() == 2) {
+                  if (R->second == PairConnectionSplat)
+                    ESContrib = std::min(ESContrib, (int) TTI->getShuffleCost(
+                      TargetTransformInfo::SK_Broadcast, VTy));
+                  else
+                    ESContrib = std::min(ESContrib, (int) TTI->getShuffleCost(
+                      TargetTransformInfo::SK_Reverse, VTy));
+                }
+
                 DEBUG(if (DebugPairSelection) dbgs() << "\tcost {" <<
                   *Q->second.first << " <-> " << *Q->second.second <<
                     "} -> {" <<
@@ -1854,10 +1870,12 @@ namespace {
 
             if (NeedsExtraction) {
               int ESContrib;
-              if (Ty1->isVectorTy())
+              if (Ty1->isVectorTy()) {
                 ESContrib = (int) getInstrCost(Instruction::ShuffleVector,
                                                Ty1, VTy);
-              else
+                ESContrib = std::min(ESContrib, (int) TTI->getShuffleCost(
+                  TargetTransformInfo::SK_ExtractSubvector, VTy, 0, Ty1));
+              } else
                 ESContrib = (int) TTI->getVectorInstrCost(
                                     Instruction::ExtractElement, VTy, 0);
 
@@ -1884,10 +1902,13 @@ namespace {
 
             if (NeedsExtraction) {
               int ESContrib;
-              if (Ty2->isVectorTy())
+              if (Ty2->isVectorTy()) {
                 ESContrib = (int) getInstrCost(Instruction::ShuffleVector,
                                                Ty2, VTy);
-              else
+                ESContrib = std::min(ESContrib, (int) TTI->getShuffleCost(
+                  TargetTransformInfo::SK_ExtractSubvector, VTy,
+                  Ty1->isVectorTy() ? Ty1->getVectorNumElements() : 1, Ty2));
+              } else
                 ESContrib = (int) TTI->getVectorInstrCost(
                                     Instruction::ExtractElement, VTy, 1);
               DEBUG(if (DebugPairSelection) dbgs() << "\tcost {" <<
@@ -1963,6 +1984,10 @@ namespace {
               } else if (IncomingPairs.count(VPR)) {
                 ESContrib = (int) getInstrCost(Instruction::ShuffleVector,
                                                VTy, VTy);
+
+                if (VTy->getVectorNumElements() == 2)
+                  ESContrib = std::min(ESContrib, (int) TTI->getShuffleCost(
+                    TargetTransformInfo::SK_Reverse, VTy));
               } else if (!Ty1->isVectorTy() && !Ty2->isVectorTy()) {
                 ESContrib = (int) TTI->getVectorInstrCost(
                                     Instruction::InsertElement, VTy, 0);

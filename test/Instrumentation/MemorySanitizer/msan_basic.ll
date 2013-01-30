@@ -378,6 +378,25 @@ define <2 x i1> @ICmpSLT_vector(<2 x i32*> %x) nounwind uwtable readnone {
 ; CHECK: ret <2 x i1>
 
 
+; Check that we propagate shadow for unsigned relational comparisons with
+; constants
+
+define zeroext i1 @ICmpUGTConst(i32 %x) nounwind uwtable readnone {
+entry:
+  %cmp = icmp ugt i32 %x, 7
+  ret i1 %cmp
+}
+
+; CHECK: @ICmpUGTConst
+; CHECK: icmp ugt i32
+; CHECK-NOT: call void @__msan_warning
+; CHECK: icmp ugt i32
+; CHECK-NOT: call void @__msan_warning
+; CHECK: icmp ugt i32
+; CHECK-NOT: call void @__msan_warning
+; CHECK: ret i1
+
+
 ; Check that loads of shadow have the same aligment as the original loads.
 ; Check that loads of origin have the aligment of max(4, original alignment).
 

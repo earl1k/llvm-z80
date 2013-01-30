@@ -1015,7 +1015,7 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
 
     if (!CallerPAL.isEmpty() && !Caller->use_empty()) {
       AttrBuilder RAttrs(CallerPAL, AttributeSet::ReturnIndex);
-      if (RAttrs.hasAttributes(Attribute::typeIncompatible(NewRetTy)))
+      if (RAttrs.hasAttributes(AttributeFuncs::typeIncompatible(NewRetTy)))
         return false;   // Attribute not compatible with transformed value.
     }
 
@@ -1044,14 +1044,15 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
     if (!CastInst::isCastable(ActTy, ParamTy))
       return false;   // Cannot transform this parameter value.
 
-    Attribute Attrs = CallerPAL.getParamAttributes(i + 1);
-    if (AttrBuilder(Attrs).
-          hasAttributes(Attribute::typeIncompatible(ParamTy)))
+    if (AttrBuilder(CallerPAL.getParamAttributes(i + 1), i + 1).
+          hasAttributes(AttributeFuncs::typeIncompatible(ParamTy)))
       return false;   // Attribute not compatible with transformed value.
 
     // If the parameter is passed as a byval argument, then we have to have a
     // sized type and the sized type has to have the same size as the old type.
-    if (ParamTy != ActTy && Attrs.hasAttribute(Attribute::ByVal)) {
+    if (ParamTy != ActTy &&
+        CallerPAL.getParamAttributes(i + 1).hasAttribute(i + 1,
+                                                         Attribute::ByVal)) {
       PointerType *ParamPTy = dyn_cast<PointerType>(ParamTy);
       if (ParamPTy == 0 || !ParamPTy->getElementType()->isSized() || TD == 0)
         return false;
@@ -1100,11 +1101,13 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
     // won't be dropping them.  Check that these extra arguments have attributes
     // that are compatible with being a vararg call argument.
     for (unsigned i = CallerPAL.getNumSlots(); i; --i) {
-      if (CallerPAL.getSlot(i - 1).Index <= FT->getNumParams())
+      unsigned Index = CallerPAL.getSlotIndex(i - 1);
+      if (Index <= FT->getNumParams())
         break;
-      Attribute PAttrs = CallerPAL.getSlot(i - 1).Attrs;
+
       // Check if it has an attribute that's incompatible with varargs.
-      if (PAttrs.hasAttribute(Attribute::StructRet))
+      AttributeSet PAttrs = CallerPAL.getSlotAttributes(i - 1);
+      if (PAttrs.hasAttribute(Index, Attribute::StructRet))
         return false;
     }
 
@@ -1113,7 +1116,7 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
   // inserting cast instructions as necessary.
   std::vector<Value*> Args;
   Args.reserve(NumActualArgs);
-  SmallVector<AttributeWithIndex, 8> attrVec;
+  SmallVector<AttributeSet, 8> attrVec;
   attrVec.reserve(NumCommonArgs);
 
   // Get any return attributes.
@@ -1121,13 +1124,12 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
 
   // If the return value is not being used, the type may not be compatible
   // with the existing attributes.  Wipe out any problematic attributes.
-  RAttrs.removeAttributes(Attribute::typeIncompatible(NewRetTy));
+  RAttrs.removeAttributes(AttributeFuncs::typeIncompatible(NewRetTy));
 
   // Add the new return attributes.
   if (RAttrs.hasAttributes())
-    attrVec.push_back(
-      AttributeWithIndex::get(AttributeSet::ReturnIndex,
-                              Attribute::get(FT->getContext(), RAttrs)));
+    attrVec.push_back(AttributeSet::get(Caller->getContext(),
+                                        AttributeSet::ReturnIndex, RAttrs));
 
   AI = CS.arg_begin();
   for (unsigned i = 0; i != NumCommonArgs; ++i, ++AI) {
@@ -1141,9 +1143,10 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
     }
 
     // Add any parameter attributes.
-    Attribute PAttrs = CallerPAL.getParamAttributes(i + 1);
+    AttrBuilder PAttrs(CallerPAL.getParamAttributes(i + 1), i + 1);
     if (PAttrs.hasAttributes())
-      attrVec.push_back(AttributeWithIndex::get(i + 1, PAttrs));
+      attrVec.push_back(AttributeSet::get(Caller->getContext(), i + 1,
+                                          PAttrs));
   }
 
   // If the function takes more arguments than the call was taking, add them
@@ -1168,18 +1171,17 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
         }
 
         // Add any parameter attributes.
-        Attribute PAttrs = CallerPAL.getParamAttributes(i + 1);
+        AttrBuilder PAttrs(CallerPAL.getParamAttributes(i + 1), i + 1);
         if (PAttrs.hasAttributes())
-          attrVec.push_back(AttributeWithIndex::get(i + 1, PAttrs));
+          attrVec.push_back(AttributeSet::get(FT->getContext(), i + 1,
+                                              PAttrs));
       }
     }
   }
 
   AttributeSet FnAttrs = CallerPAL.getFnAttributes();
   if (CallerPAL.hasAttributes(AttributeSet::FunctionIndex))
-    attrVec.push_back(AttributeWithIndex::get(Callee->getContext(),
-                                              AttributeSet::FunctionIndex,
-                                              FnAttrs));
+    attrVec.push_back(AttributeSet::get(Callee->getContext(), FnAttrs));
 
   if (NewRetTy->isVoidTy())
     Caller->setName("");   // Void type should not have a name.
@@ -1263,12 +1265,12 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
   if (!NestAttrs.isEmpty()) {
     unsigned NestIdx = 1;
     Type *NestTy = 0;
-    Attribute NestAttr;
+    AttributeSet NestAttr;
 
     // Look for a parameter marked with the 'nest' attribute.
     for (FunctionType::param_iterator I = NestFTy->param_begin(),
          E = NestFTy->param_end(); I != E; ++NestIdx, ++I)
-      if (NestAttrs.getParamAttributes(NestIdx).hasAttribute(Attribute::Nest)){
+      if (NestAttrs.hasAttribute(NestIdx, Attribute::Nest)) {
         // Record the parameter type and any other attributes.
         NestTy = *I;
         NestAttr = NestAttrs.getParamAttributes(NestIdx);
@@ -1280,7 +1282,7 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
       std::vector<Value*> NewArgs;
       NewArgs.reserve(unsigned(CS.arg_end()-CS.arg_begin())+1);
 
-      SmallVector<AttributeWithIndex, 8> NewAttrs;
+      SmallVector<AttributeSet, 8> NewAttrs;
       NewAttrs.reserve(Attrs.getNumSlots() + 1);
 
       // Insert the nest argument into the call argument list, which may
@@ -1288,9 +1290,8 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
 
       // Add any result attributes.
       if (Attrs.hasAttributes(AttributeSet::ReturnIndex))
-        NewAttrs.push_back(AttributeWithIndex::get(Caller->getContext(),
-                                                   AttributeSet::ReturnIndex,
-                                                   Attrs.getRetAttributes()));
+        NewAttrs.push_back(AttributeSet::get(Caller->getContext(),
+                                             Attrs.getRetAttributes()));
 
       {
         unsigned Idx = 1;
@@ -1302,7 +1303,8 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
             if (NestVal->getType() != NestTy)
               NestVal = Builder->CreateBitCast(NestVal, NestTy, "nest");
             NewArgs.push_back(NestVal);
-            NewAttrs.push_back(AttributeWithIndex::get(NestIdx, NestAttr));
+            NewAttrs.push_back(AttributeSet::get(Caller->getContext(),
+                                                 NestAttr));
           }
 
           if (I == E)
@@ -1310,10 +1312,12 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
 
           // Add the original argument and attributes.
           NewArgs.push_back(*I);
-          Attribute Attr = Attrs.getParamAttributes(Idx);
-          if (Attr.hasAttributes())
-            NewAttrs.push_back
-              (AttributeWithIndex::get(Idx + (Idx >= NestIdx), Attr));
+          AttributeSet Attr = Attrs.getParamAttributes(Idx);
+          if (Attr.hasAttributes(Idx)) {
+            AttrBuilder B(Attr, Idx);
+            NewAttrs.push_back(AttributeSet::get(Caller->getContext(),
+                                                 Idx + (Idx >= NestIdx), B));
+          }
 
           ++Idx, ++I;
         } while (1);
@@ -1321,9 +1325,8 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
 
       // Add any function attributes.
       if (Attrs.hasAttributes(AttributeSet::FunctionIndex))
-        NewAttrs.push_back(AttributeWithIndex::get(FTy->getContext(),
-                                                   AttributeSet::FunctionIndex,
-                                                   Attrs.getFnAttributes()));
+        NewAttrs.push_back(AttributeSet::get(FTy->getContext(),
+                                             Attrs.getFnAttributes()));
 
       // The trampoline may have been bitcast to a bogus type (FTy).
       // Handle this by synthesizing a new function type, equal to FTy

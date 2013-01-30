@@ -111,7 +111,7 @@ After strength reduction:
 
 .. code-block:: llvm
 
-    %result = shl i32 %X, i8 3
+    %result = shl i32 %X, 3
 
 And the hard way:
 
@@ -679,7 +679,7 @@ Currently, only the following parameter attributes are defined:
     This indicates that the pointer parameter specifies the address of a
     structure that is the return value of the function in the source
     program. This pointer must be guaranteed by the caller to be valid:
-    loads and stores to the structure may be assumed by the callee to
+    loads and stores to the structure may be assumed by the callee
     not to trap and to be properly aligned. This may only be applied to
     the first parameter. This is not a valid attribute for return
     values.
@@ -825,7 +825,12 @@ example:
     placed on the stack before the local variables that's checked upon
     return from the function to see if it has been overwritten. A
     heuristic is used to determine if a function needs stack protectors
-    or not.
+    or not. The heuristic used will enable protectors for functions with:
+
+    - Character arrays larger than ``ssp-buffer-size`` (default 8).
+    - Aggregates containing character arrays larger than ``ssp-buffer-size``.
+    - Calls to alloca() with variable sizes or constant sizes greater than
+      ``ssp-buffer-size``.
 
     If a function that has an ``ssp`` attribute is inlined into a
     function that doesn't have an ``ssp`` attribute, then the resulting
@@ -837,8 +842,24 @@ example:
 
     If a function that has an ``sspreq`` attribute is inlined into a
     function that doesn't have an ``sspreq`` attribute or which has an
-    ``ssp`` attribute, then the resulting function will have an
-    ``sspreq`` attribute.
+    ``ssp`` or ``sspstrong`` attribute, then the resulting function will have
+    an ``sspreq`` attribute.
+``sspstrong``
+    This attribute indicates that the function should emit a stack smashing
+    protector. This attribute causes a strong heuristic to be used when
+    determining if a function needs stack protectors.  The strong heuristic
+    will enable protectors for functions with:
+
+    - Arrays of any size and type
+    - Aggregates containing an array of any size and type.
+    - Calls to alloca().
+    - Local variables that have had their address taken.
+
+    This overrides the ``ssp`` function attribute.
+
+    If a function that has an ``sspstrong`` attribute is inlined into a
+    function that doesn't have an ``sspstrong`` attribute, then the
+    resulting function will have an ``sspstrong`` attribute.
 ``uwtable``
     This attribute indicates that the ABI being targeted requires that
     an unwind table entry be produce for this function even if we can

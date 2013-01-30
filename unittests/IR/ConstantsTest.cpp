@@ -151,16 +151,18 @@ TEST(ConstantsTest, PointerCast) {
               Constant::getNullValue(Int8PtrVecTy), Int32PtrVecTy));
 }
 
-#define CHECK(x, y) {                                           \
-    std::string __s;                                            \
-    raw_string_ostream __o(__s);                                \
-    cast<ConstantExpr>(x)->getAsInstruction()->print(__o);      \
-    __o.flush();                                                \
-    EXPECT_EQ(std::string("  <badref> = " y), __s);             \
+#define CHECK(x, y) {                                         		\
+    std::string __s;                                            	\
+    raw_string_ostream __o(__s);                                	\
+    Instruction *__I = cast<ConstantExpr>(x)->getAsInstruction();	\
+    __I->print(__o);      						\
+    delete __I; 							\
+    __o.flush();                                                	\
+    EXPECT_EQ(std::string("  <badref> = " y), __s);             	\
   }
 
 TEST(ConstantsTest, AsInstructionsTest) {
-  Module *M = new Module("MyModule", getGlobalContext());
+  OwningPtr<Module> M(new Module("MyModule", getGlobalContext()));
 
   Type *Int64Ty = Type::getInt64Ty(getGlobalContext());
   Type *Int32Ty = Type::getInt32Ty(getGlobalContext());

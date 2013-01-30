@@ -269,8 +269,24 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
 
   case AMDGPU::EG_ExportSwz:
   case AMDGPU::R600_ExportSwz: {
+    // Instruction is left unmodified if its not the last one of its type
+    bool isLastInstructionOfItsType = true;
+    unsigned InstExportType = MI->getOperand(1).getImm();
+    for (MachineBasicBlock::iterator NextExportInst = llvm::next(I),
+         EndBlock = BB->end(); NextExportInst != EndBlock;
+         NextExportInst = llvm::next(NextExportInst)) {
+      if (NextExportInst->getOpcode() == AMDGPU::EG_ExportSwz ||
+          NextExportInst->getOpcode() == AMDGPU::R600_ExportSwz) {
+        unsigned CurrentInstExportType = NextExportInst->getOperand(1)
+            .getImm();
+        if (CurrentInstExportType == InstExportType) {
+          isLastInstructionOfItsType = false;
+          break;
+        }
+      }
+    }
     bool EOP = (llvm::next(I)->getOpcode() == AMDGPU::RETURN)? 1 : 0;
-    if (!EOP)
+    if (!EOP && !isLastInstructionOfItsType)
       return BB;
     unsigned CfInst = (MI->getOpcode() == AMDGPU::EG_ExportSwz)? 84 : 40;
     BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(MI->getOpcode()))
@@ -282,7 +298,7 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
             .addOperand(MI->getOperand(5))
             .addOperand(MI->getOperand(6))
             .addImm(CfInst)
-            .addImm(1);
+            .addImm(EOP);
     break;
   }
   }
@@ -386,39 +402,7 @@ SDValue R600TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const 
           Chain);
 
     }
-    case AMDGPUIntrinsic::R600_store_stream_output : {
-      MachineFunction &MF = DAG.getMachineFunction();
-      R600MachineFunctionInfo *MFI = MF.getInfo<R600MachineFunctionInfo>();
-      int64_t RegIndex = cast<ConstantSDNode>(Op.getOperand(3))->getZExtValue();
-      int64_t BufIndex = cast<ConstantSDNode>(Op.getOperand(4))->getZExtValue();
 
-      SDNode **OutputsMap = MFI->StreamOutputs[BufIndex];
-      unsigned Inst;
-      switch (cast<ConstantSDNode>(Op.getOperand(4))->getZExtValue()  ) {
-      // STREAM3
-      case 3:
-        Inst = 4;
-        break;
-      // STREAM2
-      case 2:
-        Inst = 3;
-        break;
-      // STREAM1
-      case 1:
-        Inst = 2;
-        break;
-      // STREAM0
-      case 0:
-        Inst = 1;
-        break;
-      default:
-        llvm_unreachable("Wrong buffer id for stream outputs !");
-      }
-
-      return InsertScalarToRegisterExport(DAG, Op.getDebugLoc(), OutputsMap,
-          RegIndex / 4, RegIndex % 4, Inst, 0, Op.getOperand(2),
-          Chain);
-    }
     // default for switch(IntrinsicID)
     default: break;
     }

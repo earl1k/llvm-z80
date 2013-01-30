@@ -19,80 +19,100 @@ using namespace dwarf;
 
 typedef DWARFDebugLine::LineTable DWARFLineTable;
 
-void DWARFContext::dump(raw_ostream &OS) {
-  OS << ".debug_abbrev contents:\n";
-  getDebugAbbrev()->dump(OS);
+void DWARFContext::dump(raw_ostream &OS, DIDumpType DumpType) {
+  if (DumpType == DIDT_All || DumpType == DIDT_Abbrev) {
+    OS << ".debug_abbrev contents:\n";
+    getDebugAbbrev()->dump(OS);
+  }
 
-  OS << "\n.debug_info contents:\n";
-  for (unsigned i = 0, e = getNumCompileUnits(); i != e; ++i)
-    getCompileUnitAtIndex(i)->dump(OS);
+  if (DumpType == DIDT_All || DumpType == DIDT_Info) {
+    OS << "\n.debug_info contents:\n";
+    for (unsigned i = 0, e = getNumCompileUnits(); i != e; ++i)
+      getCompileUnitAtIndex(i)->dump(OS);
+  }
 
-  OS << "\n.debug_aranges contents:\n";
-  DataExtractor arangesData(getARangeSection(), isLittleEndian(), 0);
   uint32_t offset = 0;
-  DWARFDebugArangeSet set;
-  while (set.extract(arangesData, &offset))
-    set.dump(OS);
+  if (DumpType == DIDT_All || DumpType == DIDT_Aranges) {
+    OS << "\n.debug_aranges contents:\n";
+    DataExtractor arangesData(getARangeSection(), isLittleEndian(), 0);
+    DWARFDebugArangeSet set;
+    while (set.extract(arangesData, &offset))
+      set.dump(OS);
+  }
 
   uint8_t savedAddressByteSize = 0;
-  OS << "\n.debug_line contents:\n";
-  for (unsigned i = 0, e = getNumCompileUnits(); i != e; ++i) {
-    DWARFCompileUnit *cu = getCompileUnitAtIndex(i);
-    savedAddressByteSize = cu->getAddressByteSize();
-    unsigned stmtOffset =
-      cu->getCompileUnitDIE()->getAttributeValueAsUnsigned(cu, DW_AT_stmt_list,
-                                                           -1U);
-    if (stmtOffset != -1U) {
-      DataExtractor lineData(getLineSection(), isLittleEndian(),
-                             savedAddressByteSize);
-      DWARFDebugLine::DumpingState state(OS);
-      DWARFDebugLine::parseStatementTable(lineData, &stmtOffset, state);
+  if (DumpType == DIDT_All || DumpType == DIDT_Line) {
+    OS << "\n.debug_line contents:\n";
+    for (unsigned i = 0, e = getNumCompileUnits(); i != e; ++i) {
+      DWARFCompileUnit *cu = getCompileUnitAtIndex(i);
+      savedAddressByteSize = cu->getAddressByteSize();
+      unsigned stmtOffset =
+        cu->getCompileUnitDIE()->getAttributeValueAsUnsigned(cu, DW_AT_stmt_list,
+                                                             -1U);
+      if (stmtOffset != -1U) {
+        DataExtractor lineData(getLineSection(), isLittleEndian(),
+                               savedAddressByteSize);
+        DWARFDebugLine::DumpingState state(OS);
+        DWARFDebugLine::parseStatementTable(lineData, &lineRelocMap(), &stmtOffset, state);
+      }
     }
   }
 
-  OS << "\n.debug_str contents:\n";
-  DataExtractor strData(getStringSection(), isLittleEndian(), 0);
-  offset = 0;
-  uint32_t strOffset = 0;
-  while (const char *s = strData.getCStr(&offset)) {
-    OS << format("0x%8.8x: \"%s\"\n", strOffset, s);
-    strOffset = offset;
+  if (DumpType == DIDT_All || DumpType == DIDT_Str) {
+    OS << "\n.debug_str contents:\n";
+    DataExtractor strData(getStringSection(), isLittleEndian(), 0);
+    offset = 0;
+    uint32_t strOffset = 0;
+    while (const char *s = strData.getCStr(&offset)) {
+      OS << format("0x%8.8x: \"%s\"\n", strOffset, s);
+      strOffset = offset;
+    }
   }
 
-  OS << "\n.debug_ranges contents:\n";
-  // In fact, different compile units may have different address byte
-  // sizes, but for simplicity we just use the address byte size of the last
-  // compile unit (there is no easy and fast way to associate address range
-  // list and the compile unit it describes).
-  DataExtractor rangesData(getRangeSection(), isLittleEndian(),
-                           savedAddressByteSize);
-  offset = 0;
-  DWARFDebugRangeList rangeList;
-  while (rangeList.extract(rangesData, &offset))
-    rangeList.dump(OS);
-
-  OS << "\n.debug_abbrev.dwo contents:\n";
-  getDebugAbbrevDWO()->dump(OS);
-
-  OS << "\n.debug_info.dwo contents:\n";
-  for (unsigned i = 0, e = getNumDWOCompileUnits(); i != e; ++i)
-    getDWOCompileUnitAtIndex(i)->dump(OS);
-
-  OS << "\n.debug_str.dwo contents:\n";
-  DataExtractor strDWOData(getStringDWOSection(), isLittleEndian(), 0);
-  offset = 0;
-  uint32_t strDWOOffset = 0;
-  while (const char *s = strDWOData.getCStr(&offset)) {
-    OS << format("0x%8.8x: \"%s\"\n", strDWOOffset, s);
-    strDWOOffset = offset;
+  if (DumpType == DIDT_All || DumpType == DIDT_Ranges) {
+    OS << "\n.debug_ranges contents:\n";
+    // In fact, different compile units may have different address byte
+    // sizes, but for simplicity we just use the address byte size of the last
+    // compile unit (there is no easy and fast way to associate address range
+    // list and the compile unit it describes).
+    DataExtractor rangesData(getRangeSection(), isLittleEndian(),
+                             savedAddressByteSize);
+    offset = 0;
+    DWARFDebugRangeList rangeList;
+    while (rangeList.extract(rangesData, &offset))
+      rangeList.dump(OS);
   }
 
-  OS << "\n.debug_str_offsets.dwo contents:\n";
-  DataExtractor strOffsetExt(getStringOffsetDWOSection(), isLittleEndian(), 0);
-  offset = 0;
-  while (offset < getStringOffsetDWOSection().size()) {
-    OS << format("0x%8.8x: ", offset);
-    OS << format("%8.8x\n", strOffsetExt.getU32(&offset));
+  if (DumpType == DIDT_All || DumpType == DIDT_AbbrevDwo) {
+    OS << "\n.debug_abbrev.dwo contents:\n";
+    getDebugAbbrevDWO()->dump(OS);
+  }
+
+  if (DumpType == DIDT_All || DumpType == DIDT_InfoDwo) {
+    OS << "\n.debug_info.dwo contents:\n";
+    for (unsigned i = 0, e = getNumDWOCompileUnits(); i != e; ++i)
+      getDWOCompileUnitAtIndex(i)->dump(OS);
+  }
+
+  if (DumpType == DIDT_All || DumpType == DIDT_StrDwo) {
+    OS << "\n.debug_str.dwo contents:\n";
+    DataExtractor strDWOData(getStringDWOSection(), isLittleEndian(), 0);
+    offset = 0;
+    uint32_t strDWOOffset = 0;
+    while (const char *s = strDWOData.getCStr(&offset)) {
+      OS << format("0x%8.8x: \"%s\"\n", strDWOOffset, s);
+      strDWOOffset = offset;
+    }
+  }
+
+  if (DumpType == DIDT_All || DumpType == DIDT_StrOffsetsDwo) {
+    OS << "\n.debug_str_offsets.dwo contents:\n";
+    DataExtractor strOffsetExt(getStringOffsetDWOSection(), isLittleEndian(), 0);
+    offset = 0;
+    while (offset < getStringOffsetDWOSection().size()) {
+      OS << format("0x%8.8x: ", offset);
+      OS << format("%8.8x\n", strOffsetExt.getU32(&offset));
+    }
   }
 }
 
@@ -135,7 +155,7 @@ const DWARFDebugAranges *DWARFContext::getDebugAranges() {
 const DWARFLineTable *
 DWARFContext::getLineTableForCompileUnit(DWARFCompileUnit *cu) {
   if (!Line)
-    Line.reset(new DWARFDebugLine());
+    Line.reset(new DWARFDebugLine(&lineRelocMap()));
 
   unsigned stmtOffset =
     cu->getCompileUnitDIE()->getAttributeValueAsUnsigned(cu, DW_AT_stmt_list,
@@ -305,6 +325,64 @@ DILineInfo DWARFContext::getLineInfoForAddress(uint64_t Address,
                     Line, Column);
 }
 
+DILineInfoTable DWARFContext::getLineInfoForAddressRange(uint64_t Address,
+    uint64_t Size,
+    DILineInfoSpecifier Specifier) {
+  DILineInfoTable  Lines;
+  DWARFCompileUnit *CU = getCompileUnitForAddress(Address);
+  if (!CU)
+    return Lines;
+
+  std::string FunctionName = "<invalid>";
+  if (Specifier.needs(DILineInfoSpecifier::FunctionName)) {
+    // The address may correspond to instruction in some inlined function,
+    // so we have to build the chain of inlined functions and take the
+    // name of the topmost function in it.
+    const DWARFDebugInfoEntryMinimal::InlinedChain &InlinedChain =
+        CU->getInlinedChainForAddress(Address);
+    if (InlinedChain.size() > 0) {
+      const DWARFDebugInfoEntryMinimal &TopFunctionDIE = InlinedChain[0];
+      if (const char *Name = TopFunctionDIE.getSubroutineName(CU))
+        FunctionName = Name;
+    }
+  }
+
+  StringRef  FuncNameRef = StringRef(FunctionName);
+
+  // If the Specifier says we don't need FileLineInfo, just
+  // return the top-most function at the starting address.
+  if (!Specifier.needs(DILineInfoSpecifier::FileLineInfo)) {
+    Lines.push_back(std::make_pair(Address, 
+                                   DILineInfo(StringRef("<invalid>"), 
+                                              FuncNameRef, 0, 0)));
+    return Lines;
+  }
+
+  const DWARFLineTable *LineTable = getLineTableForCompileUnit(CU);
+  const bool NeedsAbsoluteFilePath =
+      Specifier.needs(DILineInfoSpecifier::AbsoluteFilePath);
+
+  // Get the index of row we're looking for in the line table.
+  std::vector<uint32_t> RowVector;
+  if (!LineTable->lookupAddressRange(Address, Size, RowVector))
+    return Lines;
+
+  uint32_t NumRows = RowVector.size();
+  for (uint32_t i = 0; i < NumRows; ++i) {
+    uint32_t RowIndex = RowVector[i];
+    // Take file number and line/column from the row.
+    const DWARFDebugLine::Row &Row = LineTable->Rows[RowIndex];
+    std::string FileName = "<invalid>";
+    getFileNameForCompileUnit(CU, LineTable, Row.File,
+                              NeedsAbsoluteFilePath, FileName);
+    Lines.push_back(std::make_pair(Row.Address, 
+                                   DILineInfo(StringRef(FileName),
+                                         FuncNameRef, Row.Line, Row.Column)));
+  }
+
+  return Lines;
+}
+
 DIInliningInfo DWARFContext::getInliningInfoForAddress(uint64_t Address,
     DILineInfoSpecifier Specifier) {
   DWARFCompileUnit *CU = getCompileUnitForAddress(Address);
@@ -402,12 +480,15 @@ DWARFContextInMemory::DWARFContextInMemory(object::ObjectFile *Obj) :
     else
       continue;
 
-    // TODO: For now only handle relocations for the debug_info section.
+    // TODO: Add support for relocations in other sections as needed.
+    // Record relocations for the debug_info and debug_line sections.
     RelocAddrMap *Map;
     if (name == "debug_info")
       Map = &InfoRelocMap;
     else if (name == "debug_info.dwo")
       Map = &InfoDWORelocMap;
+    else if (name == "debug_line")
+      Map = &LineRelocMap;
     else
       continue;
 
@@ -421,10 +502,17 @@ DWARFContextInMemory::DWARFContextInMemory(object::ObjectFile *Obj) :
         reloc_i->getAddress(Address);
         uint64_t Type;
         reloc_i->getType(Type);
+        uint64_t SymAddr = 0;
+        // ELF relocations may need the symbol address
+        if (Obj->isELF()) {
+          object::SymbolRef Sym;
+          reloc_i->getSymbol(Sym);
+          Sym.getAddress(SymAddr);
+        }
 
         object::RelocVisitor V(Obj->getFileFormatName());
         // The section address is always 0 for debug sections.
-        object::RelocToApply R(V.visit(Type, *reloc_i));
+        object::RelocToApply R(V.visit(Type, *reloc_i, 0, SymAddr));
         if (V.error()) {
           SmallString<32> Name;
           error_code ec(reloc_i->getTypeName(Name));

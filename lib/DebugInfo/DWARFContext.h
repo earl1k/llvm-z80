@@ -45,7 +45,7 @@ class DWARFContext : public DIContext {
 
 public:
   DWARFContext() {}
-  virtual void dump(raw_ostream &OS);
+  virtual void dump(raw_ostream &OS, DIDumpType DumpType = DIDT_All);
 
   /// Get the number of compile units in this context.
   unsigned getNumCompileUnits() {
@@ -90,11 +90,14 @@ public:
 
   virtual DILineInfo getLineInfoForAddress(uint64_t Address,
       DILineInfoSpecifier Specifier = DILineInfoSpecifier());
+  virtual DILineInfoTable getLineInfoForAddressRange(uint64_t Address,
+      uint64_t Size, DILineInfoSpecifier Specifier = DILineInfoSpecifier());
   virtual DIInliningInfo getInliningInfoForAddress(uint64_t Address,
       DILineInfoSpecifier Specifier = DILineInfoSpecifier());
 
   virtual bool isLittleEndian() const = 0;
   virtual const RelocAddrMap &infoRelocMap() const = 0;
+  virtual const RelocAddrMap &lineRelocMap() const = 0;
   virtual StringRef getInfoSection() = 0;
   virtual StringRef getAbbrevSection() = 0;
   virtual StringRef getARangeSection() = 0;
@@ -130,6 +133,7 @@ class DWARFContextInMemory : public DWARFContext {
   virtual void anchor();
   bool IsLittleEndian;
   RelocAddrMap InfoRelocMap;
+  RelocAddrMap LineRelocMap;
   StringRef InfoSection;
   StringRef AbbrevSection;
   StringRef ARangeSection;
@@ -150,6 +154,7 @@ public:
   DWARFContextInMemory(object::ObjectFile *);
   virtual bool isLittleEndian() const { return IsLittleEndian; }
   virtual const RelocAddrMap &infoRelocMap() const { return InfoRelocMap; }
+  virtual const RelocAddrMap &lineRelocMap() const { return LineRelocMap; }
   virtual StringRef getInfoSection() { return InfoSection; }
   virtual StringRef getAbbrevSection() { return AbbrevSection; }
   virtual StringRef getARangeSection() { return ARangeSection; }

@@ -76,7 +76,24 @@ public:
         HasError = true;
         return RelocToApply();
       }
+    } else if (FileFormat == "ELF64-ppc64") {
+      switch (RelocType) {
+      case llvm::ELF::R_PPC64_ADDR32:
+        return visitELF_PPC64_ADDR32(R, Value);
+      default:
+        HasError = true;
+        return RelocToApply();
+      }
+    } else if (FileFormat == "ELF32-mips") {
+      switch (RelocType) {
+      case llvm::ELF::R_MIPS_32:
+        return visitELF_MIPS_32(R, Value);
+      default:
+        HasError = true;
+        return RelocToApply();
+      }
     }
+    HasError = true;
     return RelocToApply();
   }
 
@@ -137,6 +154,22 @@ private:
     int64_t Addend;
     R.getAdditionalInfo(Addend);
     int32_t Res = (Value + Addend) & 0xFFFFFFFF;
+    return RelocToApply(Res, 4);
+  }
+
+  /// PPC64 ELF
+  RelocToApply visitELF_PPC64_ADDR32(RelocationRef R, uint64_t Value) {
+    int64_t Addend;
+    R.getAdditionalInfo(Addend);
+    uint32_t Res = (Value + Addend) & 0xFFFFFFFF;
+    return RelocToApply(Res, 4);
+  }
+
+  /// MIPS ELF
+  RelocToApply visitELF_MIPS_32(RelocationRef R, uint64_t Value) {
+    int64_t Addend;
+    R.getAdditionalInfo(Addend);
+    uint32_t Res = (Value + Addend) & 0xFFFFFFFF;
     return RelocToApply(Res, 4);
   }
 };

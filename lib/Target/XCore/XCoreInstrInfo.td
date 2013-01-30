@@ -384,9 +384,9 @@ def LD8U_3r :  _F3R<0b10001, (outs GRRegs:$dst),
 }
 
 let mayStore=1 in {
-def STW_3r : _FL3R<0b000001100, (outs),
-                   (ins GRRegs:$val, GRRegs:$addr, GRRegs:$offset),
-                   "stw $val, $addr[$offset]", []>;
+def STW_l3r : _FL3R<0b000001100, (outs),
+                    (ins GRRegs:$val, GRRegs:$addr, GRRegs:$offset),
+                    "stw $val, $addr[$offset]", []>;
 
 def STW_2rus : _F2RUS<0b0000, (outs),
                       (ins GRRegs:$val, GRRegs:$addr, i32imm:$offset),
@@ -451,7 +451,6 @@ def CRC_l3r : _FL3RSrcDst<0b101011100, (outs GRRegs:$dst),
                              (int_xcore_crc32 GRRegs:$src1, GRRegs:$src2,
                                               GRRegs:$src3))]>;
 
-// TODO inpw, outpw
 let mayStore=1 in {
 def ST16_l3r : _FL3R<0b100001100, (outs),
                      (ins GRRegs:$val, GRRegs:$addr, GRRegs:$offset),
@@ -462,51 +461,51 @@ def ST8_l3r : _FL3R<0b100011100, (outs),
                     "st8 $val, $addr[$offset]", []>;
 }
 
-// Four operand long
-let Constraints = "$src1 = $dst1,$src2 = $dst2" in {
-def MACCU_l4r : _L4R<(outs GRRegs:$dst1, GRRegs:$dst2),
-                    (ins GRRegs:$src1, GRRegs:$src2, GRRegs:$src3,
-                      GRRegs:$src4),
-                    "maccu $dst1, $dst2, $src3, $src4",
-                    []>;
+def INPW_l2rus : _FL2RUSBitp<0b100101110, (outs GRRegs:$a),
+                             (ins GRRegs:$b, i32imm:$c), "inpw $a, res[$b], $c",
+                             []>;
 
-def MACCS_l4r : _L4R<(outs GRRegs:$dst1, GRRegs:$dst2),
-                    (ins GRRegs:$src1, GRRegs:$src2, GRRegs:$src3,
-                      GRRegs:$src4),
-                    "maccs $dst1, $dst2, $src3, $src4",
-                    []>;
+def OUTPW_l2rus : _FL2RUSBitp<0b100101101, (outs),
+                              (ins GRRegs:$a, GRRegs:$b, i32imm:$c),
+                              "outpw res[$b], $a, $c", []>;
+
+// Four operand long
+let Constraints = "$e = $a,$f = $b" in {
+def MACCU_l4r : _FL4RSrcDstSrcDst<
+  0b000001, (outs GRRegs:$a, GRRegs:$b),
+  (ins GRRegs:$e, GRRegs:$f, GRRegs:$c, GRRegs:$d), "maccu $a, $b, $c, $d", []>;
+
+def MACCS_l4r : _FL4RSrcDstSrcDst<
+  0b000010, (outs GRRegs:$a, GRRegs:$b),
+  (ins GRRegs:$e, GRRegs:$f, GRRegs:$c, GRRegs:$d), "maccs $a, $b, $c, $d", []>;
 }
 
-let Constraints = "$src1 = $dst1" in
-def CRC8_l4r : _L4R<(outs GRRegs:$dst1, GRRegs:$dst2),
-                    (ins GRRegs:$src1, GRRegs:$src2, GRRegs:$src3),
-                    "crc8 $dst1, $dst2, $src2, $src3",
-                    []>;
+let Constraints = "$e = $b" in
+def CRC8_l4r : _FL4RSrcDst<0b000000, (outs GRRegs:$a, GRRegs:$b),
+                           (ins GRRegs:$e, GRRegs:$c, GRRegs:$d),
+                           "crc8 $b, $a, $c, $d", []>;
 
 // Five operand long
 
-def LADD_l5r : _L5R<(outs GRRegs:$dst1, GRRegs:$dst2),
-                    (ins GRRegs:$src1, GRRegs:$src2, GRRegs:$src3),
-                    "ladd $dst1, $dst2, $src1, $src2, $src3",
-                    []>;
+def LADD_l5r : _FL5R<0b000001, (outs GRRegs:$dst1, GRRegs:$dst2),
+                     (ins GRRegs:$src1, GRRegs:$src2, GRRegs:$src3),
+                     "ladd $dst2, $dst1, $src1, $src2, $src3",
+                     []>;
 
-def LSUB_l5r : _L5R<(outs GRRegs:$dst1, GRRegs:$dst2),
-                    (ins GRRegs:$src1, GRRegs:$src2, GRRegs:$src3),
-                    "lsub $dst1, $dst2, $src1, $src2, $src3",
-                    []>;
+def LSUB_l5r : _FL5R<0b000010, (outs GRRegs:$dst1, GRRegs:$dst2),
+                     (ins GRRegs:$src1, GRRegs:$src2, GRRegs:$src3),
+                     "lsub $dst2, $dst1, $src1, $src2, $src3", []>;
 
-def LDIV_l5r : _L5R<(outs GRRegs:$dst1, GRRegs:$dst2),
-                    (ins GRRegs:$src1, GRRegs:$src2, GRRegs:$src3),
-                    "ldiv $dst1, $dst2, $src1, $src2, $src3",
-                    []>;
+def LDIVU_l5r : _FL5R<0b000000, (outs GRRegs:$dst1, GRRegs:$dst2),
+                      (ins GRRegs:$src1, GRRegs:$src2, GRRegs:$src3),
+                      "ldivu $dst1, $dst2, $src3, $src1, $src2", []>;
 
 // Six operand long
 
-def LMUL_l6r : _L6R<(outs GRRegs:$dst1, GRRegs:$dst2),
-                    (ins GRRegs:$src1, GRRegs:$src2, GRRegs:$src3,
-                      GRRegs:$src4),
-                    "lmul $dst1, $dst2, $src1, $src2, $src3, $src4",
-                    []>;
+def LMUL_l6r : _FL6R<
+  0b00000, (outs GRRegs:$dst1, GRRegs:$dst2),
+  (ins GRRegs:$src1, GRRegs:$src2, GRRegs:$src3, GRRegs:$src4),
+  "lmul $dst1, $dst2, $src1, $src2, $src3, $src4", []>;
 
 // Register - U6
 
@@ -786,9 +785,9 @@ def SETD_2r : _FR2R<0b000101, (outs), (ins GRRegs:$r, GRRegs:$val),
                     "setd res[$r], $val",
                     [(int_xcore_setd GRRegs:$r, GRRegs:$val)]>;
 
-def SETPSC_l2r : _FR2R<0b110000, (outs), (ins GRRegs:$src1, GRRegs:$src2),
-                       "setpsc res[$src1], $src2",
-                       [(int_xcore_setpsc GRRegs:$src1, GRRegs:$src2)]>;
+def SETPSC_2r : _FR2R<0b110000, (outs), (ins GRRegs:$src1, GRRegs:$src2),
+                      "setpsc res[$src1], $src2",
+                      [(int_xcore_setpsc GRRegs:$src1, GRRegs:$src2)]>;
 
 def GETST_2r : _F2R<0b000001, (outs GRRegs:$dst), (ins GRRegs:$r),
                     "getst $dst, res[$r]",
@@ -819,7 +818,6 @@ def ENDIN_2r : _F2R<0b100101, (outs GRRegs:$dst), (ins GRRegs:$src),
                      [(set GRRegs:$dst, (int_xcore_endin GRRegs:$src))]>;
 
 // Two operand long
-// getd, testlcl
 def BITREV_l2r : _FL2R<0b0000011000, (outs GRRegs:$dst), (ins GRRegs:$src),
                        "bitrev $dst, $src",
                        [(set GRRegs:$dst, (int_xcore_bitrev GRRegs:$src))]>;
@@ -831,6 +829,12 @@ def BYTEREV_l2r : _FL2R<0b0000011001, (outs GRRegs:$dst), (ins GRRegs:$src),
 def CLZ_l2r : _FL2R<0b000111000, (outs GRRegs:$dst), (ins GRRegs:$src),
                     "clz $dst, $src",
                     [(set GRRegs:$dst, (ctlz GRRegs:$src))]>;
+
+def GETD_l2r : _FL2R<0b0001111001, (outs GRRegs:$dst), (ins GRRegs:$src),
+                     "getd $dst, res[$src]", []>;
+
+def GETN_l2r : _FL2R<0b0011011001, (outs GRRegs:$dst), (ins GRRegs:$src),
+                     "getn $dst, res[$src]", []>;
 
 def SETC_l2r : _FL2R<0b0010111001, (outs), (ins GRRegs:$r, GRRegs:$val),
                      "setc res[$r], $val",
@@ -856,14 +860,17 @@ def SETCLK_l2r : _FLR2R<0b0000111001, (outs), (ins GRRegs:$src1, GRRegs:$src2),
                         "setclk res[$src1], $src2",
                         [(int_xcore_setclk GRRegs:$src1, GRRegs:$src2)]>;
 
+def SETN_l2r : _FLR2R<0b0011011000, (outs), (ins GRRegs:$src1, GRRegs:$src2),
+                      "setn res[$src1], $src2", []>;
+
 def SETRDY_l2r : _FLR2R<0b0010111000, (outs), (ins GRRegs:$src1, GRRegs:$src2),
                         "setrdy res[$src1], $src2",
                         [(int_xcore_setrdy GRRegs:$src1, GRRegs:$src2)]>;
 
+def TESTLCL_l2r : _FL2R<0b0010011000, (outs GRRegs:$dst), (ins GRRegs:$src),
+                        "testlcl $dst, res[$src]", []>;
+
 // One operand short
-// TODO edu, eeu, waitet, waitef, tstart, clrtp
-// setdp, setcp, setev, kcall
-// dgetreg
 def MSYNC_1r : _F1R<0b000111, (outs), (ins GRRegs:$a),
                     "msync res[$a]",
                     [(int_xcore_msync GRRegs:$a)]>;
@@ -887,9 +894,13 @@ def BR_JT32 : PseudoInstXCore<(outs), (ins InlineJT32:$t, GRRegs:$i),
                               [(XCoreBR_JT32 tjumptable:$t, GRRegs:$i)]>;
 
 let Defs=[SP], neverHasSideEffects=1 in
-def SETSP_1r : _F1R<0b001011, (outs), (ins GRRegs:$a),
-                 "set sp, $a",
-                 []>;
+def SETSP_1r : _F1R<0b001011, (outs), (ins GRRegs:$a), "set sp, $a", []>;
+
+let neverHasSideEffects=1 in
+def SETDP_1r : _F1R<0b001100, (outs), (ins GRRegs:$a), "set dp, $a", []>;
+
+let neverHasSideEffects=1 in
+def SETCP_1r : _F1R<0b001101, (outs), (ins GRRegs:$a), "set cp, $a", []>;
 
 let hasCtrlDep = 1 in 
 def ECALLT_1r : _F1R<0b010011, (outs), (ins GRRegs:$a),
@@ -927,16 +938,39 @@ def SETEV_1r : _F1R<0b001111, (outs), (ins GRRegs:$a),
                     [(int_xcore_setev GRRegs:$a, R11)]>;
 }
 
+def DGETREG_1r : _F1R<0b001110, (outs GRRegs:$a), (ins), "dgetreg $a", []>;
+
+def EDU_1r : _F1R<0b000000, (outs), (ins GRRegs:$a), "edu res[$a]", []>;
+
 def EEU_1r : _F1R<0b000001, (outs), (ins GRRegs:$a),
                "eeu res[$a]",
                [(int_xcore_eeu GRRegs:$a)]>;
 
+def KCALL_1r : _F1R<0b010000, (outs), (ins GRRegs:$a), "kcall $a", []>;
+
+def WAITEF_1R : _F1R<0b000011, (outs), (ins GRRegs:$a), "waitef $a", []>;
+
+def WAITET_1R : _F1R<0b000010, (outs), (ins GRRegs:$a), "waitet $a", []>;
+
+def TSTART_1R : _F1R<0b000110, (outs), (ins GRRegs:$a), "start t[$a]", []>;
+
+def CLRPT_1R : _F1R<0b100000, (outs), (ins GRRegs:$a), "clrpt res[$a]", []>;
+
 // Zero operand short
-// TODO freet, ldspc, stspc, ldssr, stssr, ldsed, stsed,
-// stet, getkep, getksp, setkep, getid, kret, dcall, dret,
-// dentsp, drestsp
 
 def CLRE_0R : _F0R<0b0000001101, (outs), (ins), "clre", [(int_xcore_clre)]>;
+
+def DCALL_0R : _F0R<0b0000011100, (outs), (ins), "dcall", []>;
+
+let Defs = [SP], Uses = [SP] in
+def DENTSP_0R : _F0R<0b0001001100, (outs), (ins), "dentsp", []>;
+
+let Defs = [SP] in
+def DRESTSP_0R : _F0R<0b0001001101, (outs), (ins), "drestsp", []>;
+
+def DRET_0R : _F0R<0b0000011110, (outs), (ins), "dret", []>;
+
+def FREET_0R : _F0R<0b0000001111, (outs), (ins), "freet", []>;
 
 let Defs = [R11] in {
 def GETID_0R : _F0R<0b0001001110, (outs), (ins),
@@ -950,11 +984,43 @@ def GETED_0R : _F0R<0b0000111110, (outs), (ins),
 def GETET_0R : _F0R<0b0000111111, (outs), (ins),
                     "get r11, et",
                     [(set R11, (int_xcore_getet))]>;
+
+def GETKEP_0R : _F0R<0b0001001111, (outs), (ins),
+                     "get r11, kep", []>;
+
+def GETKSP_0R : _F0R<0b0001011100, (outs), (ins),
+                     "get r11, ksp", []>;
 }
+
+let Defs = [SP] in
+def KRET_0R : _F0R<0b0000011101, (outs), (ins), "kret", []>;
+
+let Uses = [SP], mayLoad = 1 in {
+def LDET_0R : _F0R<0b0001011110, (outs), (ins), "ldw et, sp[4]", []>;
+
+def LDSED_0R : _F0R<0b0001011101, (outs), (ins), "ldw sed, sp[3]", []>;
+
+def LDSPC_0R : _F0R<0b0000101100, (outs), (ins), "ldw spc, sp[1]", []>;
+
+def LDSSR_0R : _F0R<0b0000101110, (outs), (ins), "ldw ssr, sp[2]", []>;
+}
+
+let Uses=[R11] in
+def SETKEP_0R : _F0R<0b0000011111, (outs), (ins), "set kep, r11", []>;
 
 def SSYNC_0r : _F0R<0b0000001110, (outs), (ins),
                     "ssync",
                     [(int_xcore_ssync)]>;
+
+let Uses = [SP], mayStore = 1 in {
+def STET_0R : _F0R<0b0000111101, (outs), (ins), "stw et, sp[4]", []>;
+
+def STSED_0R : _F0R<0b0000111100, (outs), (ins), "stw sed, sp[3]", []>;
+
+def STSPC_0R : _F0R<0b0000101101, (outs), (ins), "stw spc, sp[1]", []>;
+
+def STSSR_0R : _F0R<0b0000101111, (outs), (ins), "stw ssr, sp[2]", []>;
+}
 
 let isBranch=1, isIndirectBranch=1, isTerminator=1, isBarrier = 1,
     hasSideEffects = 1 in
@@ -1009,7 +1075,7 @@ def : Pat<(truncstorei16 GRRegs:$val, GRRegs:$addr),
           (ST16_l3r GRRegs:$val, GRRegs:$addr, (LDC_ru6 0))>;
 
 def : Pat<(store GRRegs:$val, (ldawf GRRegs:$addr, GRRegs:$offset)),
-          (STW_3r GRRegs:$val, GRRegs:$addr, GRRegs:$offset)>;
+          (STW_l3r GRRegs:$val, GRRegs:$addr, GRRegs:$offset)>;
 def : Pat<(store GRRegs:$val, (add GRRegs:$addr, immUs4:$offset)),
           (STW_2rus GRRegs:$val, GRRegs:$addr, (div4_xform immUs4:$offset))>;
 def : Pat<(store GRRegs:$val, GRRegs:$addr),

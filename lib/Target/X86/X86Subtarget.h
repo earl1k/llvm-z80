@@ -194,7 +194,20 @@ public:
   /// instruction.
   void AutoDetectSubtargetFeatures();
 
-  bool is64Bit() const { return In64BitMode; }
+  /// Is this x86_64? (disregarding specific ABI / programming model)
+  bool is64Bit() const {
+    return In64BitMode;
+  }
+
+  /// Is this x86_64 with the ILP32 programming model (x32 ABI)?
+  bool isTarget64BitILP32() const {
+    return In64BitMode && (TargetTriple.getEnvironment() == Triple::GNUX32);
+  }
+
+  /// Is this x86_64 with the LP64 programming model (standard AMD64, no x32)?
+  bool isTarget64BitLP64() const {
+    return In64BitMode && (TargetTriple.getEnvironment() != Triple::GNUX32);
+  }
 
   PICStyles::Style getPICStyle() const { return PICStyle; }
   void setPICStyle(PICStyles::Style Style)  { PICStyle = Style; }
@@ -315,6 +328,10 @@ public:
   /// memset with zero passed as the second argument. Otherwise it
   /// returns null.
   const char *getBZeroEntry() const;
+  
+  /// This function returns true if the target has sincos() routine in its
+  /// compiler runtime or math libraries.
+  bool hasSinCos() const;
 
   /// enablePostRAScheduler - run for Atom optimization.
   bool enablePostRAScheduler(CodeGenOpt::Level OptLevel,

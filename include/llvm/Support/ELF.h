@@ -366,7 +366,8 @@ enum {
   R_X86_64_SIZE64     = 33,
   R_X86_64_GOTPC32_TLSDESC = 34,
   R_X86_64_TLSDESC_CALL    = 35,
-  R_X86_64_TLSDESC    = 36
+  R_X86_64_TLSDESC    = 36,
+  R_X86_64_IRELATIVE  = 37
 };
 
 // i386 relocations.
@@ -494,7 +495,15 @@ enum {
 };
 
 // ARM Specific e_flags
-enum { EF_ARM_EABIMASK = 0xFF000000U };
+enum {
+  EF_ARM_EABI_UNKNOWN =   0x00000000U,
+  EF_ARM_EABI_VER1 =      0x01000000U,
+  EF_ARM_EABI_VER2 =      0x02000000U,
+  EF_ARM_EABI_VER3 =      0x03000000U,
+  EF_ARM_EABI_VER4 =      0x04000000U,
+  EF_ARM_EABI_VER5 =      0x05000000U,
+  EF_ARM_EABIMASK =       0xFF000000U
+};
 
 // ELF Relocation types for ARM
 // Meets 2.08 ABI Specs.

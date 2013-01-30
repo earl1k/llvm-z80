@@ -956,6 +956,7 @@ bool LLParser::ParseOptionalFuncAttrs(AttrBuilder &B) {
     case lltok::kw_returns_twice:   B.addAttribute(Attribute::ReturnsTwice); break;
     case lltok::kw_ssp:             B.addAttribute(Attribute::StackProtect); break;
     case lltok::kw_sspreq:          B.addAttribute(Attribute::StackProtectReq); break;
+    case lltok::kw_sspstrong:       B.addAttribute(Attribute::StackProtectStrong); break;
     case lltok::kw_uwtable:         B.addAttribute(Attribute::UWTable); break;
     case lltok::kw_noduplicate:     B.addAttribute(Attribute::NoDuplicate); break;
 
@@ -1050,11 +1051,11 @@ bool LLParser::ParseOptionalReturnAttrs(AttrBuilder &B) {
     case lltok::kw_readonly:       case lltok::kw_inlinehint:
     case lltok::kw_alwaysinline:   case lltok::kw_optsize:
     case lltok::kw_ssp:            case lltok::kw_sspreq:
-    case lltok::kw_noredzone:      case lltok::kw_noimplicitfloat:
-    case lltok::kw_naked:          case lltok::kw_nonlazybind:
-    case lltok::kw_address_safety: case lltok::kw_minsize:
-    case lltok::kw_alignstack:     case lltok::kw_align:
-    case lltok::kw_noduplicate:
+    case lltok::kw_sspstrong:      case lltok::kw_noimplicitfloat:
+    case lltok::kw_noredzone:      case lltok::kw_naked:
+    case lltok::kw_nonlazybind:    case lltok::kw_address_safety:
+    case lltok::kw_minsize:        case lltok::kw_alignstack:
+    case lltok::kw_align:          case lltok::kw_noduplicate:
       HaveError |= Error(Lex.getLoc(), "invalid use of function-only attribute");
       break;
     }
@@ -2812,25 +2813,25 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
   // Okay, if we got here, the function is syntactically valid.  Convert types
   // and do semantic checks.
   std::vector<Type*> ParamTypeList;
-  SmallVector<AttributeWithIndex, 8> Attrs;
+  SmallVector<AttributeSet, 8> Attrs;
 
   if (RetAttrs.hasAttributes())
-    Attrs.push_back(
-      AttributeWithIndex::get(AttributeSet::ReturnIndex,
-                              Attribute::get(RetType->getContext(),
-                                              RetAttrs)));
+    Attrs.push_back(AttributeSet::get(RetType->getContext(),
+                                      AttributeSet::ReturnIndex,
+                                      RetAttrs));
 
   for (unsigned i = 0, e = ArgList.size(); i != e; ++i) {
     ParamTypeList.push_back(ArgList[i].Ty);
-    if (ArgList[i].Attrs.hasAttributes())
-      Attrs.push_back(AttributeWithIndex::get(i+1, ArgList[i].Attrs));
+    if (ArgList[i].Attrs.hasAttributes()) {
+      AttrBuilder B(ArgList[i].Attrs);
+      Attrs.push_back(AttributeSet::get(RetType->getContext(), i + 1, B));
+    }
   }
 
   if (FuncAttrs.hasAttributes())
-    Attrs.push_back(
-      AttributeWithIndex::get(AttributeSet::FunctionIndex,
-                              Attribute::get(RetType->getContext(),
-                                              FuncAttrs)));
+    Attrs.push_back(AttributeSet::get(RetType->getContext(),
+                                      AttributeSet::FunctionIndex,
+                                      FuncAttrs));
 
   AttributeSet PAL = AttributeSet::get(Context, Attrs);
 
@@ -3357,12 +3358,11 @@ bool LLParser::ParseInvoke(Instruction *&Inst, PerFunctionState &PFS) {
   if (ConvertValIDToValue(PFTy, CalleeID, Callee, &PFS)) return true;
 
   // Set up the Attribute for the function.
-  SmallVector<AttributeWithIndex, 8> Attrs;
+  SmallVector<AttributeSet, 8> Attrs;
   if (RetAttrs.hasAttributes())
-    Attrs.push_back(
-      AttributeWithIndex::get(AttributeSet::ReturnIndex,
-                              Attribute::get(Callee->getContext(),
-                                              RetAttrs)));
+    Attrs.push_back(AttributeSet::get(RetType->getContext(),
+                                      AttributeSet::ReturnIndex,
+                                      RetAttrs));
 
   SmallVector<Value*, 8> Args;
 
@@ -3382,18 +3382,19 @@ bool LLParser::ParseInvoke(Instruction *&Inst, PerFunctionState &PFS) {
       return Error(ArgList[i].Loc, "argument is not of expected type '" +
                    getTypeString(ExpectedTy) + "'");
     Args.push_back(ArgList[i].V);
-    if (ArgList[i].Attrs.hasAttributes())
-      Attrs.push_back(AttributeWithIndex::get(i+1, ArgList[i].Attrs));
+    if (ArgList[i].Attrs.hasAttributes()) {
+      AttrBuilder B(ArgList[i].Attrs);
+      Attrs.push_back(AttributeSet::get(RetType->getContext(), i + 1, B));
+    }
   }
 
   if (I != E)
     return Error(CallLoc, "not enough parameters specified for call");
 
   if (FnAttrs.hasAttributes())
-    Attrs.push_back(
-      AttributeWithIndex::get(AttributeSet::FunctionIndex,
-                              Attribute::get(Callee->getContext(),
-                                              FnAttrs)));
+    Attrs.push_back(AttributeSet::get(RetType->getContext(),
+                                      AttributeSet::FunctionIndex,
+                                      FnAttrs));
 
   // Finish off the Attribute and check them
   AttributeSet PAL = AttributeSet::get(Context, Attrs);
@@ -3759,12 +3760,11 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
   if (ConvertValIDToValue(PFTy, CalleeID, Callee, &PFS)) return true;
 
   // Set up the Attribute for the function.
-  SmallVector<AttributeWithIndex, 8> Attrs;
+  SmallVector<AttributeSet, 8> Attrs;
   if (RetAttrs.hasAttributes())
-    Attrs.push_back(
-      AttributeWithIndex::get(AttributeSet::ReturnIndex,
-                              Attribute::get(Callee->getContext(),
-                                              RetAttrs)));
+    Attrs.push_back(AttributeSet::get(RetType->getContext(),
+                                      AttributeSet::ReturnIndex,
+                                      RetAttrs));
 
   SmallVector<Value*, 8> Args;
 
@@ -3784,18 +3784,19 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
       return Error(ArgList[i].Loc, "argument is not of expected type '" +
                    getTypeString(ExpectedTy) + "'");
     Args.push_back(ArgList[i].V);
-    if (ArgList[i].Attrs.hasAttributes())
-      Attrs.push_back(AttributeWithIndex::get(i+1, ArgList[i].Attrs));
+    if (ArgList[i].Attrs.hasAttributes()) {
+      AttrBuilder B(ArgList[i].Attrs);
+      Attrs.push_back(AttributeSet::get(RetType->getContext(), i + 1, B));
+    }
   }
 
   if (I != E)
     return Error(CallLoc, "not enough parameters specified for call");
 
   if (FnAttrs.hasAttributes())
-    Attrs.push_back(
-      AttributeWithIndex::get(AttributeSet::FunctionIndex,
-                              Attribute::get(Callee->getContext(),
-                                              FnAttrs)));
+    Attrs.push_back(AttributeSet::get(RetType->getContext(),
+                                      AttributeSet::FunctionIndex,
+                                      FnAttrs));
 
   // Finish off the Attribute and check them
   AttributeSet PAL = AttributeSet::get(Context, Attrs);
