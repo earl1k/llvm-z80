@@ -51,6 +51,10 @@ def D : Z80Reg<"d", 2>;
 def E : Z80Reg<"e", 3>;
 def H : Z80Reg<"h", 4>;
 def L : Z80Reg<"l", 5>;
+def XH : Z80Reg<"xh", 4>;
+def XL : Z80Reg<"xl", 5>;
+def YH : Z80Reg<"yh", 4>;
+def YL : Z80Reg<"yl", 5>;
 
 // Flags register
 def FLAGS : Z80Reg<"f">;
@@ -60,6 +64,8 @@ def BC : Z80RegWithSubRegs<"bc", 0, [B, C]>;
 def DE : Z80RegWithSubRegs<"de", 1, [D, E]>;
 def HL : Z80RegWithSubRegs<"hl", 2, [H, L]>;
 def AF : Z80RegWithSubRegs<"af", 3, [A, FLAGS]>;
+def IX : Z80RegWithSubRegs<"ix", 2, [XH, XL]>;
+def IY : Z80RegWithSubRegs<"iy", 2, [YH, YL]>;
 
 def SP : Z80Reg<"sp">;
 def PC : Z80Reg<"pc">;

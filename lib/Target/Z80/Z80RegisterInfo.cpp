@@ -14,11 +14,26 @@
 #include "Z80RegisterInfo.h"
 #include "Z80.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/Support/CommandLine.h"
 
 #define GET_REGINFO_TARGET_DESC
 #include "Z80GenRegisterInfo.inc"
 
 using namespace llvm;
+
+typedef enum {
+  IX,
+  IY
+} FrameUseRegister;
+
+static cl::opt<FrameUseRegister>
+FrameRegister("z80-frame-register",
+  cl::desc("Frame register (IX by default)"),
+  cl::init(IX),
+  cl::values(
+    clEnumValN(IX, "ix", "IX register"),
+    clEnumValN(IY, "iy", "IY register"),
+    clEnumValEnd));
 
 Z80RegisterInfo::Z80RegisterInfo(Z80TargetMachine &tm, const TargetInstrInfo &tii)
   : Z80GenRegisterInfo(Z80::PC), TM(tm), TII(tii)
@@ -71,6 +86,5 @@ void Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator I,
 
 unsigned Z80RegisterInfo::getFrameRegister(const MachineFunction &MF) const
 {
-  assert(0 && "Not implemented yet!");
-  return 0;
+  return (FrameRegister == IX) ? Z80::IX : Z80::IY;
 }
