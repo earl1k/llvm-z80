@@ -29,6 +29,16 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
 
   computeRegisterProperties();
 
+  setStackPointerRegisterToSaveRestore(Z80::SP);
+
+  setBooleanContents(ZeroOrOneBooleanContent);
+
+  setLoadExtAction(ISD::EXTLOAD, MVT::i8, Expand);
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i8, Expand);
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i8, Expand);
+
+  setTruncStoreAction(MVT::i16, MVT::i8, Expand);
+
   setOperationAction(ISD::ZERO_EXTEND, MVT::i16, Custom);
   setOperationAction(ISD::SIGN_EXTEND, MVT::i16, Custom);
 
