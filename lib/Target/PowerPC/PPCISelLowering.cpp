@@ -3341,17 +3341,6 @@ PPCTargetLowering::FinishCall(CallingConv::ID CallConv, DebugLoc dl,
 
   // Emit tail call.
   if (isTailCall) {
-    // If this is the first return lowered for this function, add the regs
-    // to the liveout set for the function.
-    if (DAG.getMachineFunction().getRegInfo().liveout_empty()) {
-      SmallVector<CCValAssign, 16> RVLocs;
-      CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(),
-                     getTargetMachine(), RVLocs, *DAG.getContext());
-      CCInfo.AnalyzeCallResult(Ins, RetCC_PPC);
-      for (unsigned i = 0; i != RVLocs.size(); ++i)
-        DAG.getMachineFunction().getRegInfo().addLiveOut(RVLocs[i].getLocReg());
-    }
-
     assert(((Callee.getOpcode() == ISD::Register &&
              cast<RegisterSDNode>(Callee)->getReg() == PPC::CTR) ||
             Callee.getOpcode() == ISD::TargetExternalSymbol ||
@@ -4417,14 +4406,8 @@ PPCTargetLowering::LowerReturn(SDValue Chain,
                  getTargetMachine(), RVLocs, *DAG.getContext());
   CCInfo.AnalyzeReturn(Outs, RetCC_PPC);
 
-  // If this is the first return lowered for this function, add the regs to the
-  // liveout set for the function.
-  if (DAG.getMachineFunction().getRegInfo().liveout_empty()) {
-    for (unsigned i = 0; i != RVLocs.size(); ++i)
-      DAG.getMachineFunction().getRegInfo().addLiveOut(RVLocs[i].getLocReg());
-  }
-
   SDValue Flag;
+  SmallVector<SDValue, 4> RetOps(1, Chain);
 
   // Copy the result values into the output registers.
   for (unsigned i = 0; i != RVLocs.size(); ++i) {
@@ -4449,12 +4432,17 @@ PPCTargetLowering::LowerReturn(SDValue Chain,
 
     Chain = DAG.getCopyToReg(Chain, dl, VA.getLocReg(), Arg, Flag);
     Flag = Chain.getValue(1);
+    RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
   }
 
+  RetOps[0] = Chain;  // Update chain.
+
+  // Add the flag if we have it.
   if (Flag.getNode())
-    return DAG.getNode(PPCISD::RET_FLAG, dl, MVT::Other, Chain, Flag);
-  else
-    return DAG.getNode(PPCISD::RET_FLAG, dl, MVT::Other, Chain);
+    RetOps.push_back(Flag);
+
+  return DAG.getNode(PPCISD::RET_FLAG, dl, MVT::Other,
+                     &RetOps[0], RetOps.size());
 }
 
 SDValue PPCTargetLowering::LowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG,
@@ -5032,9 +5020,14 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
   // If this value is in the range [-32,30] and is even, use:
   //    tmp = VSPLTI[bhw], result = add tmp, tmp
   if (SextVal >= -32 && SextVal <= 30 && (SextVal & 1) == 0) {
+    // FIXME: This is currently disabled because the ADD will be folded back
+    // into an invalid BUILD_VECTOR immediately.
+    return SDValue();
+#if 0
     SDValue Res = BuildSplatI(SextVal >> 1, SplatSize, MVT::Other, DAG, dl);
     Res = DAG.getNode(ISD::ADD, dl, Res.getValueType(), Res, Res);
     return DAG.getNode(ISD::BITCAST, dl, Op.getValueType(), Res);
+#endif
   }
 
   // If this is 0x8000_0000 x 4, turn into vspltisw + vslw.  If it is
@@ -5133,14 +5126,16 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
   // Three instruction sequences.
 
   // Odd, in range [17,31]:  (vsplti C)-(vsplti -16).
-  if (SextVal >= 0 && SextVal <= 31) {
+  // FIXME: Disabled because the add gets constant folded.
+  if (0 && SextVal >= 0 && SextVal <= 31) {
     SDValue LHS = BuildSplatI(SextVal-16, SplatSize, MVT::Other, DAG, dl);
     SDValue RHS = BuildSplatI(-16, SplatSize, MVT::Other, DAG, dl);
     LHS = DAG.getNode(ISD::SUB, dl, LHS.getValueType(), LHS, RHS);
     return DAG.getNode(ISD::BITCAST, dl, Op.getValueType(), LHS);
   }
   // Odd, in range [-31,-17]:  (vsplti C)+(vsplti -16).
-  if (SextVal >= -31 && SextVal <= 0) {
+  // FIXME: Disabled because the add gets constant folded.
+  if (0 && SextVal >= -31 && SextVal <= 0) {
     SDValue LHS = BuildSplatI(SextVal+16, SplatSize, MVT::Other, DAG, dl);
     SDValue RHS = BuildSplatI(-16, SplatSize, MVT::Other, DAG, dl);
     LHS = DAG.getNode(ISD::ADD, dl, LHS.getValueType(), LHS, RHS);

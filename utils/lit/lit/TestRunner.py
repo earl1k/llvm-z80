@@ -49,13 +49,14 @@ def executeShCmd(cmd, cfg, cwd, results):
             return executeShCmd(cmd.rhs, cfg, cwd, results)
 
         if cmd.op == '&':
-            raise NotImplementedError,"unsupported test command: '&'"
+            raise InternalShellError(cmd,"unsupported shell operator: '&'")
 
         if cmd.op == '||':
             res = executeShCmd(cmd.lhs, cfg, cwd, results)
             if res != 0:
                 res = executeShCmd(cmd.rhs, cfg, cwd, results)
             return res
+
         if cmd.op == '&&':
             res = executeShCmd(cmd.lhs, cfg, cwd, results)
             if res is None:
@@ -98,7 +99,7 @@ def executeShCmd(cmd, cfg, cwd, results):
             elif r[0] == ('<',):
                 redirects[0] = [r[1], 'r', None]
             else:
-                raise NotImplementedError,"Unsupported redirect: %r" % (r,)
+                raise InternalShellError(j,"Unsupported redirect: %r" % (r,))
 
         # Map from the final redirections to something subprocess can handle.
         final_redirects = []
@@ -107,14 +108,14 @@ def executeShCmd(cmd, cfg, cwd, results):
                 result = input
             elif r == (1,):
                 if index == 0:
-                    raise NotImplementedError,"Unsupported redirect for stdin"
+                    raise InternalShellError(j,"Unsupported redirect for stdin")
                 elif index == 1:
                     result = subprocess.PIPE
                 else:
                     result = subprocess.STDOUT
             elif r == (2,):
                 if index != 2:
-                    raise NotImplementedError,"Unsupported redirect on stdout"
+                    raise InternalShellError(j,"Unsupported redirect on stdout")
                 result = subprocess.PIPE
             else:
                 if r[2] is None:
@@ -256,9 +257,8 @@ def executeScriptInternal(test, litConfig, tmpBase, commands, cwd):
     try:
         exitCode = executeShCmd(cmd, test.config, cwd, results)
     except InternalShellError,e:
-        out = ''
-        err = e.message
-        exitCode = 255
+        exitCode = 127
+        results.append((e.command, '', e.message, exitCode))
 
     out = err = ''
     for i,(cmd, cmd_out,cmd_err,res) in enumerate(results):
@@ -428,17 +428,14 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
     isXFail = isExpectedFail(test, xfails)
     return script,isXFail,tmpBase,execdir
 
-def formatTestOutput(status, out, err, exitCode, failDueToStderr, script):
+def formatTestOutput(status, out, err, exitCode, script):
     output = StringIO.StringIO()
     print >>output, "Script:"
     print >>output, "--"
     print >>output, '\n'.join(script)
     print >>output, "--"
     print >>output, "Exit Code: %r" % exitCode,
-    if failDueToStderr:
-        print >>output, "(but there was output on stderr)"
-    else:
-        print >>output
+    print >>output
     if out:
         print >>output, "Command Output (stdout):"
         print >>output, "--"
@@ -492,7 +489,4 @@ def executeShTest(test, litConfig, useExternalSh,
     if ok:
         return (status,'')
 
-    # Sh tests are not considered to fail just from stderr output.
-    failDueToStderr = False
-
-    return formatTestOutput(status, out, err, exitCode, failDueToStderr, script)
+    return formatTestOutput(status, out, err, exitCode, script)

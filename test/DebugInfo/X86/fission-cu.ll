@@ -6,10 +6,8 @@
 !llvm.dbg.cu = !{!0}
 
 !0 = metadata !{i32 786449, i32 0, i32 12, metadata !"baz.c", metadata !"/usr/local/google/home/echristo/tmp", metadata !"clang version 3.3 (trunk 169021) (llvm/trunk 169020)", i1 true, i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !1, metadata !3} ; [ DW_TAG_compile_unit ] [/usr/local/google/home/echristo/tmp/baz.c] [DW_LANG_C99]
-!1 = metadata !{metadata !2}
-!2 = metadata !{i32 0}
-!3 = metadata !{metadata !4}
-!4 = metadata !{metadata !5}
+!1 = metadata !{i32 0}
+!3 = metadata !{metadata !5}
 !5 = metadata !{i32 786484, i32 0, null, metadata !"a", metadata !"a", metadata !"", metadata !6, i32 1, metadata !7, i32 0, i32 1, i32* @a} ; [ DW_TAG_variable ] [a] [line 1] [def]
 !6 = metadata !{i32 786473, metadata !"baz.c", metadata !"/usr/local/google/home/echristo/tmp", null} ; [ DW_TAG_file_type ]
 !7 = metadata !{i32 786468, null, metadata !"int", null, i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
@@ -19,9 +17,20 @@
 ; DW_AT_low_pc, DW_AT_high_pc, DW_AT_ranges, DW_AT_dwo_name, DW_AT_dwo_id,
 ; DW_AT_ranges_base, DW_AT_addr_base.
 
+; CHECK: .debug_abbrev contents:
+; CHECK: Abbrev table for offset: 0x00000000
+; CHECK: [1] DW_TAG_compile_unit DW_CHILDREN_no
+; CHECK: DW_AT_GNU_dwo_name      DW_FORM_strp
+; CHECK: DW_AT_GNU_dwo_id        DW_FORM_data8
+; CHECK: DW_AT_GNU_addr_base     DW_FORM_sec_offset
+; CHECK: DW_AT_low_pc    DW_FORM_addr
+; CHECK: DW_AT_stmt_list DW_FORM_sec_offset
+; CHECK: DW_AT_comp_dir  DW_FORM_strp
+
 ; CHECK: .debug_info contents:
 ; CHECK: DW_TAG_compile_unit
 ; CHECK: DW_AT_GNU_dwo_name [DW_FORM_strp] ( .debug_str[0x00000000] = "baz.dwo")
+; CHECK: DW_AT_GNU_dwo_id [DW_FORM_data8]  (0x0000000000000000)
 ; CHECK: DW_AT_GNU_addr_base [DW_FORM_sec_offset]                   (0x00000000)
 ; CHECK: DW_AT_low_pc [DW_FORM_addr]       (0x0000000000000000)
 ; CHECK: DW_AT_stmt_list [DW_FORM_sec_offset]   (0x00000000)
@@ -41,6 +50,7 @@
 ; CHECK: DW_AT_low_pc    DW_FORM_GNU_addr_index
 ; CHECK: DW_AT_stmt_list DW_FORM_data4
 ; CHECK: DW_AT_comp_dir  DW_FORM_GNU_str_index
+; CHECK: DW_AT_GNU_dwo_id        DW_FORM_data8
 
 ; CHECK: [2] DW_TAG_base_type    DW_CHILDREN_no
 ; CHECK: DW_AT_name      DW_FORM_GNU_str_index
@@ -62,11 +72,12 @@
 ; CHECK: DW_AT_language [DW_FORM_data2]        (0x000c)
 ; CHECK: DW_AT_name [DW_FORM_GNU_str_index]    ( indexed (00000001) string = "baz.c")
 ; CHECK: DW_AT_low_pc [DW_FORM_GNU_addr_index]     ( indexed (00000000) address = 0x0000000000000000)
+; CHECK: DW_AT_GNU_dwo_id [DW_FORM_data8]  (0x0000000000000000)
 ; CHECK: DW_TAG_base_type
 ; CHECK: DW_AT_name [DW_FORM_GNU_str_index]     ( indexed (00000004) string = "int")
 ; CHECK: DW_TAG_variable
 ; CHECK: DW_AT_name [DW_FORM_GNU_str_index]     ( indexed (00000003) string = "a")
-; CHECK: DW_AT_type [DW_FORM_ref4]       (cu + 0x0016 => {0x00000016})
+; CHECK: DW_AT_type [DW_FORM_ref4]       (cu + 0x001e => {0x0000001e})
 ; CHECK: DW_AT_external [DW_FORM_flag_present]   (true)
 ; CHECK: DW_AT_decl_file [DW_FORM_data1] (0x01)
 ; CHECK: DW_AT_decl_line [DW_FORM_data1] (0x01)

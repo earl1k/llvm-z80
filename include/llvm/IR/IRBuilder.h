@@ -28,10 +28,11 @@
 namespace llvm {
   class MDNode;
 
-/// IRBuilderDefaultInserter - This provides the default implementation of the
-/// IRBuilder 'InsertHelper' method that is called whenever an instruction is
-/// created by IRBuilder and needs to be inserted.  By default, this inserts the
-/// instruction at the insertion point.
+/// \brief This provides the default implementation of the IRBuilder
+/// 'InsertHelper' method that is called whenever an instruction is created by
+/// IRBuilder and needs to be inserted.
+///
+/// By default, this inserts the instruction at the insertion point.
 template <bool preserveNames = true>
 class IRBuilderDefaultInserter {
 protected:
@@ -43,7 +44,7 @@ protected:
   }
 };
 
-/// IRBuilderBase - Common base class shared among various IRBuilders.
+/// \brief Common base class shared among various IRBuilders.
 class IRBuilderBase {
   DebugLoc CurDbgLocation;
 protected:
@@ -330,9 +331,9 @@ private:
   Value *getCastedInt8PtrValue(Value *Ptr);
 };
 
-/// IRBuilder - This provides a uniform API for creating instructions and
-/// inserting them into a basic block: either at the end of a BasicBlock, or
-/// at a specific iterator location in a block.
+/// \brief This provides a uniform API for creating instructions and inserting
+/// them into a basic block: either at the end of a BasicBlock, or at a specific
+/// iterator location in a block.
 ///
 /// Note that the builder does not expose the full generality of LLVM
 /// instructions.  For access to extra instruction properties, use the mutators
@@ -1054,20 +1055,6 @@ public:
       return CreateSExt(V, DestTy, Name);
     if (VTy->getScalarSizeInBits() > DestTy->getScalarSizeInBits())
       return CreateTrunc(V, DestTy, Name);
-    return V;
-  }
-  /// \brief Create a FPExt or FPTrunc from the float value V to DestTy. Return
-  /// the value untouched if the type of V is already DestTy.
-  Value *CreateFPExtOrFPTrunc(Value *V, Type *DestTy,
-                           const Twine &Name = "") {
-    assert(V->getType()->isFPOrFPVectorTy() &&
-           DestTy->isFPOrFPVectorTy() &&
-           "Can only FPExt/FPTrunc floating point types!");
-    Type *VTy = V->getType();
-    if (VTy->getScalarSizeInBits() < DestTy->getScalarSizeInBits())
-      return CreateFPExt(V, DestTy, Name);
-    if (VTy->getScalarSizeInBits() > DestTy->getScalarSizeInBits())
-      return CreateFPTrunc(V, DestTy, Name);
     return V;
   }
   Value *CreateFPToUI(Value *V, Type *DestTy, const Twine &Name = ""){

@@ -132,7 +132,7 @@ bool ModuleInfo::getNameFromSymbolTable(SymbolRef::Type Type, uint64_t Address,
   return false;
 }
 
-const std::string LLVMSymbolizer::kBadString = "??";
+const char LLVMSymbolizer::kBadString[] = "??";
 
 std::string LLVMSymbolizer::symbolizeCode(const std::string &ModuleName,
                                           uint64_t ModuleOffset) {
@@ -181,7 +181,8 @@ static bool getObjectEndianness(const ObjectFile *Obj,
 
 static ObjectFile *getObjectFile(const std::string &Path) {
   OwningPtr<MemoryBuffer> Buff;
-  MemoryBuffer::getFile(Path, Buff);
+  if (error_code ec = MemoryBuffer::getFile(Path, Buff))
+    error(ec);
   return ObjectFile::createObjectFile(Buff.take());
 }
 

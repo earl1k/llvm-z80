@@ -162,6 +162,7 @@ public:
 /// T cannot be a rvalue reference.
 template<class T>
 class ErrorOr {
+  template <class OtherT> friend class ErrorOr;
   static const bool isRef = is_reference<T>::value;
   typedef ReferenceStorage<typename remove_reference<T>::type> wrap;
 
@@ -198,22 +199,22 @@ public:
     new (get()) storage_type(moveIfMoveConstructible<storage_type>(Val));
   }
 
-  ErrorOr(const ErrorOr &Other) : IsValid(false) {
+  template <class OtherT>
+  ErrorOr(ErrorOr<OtherT> &Other) : IsValid(false) {
     // Construct an invalid ErrorOr if other is invalid.
     if (!Other.IsValid)
       return;
+    IsValid = true;
     if (!Other.HasError) {
       // Get the other value.
-      new (get()) storage_type(*Other.get());
       HasError = false;
+      new (get()) storage_type(*Other.get());
     } else {
       // Get other's error.
       Error = Other.Error;
       HasError = true;
       Error->aquire();
     }
-
-    IsValid = true;
   }
 
   ErrorOr &operator =(const ErrorOr &Other) {
@@ -227,15 +228,16 @@ public:
   }
 
 #if LLVM_HAS_RVALUE_REFERENCES
-  ErrorOr(ErrorOr &&Other) : IsValid(false) {
+  template <class OtherT>
+  ErrorOr(ErrorOr<OtherT> &&Other) : IsValid(false) {
     // Construct an invalid ErrorOr if other is invalid.
     if (!Other.IsValid)
       return;
+    IsValid = true;
     if (!Other.HasError) {
       // Get the other value.
-      IsValid = true;
-      new (get()) storage_type(std::move(*Other.get()));
       HasError = false;
+      new (get()) storage_type(std::move(*Other.get()));
       // Tell other not to do any destruction.
       Other.IsValid = false;
     } else {
@@ -245,8 +247,6 @@ public:
       // Tell other not to do any destruction.
       Other.IsValid = false;
     }
-
-    IsValid = true;
   }
 
   ErrorOr &operator =(ErrorOr &&Other) {
@@ -311,7 +311,6 @@ private:
     return &Val->get();
   }
 
-protected:
   storage_type *get() {
     assert(IsValid && "Can't do anything on a default constructed ErrorOr!");
     assert(!HasError && "Cannot get value when an error exists!");

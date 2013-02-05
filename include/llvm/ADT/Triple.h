@@ -44,6 +44,7 @@ public:
     UnknownArch,
 
     arm,     // ARM; arm, armv.*, xscale
+    aarch64, // AArch64: aarch64
     hexagon, // Hexagon: hexagon
     mips,    // MIPS: mips, mipsallegrex
     mipsel,  // MIPSEL: mipsel, mipsallegrexel
@@ -297,9 +298,14 @@ public:
     return getOS() == Triple::Darwin || getOS() == Triple::MacOSX;
   }
 
+  /// Is this an iOS triple.
+  bool isiOS() const {
+    return getOS() == Triple::IOS;
+  }
+
   /// isOSDarwin - Is this a "Darwin" OS (OS X or iOS).
   bool isOSDarwin() const {
-    return isMacOSX() || getOS() == Triple::IOS;
+    return isMacOSX() || isiOS();
   }
 
   /// \brief Tests for either Cygwin or MinGW OS

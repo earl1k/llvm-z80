@@ -693,9 +693,9 @@ void Verifier::VerifyParameterAttrs(AttributeSet Attrs, uint64_t Idx, Type *Ty,
           "'noinline and alwaysinline' are incompatible!", V);
 
   Assert1(!AttrBuilder(Attrs, Idx).
-            hasAttributes(AttributeFuncs::typeIncompatible(Ty)),
+            hasAttributes(AttributeFuncs::typeIncompatible(Ty, Idx), Idx),
           "Wrong types for attribute: " +
-          AttributeFuncs::typeIncompatible(Ty).getAsString(), V);
+          AttributeFuncs::typeIncompatible(Ty, Idx).getAsString(Idx), V);
 
   if (PointerType *PTy = dyn_cast<PointerType>(Ty))
     Assert1(!Attrs.hasAttribute(Idx, Attribute::ByVal) ||
@@ -745,7 +745,9 @@ void Verifier::VerifyFunctionAttrs(FunctionType *FT,
   AttrBuilder NotFn(Attrs, AttributeSet::FunctionIndex);
   NotFn.removeFunctionOnlyAttrs();
   Assert1(!NotFn.hasAttributes(), "Attribute '" +
-          Attribute::get(V->getContext(), NotFn).getAsString() +
+          AttributeSet::get(V->getContext(),
+                            AttributeSet::FunctionIndex,
+                            NotFn).getAsString(AttributeSet::FunctionIndex) +
           "' do not apply to the function!", V);
 
   // Check for mutually incompatible attributes.
@@ -797,7 +799,7 @@ void Verifier::VerifyFunctionAttrs(FunctionType *FT,
 }
 
 static bool VerifyAttributeCount(const AttributeSet &Attrs, unsigned Params) {
-  if (Attrs.isEmpty())
+  if (Attrs.getNumSlots() == 0)
     return true;
 
   unsigned LastSlot = Attrs.getNumSlots() - 1;

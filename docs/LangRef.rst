@@ -465,11 +465,11 @@ more information on under which circumstances the different models may
 be used. The target may choose a different TLS model if the specified
 model is not supported, or if a better choice of model can be made.
 
-A variable may be defined as a global "constant," which indicates that
+A variable may be defined as a global ``constant``, which indicates that
 the contents of the variable will **never** be modified (enabling better
 optimization, allowing the global data to be placed in the read-only
 section of an executable, etc). Note that variables that need runtime
-initialization cannot be marked "constant" as there is a store to the
+initialization cannot be marked ``constant`` as there is a store to the
 variable.
 
 LLVM explicitly allows *declarations* of global variables to be marked
@@ -500,6 +500,14 @@ is zero. The address space qualifier must precede any other attributes.
 
 LLVM allows an explicit section to be specified for globals. If the
 target supports it, it will emit globals to the section specified.
+
+By default, global initializers are optimized by assuming that global
+variables defined within the module are not modified from their
+initial values before the start of the global initializer.  This is
+true even for variables potentially accessible from outside the
+module, including those with external linkage or appearing in
+``@llvm.used``. This assumption may be suppressed by marking the
+variable with ``externally_initialized``.
 
 An explicit alignment may be specified for a global, which must be a
 power of 2. If not present, or if the alignment is set to zero, the
@@ -971,22 +979,20 @@ specifications are given in this list:
 
 -  ``E`` - big endian
 -  ``p:64:64:64`` - 64-bit pointers with 64-bit alignment
--  ``p1:32:32:32`` - 32-bit pointers with 32-bit alignment for address
-   space 1
--  ``p2:16:32:32`` - 16-bit pointers with 32-bit alignment for address
-   space 2
+-  ``S0`` - natural stack alignment is unspecified
 -  ``i1:8:8`` - i1 is 8-bit (byte) aligned
 -  ``i8:8:8`` - i8 is 8-bit (byte) aligned
 -  ``i16:16:16`` - i16 is 16-bit aligned
 -  ``i32:32:32`` - i32 is 32-bit aligned
 -  ``i64:32:64`` - i64 has ABI alignment of 32-bits but preferred
    alignment of 64-bits
+-  ``f16:16:16`` - half is 16-bit aligned
 -  ``f32:32:32`` - float is 32-bit aligned
 -  ``f64:64:64`` - double is 64-bit aligned
+-  ``f128:128:128`` - quad is 128-bit aligned
 -  ``v64:64:64`` - 64-bit vector is 64-bit aligned
 -  ``v128:128:128`` - 128-bit vector is 128-bit aligned
--  ``a0:0:1`` - aggregates are 8-bit aligned
--  ``s0:64:64`` - stack objects are 64-bit aligned
+-  ``a0:0:64`` - aggregates are 64-bit aligned
 
 When LLVM is determining the alignment for a given type, it uses the
 following rules:
@@ -1081,6 +1087,21 @@ volatile operations or change their order of execution relative to other
 volatile operations. The optimizers *may* change the order of volatile
 operations relative to non-volatile operations. This is not Java's
 "volatile" and has no cross-thread synchronization behavior.
+
+IR-level volatile loads and stores cannot safely be optimized into
+llvm.memcpy or llvm.memmove intrinsics even when those intrinsics are
+flagged volatile. Likewise, the backend should never split or merge
+target-legal volatile load/store instructions.
+
+.. admonition:: Rationale
+
+ Platforms may rely on volatile loads and stores of natively supported
+ data width to be executed as single instruction. For example, in C
+ this holds for an l-value of volatile primitive type with native
+ hardware support, but not necessarily for aggregate types. The
+ frontend upholds these expectations, which are intentionally
+ unspecified in the IR. The rules above ensure that IR transformation
+ do not violate the frontend's contract with the language.
 
 .. _memmodel:
 

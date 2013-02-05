@@ -23,14 +23,8 @@ class R600MachineFunctionInfo : public MachineFunctionInfo {
 
 public:
   R600MachineFunctionInfo(const MachineFunction &MF);
-  std::vector<unsigned> ReservedRegs;
+  SmallVector<unsigned, 4> LiveOuts;
   SDNode *Outputs[16];
-  bool HasLinearInterpolation;
-  bool HasPerspectiveInterpolation;
-
-  unsigned GetIJLinearIndex() const;
-  unsigned GetIJPerspectiveIndex() const;
-
 };
 
 } // End llvm namespace

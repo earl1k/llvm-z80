@@ -540,6 +540,12 @@ DIE *DwarfDebug::constructScopeDIE(CompileUnit *TheCU, LexicalScope *Scope) {
   if (!Scope || !Scope->getScopeNode())
     return NULL;
 
+  DIScope DS(Scope->getScopeNode());
+  // Early return to avoid creating dangling variable|scope DIEs.
+  if (!Scope->getInlinedAt() && DS.isSubprogram() && Scope->isAbstractScope() &&
+      !TheCU->getDIE(DS))
+    return NULL;
+
   SmallVector<DIE *, 8> Children;
   DIE *ObjectPointer = NULL;
 
@@ -565,7 +571,6 @@ DIE *DwarfDebug::constructScopeDIE(CompileUnit *TheCU, LexicalScope *Scope) {
   for (unsigned j = 0, M = Scopes.size(); j < M; ++j)
     if (DIE *Nested = constructScopeDIE(TheCU, Scopes[j]))
       Children.push_back(Nested);
-  DIScope DS(Scope->getScopeNode());
   DIE *ScopeDIE = NULL;
   if (Scope->getInlinedAt())
     ScopeDIE = constructInlinedScopeDIE(TheCU, Scope);
@@ -680,8 +685,13 @@ CompileUnit *DwarfDebug::constructCompileUnit(const MDNode *N) {
 
   if (!FirstCU)
     FirstCU = NewCU;
-  if (useSplitDwarf() && !SkeletonCU)
-    SkeletonCU = constructSkeletonCU(N);
+
+  if (useSplitDwarf()) {
+    // This should be a unique identifier when we want to build .dwp files.
+    NewCU->addUInt(Die, dwarf::DW_AT_GNU_dwo_id, dwarf::DW_FORM_data8, 0);
+    // Now construct the skeleton CU associated.
+    constructSkeletonCU(N);
+  }
 
   InfoHolder.addUnit(NewCU);
 
@@ -2445,7 +2455,8 @@ CompileUnit *DwarfDebug::constructSkeletonCU(const MDNode *N) {
   StringRef FN = sys::path::filename(T);
   NewCU->addLocalString(Die, dwarf::DW_AT_GNU_dwo_name, FN);
 
-  // FIXME: We also need DW_AT_dwo_id.
+  // This should be a unique identifier when we want to build .dwp files.
+  NewCU->addUInt(Die, dwarf::DW_AT_GNU_dwo_id, dwarf::DW_FORM_data8, 0);
 
   // FIXME: The addr base should be relative for each compile unit, however,
   // this one is going to be 0 anyhow.
@@ -2465,6 +2476,9 @@ CompileUnit *DwarfDebug::constructSkeletonCU(const MDNode *N) {
 
   if (!CompilationDir.empty())
     NewCU->addLocalString(Die, dwarf::DW_AT_comp_dir, CompilationDir);
+
+  if (!SkeletonCU)
+    SkeletonCU = NewCU;
 
   SkeletonHolder.addUnit(NewCU);
 

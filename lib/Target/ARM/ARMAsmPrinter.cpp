@@ -704,12 +704,8 @@ void ARMAsmPrinter::EmitEndOfAsmFile(Module &M) {
   // FIXME: This should eventually end up somewhere else where more
   // intelligent flag decisions can be made. For now we are just maintaining
   // the status quo for ARM and setting EF_ARM_EABI_VER5 as the default.
-  if (Subtarget->isTargetELF()) {
-    if (OutStreamer.hasRawTextSupport()) return;
-
-    MCELFStreamer &MES = static_cast<MCELFStreamer &>(OutStreamer);
-    MES.getAssembler().setELFHeaderEFlags(ELF::EF_ARM_EABI_VER5);
-  }
+  if (MCELFStreamer *MES = dyn_cast<MCELFStreamer>(&OutStreamer))
+    MES->getAssembler().setELFHeaderEFlags(ELF::EF_ARM_EABI_VER5);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1692,6 +1688,13 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       return;
     }
     break;
+  }
+  case ARM::TRAPNaCl: {
+    //.long 0xe7fedef0 @ trap
+    uint32_t Val = 0xe7fedef0UL;
+    OutStreamer.AddComment("trap");
+    OutStreamer.EmitIntValue(Val, 4);
+    return;
   }
   case ARM::tTRAP: {
     // Non-Darwin binutils don't yet support the "trap" mnemonic.

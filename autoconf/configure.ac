@@ -59,6 +59,11 @@ if test ${srcdir} != "." ; then
   fi
 fi
 
+dnl Default to empty (i.e. assigning the null string to) CFLAGS and CXXFLAGS,
+dnl instead of the autoconf default (for example, '-g -O2' for CC=gcc).
+${CFLAGS=}
+${CXXFLAGS=}
+
 dnl We need to check for the compiler up here to avoid anything else
 dnl starting with a different one.
 AC_PROG_CC(clang llvm-gcc gcc)
@@ -389,6 +394,7 @@ AC_CACHE_CHECK([target architecture],[llvm_cv_target_arch],
   sparc*-*)               llvm_cv_target_arch="Sparc" ;;
   powerpc*-*)             llvm_cv_target_arch="PowerPC" ;;
   arm*-*)                 llvm_cv_target_arch="ARM" ;;
+  aarch64*-*)             llvm_cv_target_arch="AArch64" ;;
   mips-* | mips64-*)      llvm_cv_target_arch="Mips" ;;
   mipsel-* | mips64el-*)  llvm_cv_target_arch="Mips" ;;
   xcore-*)                llvm_cv_target_arch="XCore" ;;
@@ -422,6 +428,7 @@ case $host in
   sparc*-*)               host_arch="Sparc" ;;
   powerpc*-*)             host_arch="PowerPC" ;;
   arm*-*)                 host_arch="ARM" ;;
+  aarch64*-*)             host_arch="AArch64" ;;
   mips-* | mips64-*)      host_arch="Mips" ;;
   mipsel-* | mips64el-*)  host_arch="Mips" ;;
   xcore-*)                host_arch="XCore" ;;
@@ -640,6 +647,7 @@ else
     PowerPC)     AC_SUBST(TARGET_HAS_JIT,1) ;;
     x86_64)      AC_SUBST(TARGET_HAS_JIT,1) ;;
     ARM)         AC_SUBST(TARGET_HAS_JIT,1) ;;
+    AArch64)     AC_SUBST(TARGET_HAS_JIT,0) ;;
     Mips)        AC_SUBST(TARGET_HAS_JIT,1) ;;
     XCore)       AC_SUBST(TARGET_HAS_JIT,0) ;;
     MSP430)      AC_SUBST(TARGET_HAS_JIT,0) ;;
@@ -771,20 +779,21 @@ dnl Allow specific targets to be specified for building (or not)
 TARGETS_TO_BUILD=""
 AC_ARG_ENABLE([targets],AS_HELP_STRING([--enable-targets],
     [Build specific host targets: all or target1,target2,... Valid targets are:
-     host, x86, x86_64, sparc, powerpc, arm, mips, hexagon,
+     host, x86, x86_64, sparc, powerpc, arm, aarch64, mips, hexagon,
      xcore, msp430, nvptx, and cpp (default=all)]),,
     enableval=all)
 if test "$enableval" = host-only ; then
   enableval=host
 fi
 case "$enableval" in
-  all) TARGETS_TO_BUILD="X86 Sparc PowerPC ARM Mips XCore MSP430 CppBackend MBlaze NVPTX Hexagon" ;;
+  all) TARGETS_TO_BUILD="X86 Sparc PowerPC AArch64 ARM Mips XCore MSP430 CppBackend MBlaze NVPTX Hexagon" ;;
   *)for a_target in `echo $enableval|sed -e 's/,/ /g' ` ; do
       case "$a_target" in
         x86)      TARGETS_TO_BUILD="X86 $TARGETS_TO_BUILD" ;;
         x86_64)   TARGETS_TO_BUILD="X86 $TARGETS_TO_BUILD" ;;
         sparc)    TARGETS_TO_BUILD="Sparc $TARGETS_TO_BUILD" ;;
         powerpc)  TARGETS_TO_BUILD="PowerPC $TARGETS_TO_BUILD" ;;
+        aarch64)  TARGETS_TO_BUILD="AArch64 $TARGETS_TO_BUILD" ;;
         arm)      TARGETS_TO_BUILD="ARM $TARGETS_TO_BUILD" ;;
         mips)     TARGETS_TO_BUILD="Mips $TARGETS_TO_BUILD" ;;
         mipsel)   TARGETS_TO_BUILD="Mips $TARGETS_TO_BUILD" ;;
@@ -1261,6 +1270,7 @@ dnl Check optional compiler flags.
 AC_MSG_CHECKING([optional compiler flags])
 CXX_FLAG_CHECK(NO_VARIADIC_MACROS, [-Wno-variadic-macros])
 CXX_FLAG_CHECK(NO_MISSING_FIELD_INITIALIZERS, [-Wno-missing-field-initializers])
+CXX_FLAG_CHECK(NO_NESTED_ANON_TYPES, [-Wno-nested-anon-types])
 CXX_FLAG_CHECK(COVERED_SWITCH_DEFAULT, [-Wcovered-switch-default])
 dnl GCC's potential uninitialized use analysis is weak and presents lots of
 dnl false positives, so disable it.
@@ -1296,7 +1306,7 @@ else
   NO_UNINITIALIZED=
   NO_MAYBE_UNINITIALIZED=
 fi
-AC_MSG_RESULT([$NO_VARIADIC_MACROS $NO_MISSING_FIELD_INITIALIZERS $COVERED_SWITCH_DEFAULT $NO_UNINITIALIZED $NO_MAYBE_UNINITIALIZED])
+AC_MSG_RESULT([$NO_VARIADIC_MACROS $NO_MISSING_FIELD_INITIALIZERS $NO_NESTED_ANON_TYPES $COVERED_SWITCH_DEFAULT $NO_UNINITIALIZED $NO_MAYBE_UNINITIALIZED])
 
 AC_ARG_WITH([python],
             [AS_HELP_STRING([--with-python], [path to python])],

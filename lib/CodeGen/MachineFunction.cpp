@@ -346,13 +346,6 @@ void MachineFunction::print(raw_ostream &OS, SlotIndexes *Indexes) const {
     }
     OS << '\n';
   }
-  if (RegInfo && !RegInfo->liveout_empty()) {
-    OS << "Function Live Outs:";
-    for (MachineRegisterInfo::liveout_iterator
-         I = RegInfo->liveout_begin(), E = RegInfo->liveout_end(); I != E; ++I)
-      OS << ' ' << PrintReg(*I, TRI);
-    OS << '\n';
-  }
 
   for (const_iterator BB = begin(), E = end(); BB != E; ++BB) {
     OS << '\n';
@@ -479,11 +472,11 @@ static inline unsigned clampStackAlignment(bool ShouldClamp, unsigned PrefAlign,
   if (!ShouldClamp || PrefAlign <= StackAlign)
     return PrefAlign;
   if (Alloca && MinAlign > StackAlign)
-    Alloca->getParent()->getContext().emitError(Alloca,
-        "Requested Minimal Alignment exceeds the Stack Alignment!");
+    Alloca->getParent()->getContext().emitWarning(Alloca,
+        "Requested alignment exceeds the stack alignment!");
   else
     assert(MinAlign <= StackAlign &&
-           "Requested Minimal Alignment exceeds the Stack Alignment!");
+           "Requested alignment exceeds the stack alignment!");
   return StackAlign;
 }
 
