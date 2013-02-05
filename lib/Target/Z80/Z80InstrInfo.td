@@ -23,6 +23,8 @@ include "Z80InstrFormats.td"
 def SDT_Z80Call         : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
 def SDT_Z80CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i16>]>;
 def SDT_Z80CallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
+def SDT_Z80Wrapper      : SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>,
+                                               SDTCisPtrTy<0>]>;
 def SDT_Z80Cp           : SDTypeProfile<0, 2, [SDTCisSameAs<0, 1>]>;
 def SDT_Z80SelectCC     : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
                                                SDTCisSameAs<1, 2>,
@@ -40,6 +42,7 @@ def Z80callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_Z80CallSeqEnd,
                      [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
 def Z80ret           : SDNode<"Z80ISD::RET", SDTNone,
                      [SDNPHasChain, SDNPOptInGlue]>;
+def Z80wrapper       : SDNode<"Z80ISD::WRAPPER", SDT_Z80Wrapper>;
 def Z80rlc           : SDNode<"Z80ISD::RLC", SDTIntUnaryOp, [SDNPOutGlue]>;
 def Z80rrc           : SDNode<"Z80ISD::RRC", SDTIntUnaryOp, [SDNPOutGlue]>;
 def Z80rl            : SDNode<"Z80ISD::RL",  SDTIntUnaryOp,
@@ -139,6 +142,16 @@ let isReMaterializable = 1, isAsCheapAsAMove = 1 in {
     "ld\t{$dst, $src}", [(set GR16:$dst, imm:$src)]>;
 }
 
+let canFoldAsLoad = 1, isReMaterializable = 1 in {
+  def LOAD8  : I<0x00, (outs GR8:$dst), (ins GR16:$src),
+    "load\t{$dst, ($src)}", [(set GR8:$dst, (load GR16:$src))]>;
+  def LOAD16 : I<0x00, (outs GR16:$dst), (ins GR16:$src),
+    "load\t{$dst, ($src)}", [(set GR16:$dst, (load GR16:$src))]>;
+}
+def STORE8  : I<0x00, (outs), (ins GR16:$dst, GR8:$src),
+  "store\t{($dst), $src}", [(store GR8:$src, GR16:$dst)]>;
+def STORE16 : I<0x00, (outs), (ins GR16:$dst, GR16:$src),
+  "store\t{($dst), $src}", [(store GR16:$src, GR16:$dst)]>;
 //===----------------------------------------------------------------------===//
 // Arithmetic Instructions
 //===----------------------------------------------------------------------===//
@@ -282,3 +295,5 @@ def : Pat<(subc A, imm:$src), (SUB8r imm:$src)>;
 def : Pat<(Z80call (i16 tglobaladdr:$dst)), (CALL tglobaladdr:$dst)>;
 def : Pat<(Z80call (i16 texternalsym:$dst)), (CALL texternalsym:$dst)>;
 
+// GlobalAddress
+def : Pat<(Z80wrapper tglobaladdr:$dst), (LD16ri tglobaladdr:$dst)>;

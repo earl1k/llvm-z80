@@ -29,7 +29,8 @@ void Z80InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
   printAnnotation(O, Annot);
 }
 
-void Z80InstPrinter::printOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O)
+void Z80InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
+  raw_ostream &O)
 {
   const MCOperand &Op = MI->getOperand(OpNo);
 
@@ -42,7 +43,8 @@ void Z80InstPrinter::printOperand(const MCInst *MI, unsigned OpNo, raw_ostream &
   else assert(0 && "unknown operand kind in printOperand");
 }
 
-void Z80InstPrinter::printCCOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O)
+void Z80InstPrinter::printCCOperand(const MCInst *MI, unsigned OpNo,
+  raw_ostream &O)
 {
   const MCOperand &Op = MI->getOperand(OpNo);
   assert(Op.isImm() && "Invalid CC operand");

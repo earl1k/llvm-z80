@@ -25,13 +25,13 @@ namespace llvm {
   namespace Z80ISD {
     enum NodeType {
       FIRST_NUMBER = ISD::BUILTIN_OP_END,
-      RET,
+      WRAPPER,
       SCF, CCF,
       RLC, RRC, RL, RR, SLA, SRA, SLL, SRL,
       CP,
       SELECT_CC,
       BR_CC,
-      CALL
+      CALL, RET
     }; // end NodeType
   } // end namespace Z80ISD
 
@@ -56,6 +56,7 @@ namespace llvm {
     SDValue LowerBinaryOp(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSelectCC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBrCC(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
 
     MachineBasicBlock* EmitInstrWithCustomInserter(MachineInstr *MI,
       MachineBasicBlock *MBB) const;

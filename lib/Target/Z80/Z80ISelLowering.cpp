@@ -49,6 +49,8 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
   setOperationAction(ISD::SELECT_CC, MVT::i16, Custom);
   setOperationAction(ISD::BR_CC, MVT::i8, Custom);
   setOperationAction(ISD::BR_CC, MVT::i16, Custom);
+
+  setOperationAction(ISD::GlobalAddress, MVT::i16, Custom);
 }
 
 //===----------------------------------------------------------------------===//
@@ -312,18 +314,19 @@ SDValue Z80TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const
 {
   switch (Op.getOpcode())
   {
-  case ISD::ZERO_EXTEND: return LowerZExt(Op, DAG);
-  case ISD::SIGN_EXTEND: return LowerSExt(Op, DAG);
+  case ISD::ZERO_EXTEND:   return LowerZExt(Op, DAG);
+  case ISD::SIGN_EXTEND:   return LowerSExt(Op, DAG);
   case ISD::SUB:
-  case ISD::SUBC:        return LowerSUB(Op, DAG);
+  case ISD::SUBC:          return LowerSUB(Op, DAG);
   case ISD::SRL:
   case ISD::SHL:
-  case ISD::SRA:         return LowerShifts(Op, DAG);
+  case ISD::SRA:           return LowerShifts(Op, DAG);
   case ISD::AND:
   case ISD::OR:
-  case ISD::XOR:         return LowerBinaryOp(Op, DAG);
-  case ISD::SELECT_CC:   return LowerSelectCC(Op, DAG);
-  case ISD::BR_CC:       return LowerBrCC(Op, DAG);
+  case ISD::XOR:           return LowerBinaryOp(Op, DAG);
+  case ISD::SELECT_CC:     return LowerSelectCC(Op, DAG);
+  case ISD::BR_CC:         return LowerBrCC(Op, DAG);
+  case ISD::GlobalAddress: return LowerGlobalAddress(Op, DAG);
   default:
     llvm_unreachable("unimplemented operation");
   }
@@ -334,7 +337,7 @@ const char *Z80TargetLowering::getTargetNodeName(unsigned Opcode) const
   switch (Opcode)
   {
   default: return NULL;
-  case Z80ISD::RET:       return "Z80ISD::RET";
+  case Z80ISD::WRAPPER:   return "Z80ISD::WRAPPER";
   case Z80ISD::SCF:       return "Z80ISD::SCF";
   case Z80ISD::CCF:       return "Z80ISD::CCF";
   case Z80ISD::RLC:       return "Z80ISD::RLC";
@@ -349,6 +352,7 @@ const char *Z80TargetLowering::getTargetNodeName(unsigned Opcode) const
   case Z80ISD::SELECT_CC: return "Z80ISD::SELECT_CC";
   case Z80ISD::BR_CC:     return "Z80ISD::BR_CC";
   case Z80ISD::CALL:      return "Z80ISD::CALL";
+  case Z80ISD::RET:       return "Z80ISD::RET";
   }
 }
 
@@ -565,6 +569,20 @@ SDValue Z80TargetLowering::LowerBrCC(SDValue Op, SelectionDAG &DAG) const
   SDValue Flag = EmitCMP(LHS, RHS, Z80CC, CC, dl, DAG);
 
   return DAG.getNode(Z80ISD::BR_CC, dl, VT, Chain, Z80CC, Dest, Flag);
+}
+
+SDValue Z80TargetLowering::LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const
+{
+  DebugLoc dl = Op.getDebugLoc();
+  EVT VT      = getPointerTy();
+
+  const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
+  int64_t Offset = cast<GlobalAddressSDNode>(Op)->getOffset();
+
+  // Create the TargetGlobalAddress node, folding in the constant offset.
+  SDValue Result = DAG.getTargetGlobalAddress(GV, dl, VT, Offset);
+
+  return DAG.getNode(Z80ISD::WRAPPER, dl, VT, Result);
 }
 
 //===----------------------------------------------------------------------===//
