@@ -41,7 +41,7 @@ def Z80callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_Z80CallSeqStart,
 def Z80callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_Z80CallSeqEnd,
                      [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
 def Z80ret           : SDNode<"Z80ISD::RET", SDTNone,
-                     [SDNPHasChain, SDNPOptInGlue]>;
+                     [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def Z80wrapper       : SDNode<"Z80ISD::WRAPPER", SDT_Z80Wrapper>;
 def Z80rlc           : SDNode<"Z80ISD::RLC", SDTIntUnaryOp, [SDNPOutGlue]>;
 def Z80rrc           : SDNode<"Z80ISD::RRC", SDTIntUnaryOp, [SDNPOutGlue]>;

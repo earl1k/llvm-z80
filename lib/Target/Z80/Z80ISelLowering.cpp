@@ -146,15 +146,8 @@ SDValue Z80TargetLowering::LowerReturn(SDValue Chain,
   // Analyze return values.
   CCInfo.AnalyzeReturn(Outs, RetCC_Z80);
 
-  // If this is the first return lowered for this function, add
-  // the regs to the liveout set for the function.
-  if (DAG.getMachineFunction().getRegInfo().liveout_empty()) {
-    for (unsigned i = 0; i != RVLocs.size(); i++)
-      if (RVLocs[i].isRegLoc())
-        DAG.getMachineFunction().getRegInfo().addLiveOut(RVLocs[i].getLocReg());
-  }
-
   SDValue Flag;
+  SmallVector<SDValue, 4> RetOps(1, Chain);
 
   // Copy the result value into the output registers.
   for (unsigned i = 0; i != RVLocs.size(); i++)
@@ -167,10 +160,15 @@ SDValue Z80TargetLowering::LowerReturn(SDValue Chain,
     // Guarantee the all emitted copies are stuck together,
     // avoiding something bad
     Flag = Chain.getValue(1);
+    RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
   }
+
+  RetOps[0] = Chain;  // Update chain.
+
   if (Flag.getNode())
-    return DAG.getNode(Z80ISD::RET, dl, MVT::Other, Chain, Flag);
-  return DAG.getNode(Z80ISD::RET, dl, MVT::Other, Chain);
+    RetOps.push_back(Flag);
+
+  return DAG.getNode(Z80ISD::RET, dl, MVT::Other, &RetOps[0], RetOps.size());
 }
 
 SDValue Z80TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,

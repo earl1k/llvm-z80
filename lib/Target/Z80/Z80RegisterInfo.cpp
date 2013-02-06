@@ -79,7 +79,7 @@ void Z80RegisterInfo::eliminateCallFramePseudoInstr(MachineFunction &MF,
 }
 
 void Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator I,
-  int SPAdj, RegScavenger *RS) const
+  int SPAdj, unsigned FIOperandNum, RegScavenger *RS) const
 {
   assert(0 && "Not implemented yet!");
 }
