@@ -46,19 +46,20 @@ namespace llvm {
     }
     inline void setRegPrefix(uint64_t &TSFlags, Prefixes Prefix)
     {
-      switch (TSFlags & PrefixMask)
-      {
-      default: llvm_unreachable("");
-      case NoPrefix:
-      case CB:
-        break;
-      }
       switch (Prefix)
       {
       default: llvm_unreachable("Invalid Prefix");
       case NoPrefix:
+        return;
       case FD:
       case DD:
+        break;
+      }
+      switch (TSFlags & PrefixMask)
+      {
+      default: llvm_unreachable("Invalid Prefix");
+      case NoPrefix:
+      case CB:
         break;
       }
       TSFlags += Prefix;

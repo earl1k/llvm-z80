@@ -250,12 +250,12 @@ let Uses = [HL], Defs = [HL, FLAGS] in {
     def ADD16r : IRp<0x09, (outs), (ins GR16:$src),
       "add\t{hl, $src}", [(set HL, (add HL, GR16:$src))]>;
     let Uses = [HL, FLAGS] in
-    def ADC16r : IRp<0x4A, (outs), (ins GR16:$src),
-      "adc\t{hl, $src}", [(set HL, (adde HL, GR16:$src))]>, ED;
+    def ADC16r : IRp<0x4A, (outs), (ins BR16:$src),
+      "adc\t{hl, $src}", [(set HL, (adde HL, BR16:$src))]>, ED;
   }
   let Uses = [HL, FLAGS] in
-  def SBC16r : IRp<0x42, (outs), (ins GR16:$src),
-    "sbc\t{hl, $src}", [(set HL, (sube HL, GR16:$src))]>, ED;
+  def SBC16r : IRp<0x42, (outs), (ins BR16:$src),
+    "sbc\t{hl, $src}", [(set HL, (sube HL, BR16:$src))]>, ED;
 }
 
 let Constraints = "$src = $dst" in {
