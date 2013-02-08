@@ -34,6 +34,7 @@ namespace llvm {
     {
       switch (TSFlags & PrefixMask)
       {
+      default: llvm_unreachable("Invalid Prefix");
       case NoPrefix: return 0x00;
       case CB:       return 0xCB;
       case ED:       return 0xED;

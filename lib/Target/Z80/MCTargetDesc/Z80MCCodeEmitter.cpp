@@ -143,8 +143,8 @@ unsigned Z80MCCodeEmitter::getMachineOpValue(const MCInst &MI,
       Fixups.push_back(MCFixup::Create(2, MO.getExpr(), FK_Data_2));
     else
       Fixups.push_back(MCFixup::Create(1, MO.getExpr(), FK_Data_2));
-    return 0;
   }
+  return 0;
 }
 
 unsigned Z80MCCodeEmitter::getBREncoding(const MCInst &MI, unsigned OpNo,
