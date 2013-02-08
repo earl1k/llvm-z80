@@ -28,7 +28,7 @@ namespace llvm {
       CB = 4,
       DDCB = 5,
       FDCB = 6,
-      PrefixMask = 7,
+      PrefixMask = 7
     }; // end enum
     inline unsigned getPrefix(uint64_t TSFlags)
     {
