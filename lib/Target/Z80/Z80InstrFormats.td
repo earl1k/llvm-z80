@@ -19,10 +19,10 @@ class Prefix<bits<3> n> {
   field bits<3> Prefix = n;
 }
 
-class CB       : Prefix<1>;
-class ED       : Prefix<2>;
-class DD       : Prefix<3>;
-class FD       : Prefix<4>;
+class DD       : Prefix<1>;
+class FD       : Prefix<2>;
+class ED       : Prefix<3>;
+class CB       : Prefix<4>;
 class DDCB     : Prefix<5>;
 class FDCB     : Prefix<6>;
 

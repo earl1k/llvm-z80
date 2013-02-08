@@ -43,6 +43,9 @@ namespace llvm {
         Code >>= 8;
       }
     }
+    void EmitPrefix(const MCInst &MI, raw_ostream &OS) const;
+    bool hasRegPrefix(const MCInst &MI) const;
+    Z80II::Prefixes getRegPrefix(const MCInst &MI) const;
 
     // getBinaryCodeForInstr - tblgen generated function for getting the
     // binary encoding for an instruction.
@@ -69,15 +72,56 @@ void Z80MCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
 {
   unsigned Opcode = MI.getOpcode();
   const MCInstrDesc &Desc = MCII.get(Opcode);
-  uint64_t TSFlags = Desc.TSFlags;
   unsigned Size = Desc.getSize();
 
+  EmitPrefix(MI, OS);
   uint64_t Bits = getBinaryCodeForInstr(MI, Fixups);
 
-  if (TSFlags & Z80II::PrefixMask)
-    EmitByte(Z80II::getPrefix(TSFlags), OS);
-  
   EmitInstruction(Bits, Size, OS);
+}
+
+bool Z80MCCodeEmitter::hasRegPrefix(const MCInst &MI) const
+{
+  return getRegPrefix(MI) != Z80II::NoPrefix;
+}
+
+Z80II::Prefixes Z80MCCodeEmitter::getRegPrefix(const MCInst &MI) const
+{
+ for (unsigned i = 0, e = MI.getNumOperands(); i != e; i++)
+  {
+    MCOperand MCOp = MI.getOperand(i);
+    if (MCOp.isReg())
+    {
+      switch (MCOp.getReg())
+      {
+      default: continue;
+      case Z80::IX:
+      case Z80::XH:
+      case Z80::XL:
+        return Z80II::DD;
+      case Z80::IY:
+      case Z80::YH:
+      case Z80::YL:
+        return Z80II::FD;
+      }
+    }
+  }
+  return Z80II::NoPrefix;
+}
+
+void Z80MCCodeEmitter::EmitPrefix(const MCInst &MI, raw_ostream &OS) const
+{
+  const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
+  uint64_t TSFlags = Desc.TSFlags;
+
+  Z80II::setRegPrefix(TSFlags, getRegPrefix(MI));
+  unsigned Prefix = Z80II::getPrefix(TSFlags);
+
+  while (Prefix)
+  {
+    EmitByte(Prefix, OS);
+    Prefix = Prefix>>8;
+  }
 }
 
 unsigned Z80MCCodeEmitter::getMachineOpValue(const MCInst &MI,
@@ -95,7 +139,10 @@ unsigned Z80MCCodeEmitter::getMachineOpValue(const MCInst &MI,
   }
   else if (MO.isExpr())
   {
-    Fixups.push_back(MCFixup::Create(1, MO.getExpr(), FK_Data_2));
+    if (hasRegPrefix(MI))
+      Fixups.push_back(MCFixup::Create(2, MO.getExpr(), FK_Data_2));
+    else
+      Fixups.push_back(MCFixup::Create(1, MO.getExpr(), FK_Data_2));
     return 0;
   }
 }

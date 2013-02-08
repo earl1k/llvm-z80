@@ -20,26 +20,47 @@
 
 namespace llvm {
   namespace Z80II {
-    enum {
+    enum Prefixes {
       NoPrefix = 0,
-      CB = 1,
-      ED = 2,
-      DD = 3,
-      FD = 4,
+      DD = 1,
+      FD = 2,
+      ED = 3,
+      CB = 4,
       DDCB = 5,
       FDCB = 6,
       PrefixMask = 7,
     }; // end enum
-    inline unsigned char getPrefix(uint64_t TSFlags)
+    inline unsigned getPrefix(uint64_t TSFlags)
     {
       switch (TSFlags & PrefixMask)
       {
-      default: assert(0 && "Invalid Prefix");
-      case CB: return 0xCB;
-      case ED: return 0xED;
-      case DD: return 0xDD;
-      case FD: return 0xFD;
+      case NoPrefix: return 0x00;
+      case CB:       return 0xCB;
+      case ED:       return 0xED;
+      case DD:       return 0xDD;
+      case FD:       return 0xFD;
+      case DDCB:     return 0xDDCB;
+      case FDCB:     return 0xFDCB;
       }
+    }
+    inline void setRegPrefix(uint64_t &TSFlags, Prefixes Prefix)
+    {
+      switch (TSFlags & PrefixMask)
+      {
+      default: llvm_unreachable("");
+      case NoPrefix:
+      case CB:
+        break;
+      }
+      switch (Prefix)
+      {
+      default: llvm_unreachable("Invalid Prefix");
+      case NoPrefix:
+      case FD:
+      case DD:
+        break;
+      }
+      TSFlags += Prefix;
     }
   } // end namespace Z80II
 } // end namespace llvm
