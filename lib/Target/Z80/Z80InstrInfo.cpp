@@ -31,12 +31,12 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   MachineBasicBlock::iterator I, DebugLoc DL,
   unsigned DestReg, unsigned SrcReg, bool KillSrc) const
 {
-  if (Z80::GR8RegClass.contains(DestReg, SrcReg))
+  if (Z80::BR8RegClass.contains(DestReg, SrcReg))
   {
     BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
   }
-  else if (Z80::GR16RegClass.contains(DestReg, SrcReg))
+  else if (Z80::BR16RegClass.contains(DestReg, SrcReg))
   {
     unsigned DestSubReg, SrcSubReg;
 
@@ -49,6 +49,12 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     SrcSubReg  = RI.getSubReg(SrcReg,  Z80::subreg_hi);
     BuildMI(MBB, I, DL, get(Z80::LD8rr), DestSubReg)
       .addReg(SrcSubReg, getKillRegState(KillSrc));
+  }
+  else if (Z80::GR16RegClass.contains(DestReg, SrcReg))
+  {
+    // use stack for copy registers
+    BuildMI(MBB, I, DL, get(Z80::PUSH16r)).addReg(SrcReg);
+    BuildMI(MBB, I, DL, get(Z80::POP16r), DestReg);
   }
   else llvm_unreachable("Imposible reg-to-reg copy");
 }
