@@ -82,3 +82,20 @@ void Z80InstPrinter::printCCOperand(const MCInst *MI, unsigned OpNo,
   }
   O << cond;
 }
+
+void Z80InstPrinter::printXMemOperand(const MCInst *MI, unsigned OpNo,
+  raw_ostream &O)
+{
+  const MCOperand &Base = MI->getOperand(OpNo);
+  const MCOperand &Disp = MI->getOperand(OpNo+1);
+
+  if (Base.isReg())
+  {
+    assert(Disp.isImm() && "Expected immediate in displacement field");
+    int64_t Offset = Disp.getImm();
+    O << getRegisterName(Base.getReg());
+    if (Offset >= 0) O << '+';
+    O << Offset;
+  }
+  else llvm_unreachable("Invalid operand");
+}
