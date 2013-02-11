@@ -247,8 +247,8 @@ let Defs = [FLAGS] in {
 
 let Uses = [HL], Defs = [HL, FLAGS] in {
   let isCommutable = 1 in {
-    def ADD16r : IRp<0x09, (outs), (ins GR16:$src),
-      "add\t{hl, $src}", [(set HL, (add HL, GR16:$src))]>;
+    def ADD16r : IRp<0x09, (outs), (ins BR16:$src),
+      "add\t{hl, $src}", [(set HL, (add HL, BR16:$src))]>;
     let Uses = [HL, FLAGS] in
     def ADC16r : IRp<0x4A, (outs), (ins BR16:$src),
       "adc\t{hl, $src}", [(set HL, (adde HL, BR16:$src))]>, ED;

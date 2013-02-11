@@ -40,8 +40,8 @@ namespace llvm {
       case ED:       return 0xED;
       case DD:       return 0xDD;
       case FD:       return 0xFD;
-      case DDCB:     return 0xDDCB;
-      case FDCB:     return 0xFDCB;
+      case DDCB:     return 0xCBDD;
+      case FDCB:     return 0xCBFD;
       }
     }
     inline void setRegPrefix(uint64_t &TSFlags, Prefixes Prefix)
