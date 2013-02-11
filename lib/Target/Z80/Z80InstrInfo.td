@@ -102,6 +102,11 @@ let Defs = [FLAGS] in {
   def CCF : I<0x3F, (outs), (ins), "ccf", [(Z80ccf)]>;
 }
 
+let Uses = [SP] in 
+  def ADD16rSP : I<0x39, (outs GR16:$dst), (ins), "add\t{$dst, sp}", []>;
+let Defs = [SP] in
+  def LD16SPr  : I<0xF9, (outs), (ins GR16:$src), "ld\t{sp, $src}", []>;
+
 let Defs = [SP], Uses = [SP] in {
   let mayLoad = 1 in
     def POP16r  : IRp<0xC1, (outs GR16:$reg), (ins), "pop\t{$reg}", []>;
