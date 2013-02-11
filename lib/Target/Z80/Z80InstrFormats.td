@@ -128,6 +128,16 @@ class IRz<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern,
 }
 
 //===----------------------------------------------------------------------===//
+// Simple Instruction with R[z], I[8]
+//===----------------------------------------------------------------------===//
+
+class IRzI8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+  : IRz<opc, outs, ins, asmstr, pattern, 2> {
+  bits<8> imm;
+  let Inst{15-8} = imm;
+}
+
+//===----------------------------------------------------------------------===//
 // Simple Instruction with R[p]
 //===----------------------------------------------------------------------===//
 
