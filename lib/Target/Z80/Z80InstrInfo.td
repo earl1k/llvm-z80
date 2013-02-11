@@ -117,6 +117,8 @@ let Uses = [SP] in
   def ADD16rSP : I<0x39, (outs GR16:$dst), (ins), "add\t{$dst, sp}", []>;
 let Defs = [SP] in
   def LD16SPr  : I<0xF9, (outs), (ins GR16:$src), "ld\t{sp, $src}", []>;
+let Defs = [HL, DE], Uses = [HL, DE] in
+  def EX_DE_HL : I<0xEB, (outs), (ins), "ex\t{de, hl}", []>;
 
 let Defs = [SP], Uses = [SP] in {
   let mayLoad = 1 in

@@ -35,28 +35,96 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   {
     BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
+    return;
+  }
+  else if (Z80::GR8RegClass.contains(DestReg, SrcReg))
+  {
+    if (Z80::BR8RegClass.contains(DestReg))
+    {
+      // DestReg - BR8
+      // SrcReg  - GR8
+      if (DestReg == Z80::H || DestReg == Z80::L)
+      {
+        unsigned Idx = RI.getSubRegIndex(Z80::HL, DestReg);
+
+        BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
+        BuildMI(MBB, I, DL, get(Z80::LD8rr), RI.getSubReg(Z80::DE, Idx))
+          .addReg(SrcReg, getKillRegState(KillSrc));
+        BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
+      }
+      else
+        BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
+          .addReg(SrcReg, getKillRegState(KillSrc));
+      return;
+    }
+    else if (Z80::BR8RegClass.contains(SrcReg))
+    {
+      // DestReg - GR8
+      // SrcReg  - BR8
+      if (SrcReg == Z80::H || SrcReg == Z80::L)
+      {
+        unsigned Idx = RI.getSubRegIndex(Z80::HL, SrcReg);
+
+        BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
+        BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
+          .addReg(RI.getSubReg(Z80::DE, Idx), getKillRegState(KillSrc));
+        BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
+      }
+      else
+        BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
+          .addReg(SrcReg, getKillRegState(KillSrc));
+      return;
+    }
+    else
+    {
+      // DestReg - GR8
+      // SrcReg  - GR8
+      if (RI.getSubRegIndex(Z80::IX, DestReg) &&
+          RI.getSubRegIndex(Z80::IX, SrcReg) ||
+          RI.getSubRegIndex(Z80::IY, DestReg) &&
+          RI.getSubRegIndex(Z80::IY, SrcReg))
+      {
+        BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
+          .addReg(SrcReg, getKillRegState(KillSrc));
+        return;
+      }
+      // copy from/to different index register
+    }
   }
   else if (Z80::BR16RegClass.contains(DestReg, SrcReg))
   {
-    unsigned DestSubReg, SrcSubReg;
+    if ((DestReg == Z80::HL || DestReg == Z80::DE) &&
+        (SrcReg  == Z80::HL || SrcReg  == Z80::DE) &&
+        KillSrc)
+    {
+      BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
+      BuildMI(MBB, I, DL, get(Z80::KILL))
+        .addReg(SrcReg, getKillRegState(KillSrc));
+    }
+    else
+    {
+      unsigned DestSubReg, SrcSubReg;
 
-    DestSubReg = RI.getSubReg(DestReg, Z80::subreg_lo);
-    SrcSubReg  = RI.getSubReg(SrcReg,  Z80::subreg_lo);
-    BuildMI(MBB, I, DL, get(Z80::LD8rr), DestSubReg)
-      .addReg(SrcSubReg, getKillRegState(KillSrc));
+      DestSubReg = RI.getSubReg(DestReg, Z80::subreg_lo);
+      SrcSubReg  = RI.getSubReg(SrcReg,  Z80::subreg_lo);
+      BuildMI(MBB, I, DL, get(Z80::LD8rr), DestSubReg)
+        .addReg(SrcSubReg, getKillRegState(KillSrc));
 
-    DestSubReg = RI.getSubReg(DestReg, Z80::subreg_hi);
-    SrcSubReg  = RI.getSubReg(SrcReg,  Z80::subreg_hi);
-    BuildMI(MBB, I, DL, get(Z80::LD8rr), DestSubReg)
-      .addReg(SrcSubReg, getKillRegState(KillSrc));
+      DestSubReg = RI.getSubReg(DestReg, Z80::subreg_hi);
+      SrcSubReg  = RI.getSubReg(SrcReg,  Z80::subreg_hi);
+      BuildMI(MBB, I, DL, get(Z80::LD8rr), DestSubReg)
+        .addReg(SrcSubReg, getKillRegState(KillSrc));
+    }
+    return;
   }
   else if (Z80::GR16RegClass.contains(DestReg, SrcReg))
   {
     // use stack for copy registers
     BuildMI(MBB, I, DL, get(Z80::PUSH16r)).addReg(SrcReg);
     BuildMI(MBB, I, DL, get(Z80::POP16r), DestReg);
+    return;
   }
-  else llvm_unreachable("Imposible reg-to-reg copy");
+  llvm_unreachable("Imposible reg-to-reg copy");
 }
 
 MachineInstr *Z80InstrInfo::commuteInstruction(MachineInstr *MI,
