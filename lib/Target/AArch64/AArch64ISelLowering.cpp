@@ -1863,7 +1863,7 @@ AArch64TargetLowering::LowerGlobalAddressELF(SDValue Op,
   // TableGen doesn't have easy access to the CodeModel or RelocationModel, so
   // we make that distinction here.
 
-  // We support the static, small memory model for now.
+  // We support the small memory model for now.
   assert(getTargetMachine().getCodeModel() == CodeModel::Small);
 
   EVT PtrVT = getPointerTy();
@@ -1871,6 +1871,18 @@ AArch64TargetLowering::LowerGlobalAddressELF(SDValue Op,
   const GlobalAddressSDNode *GN = cast<GlobalAddressSDNode>(Op);
   const GlobalValue *GV = GN->getGlobal();
   unsigned Alignment = GV->getAlignment();
+  Reloc::Model RelocM = getTargetMachine().getRelocationModel();
+
+  if (GV->isWeakForLinker() && RelocM == Reloc::Static) {
+    // Weak symbols can't use ADRP/ADD pair since they should evaluate to
+    // zero when undefined. In PIC mode the GOT can take care of this, but in
+    // absolute mode we use a constant pool load.
+    return DAG.getLoad(PtrVT, dl, DAG.getEntryNode(),
+                       DAG.getConstantPool(GV, GN->getValueType(0)),
+                       MachinePointerInfo::getConstantPool(),
+                       /*isVolatile=*/ false,  /*isNonTemporal=*/ true,
+                       /*isInvariant=*/ true, 8);
+  }
 
   if (Alignment == 0) {
     const PointerType *GVPtrTy = cast<PointerType>(GV->getType());
@@ -1886,7 +1898,6 @@ AArch64TargetLowering::LowerGlobalAddressELF(SDValue Op,
   }
 
   unsigned char HiFixup, LoFixup;
-  Reloc::Model RelocM = getTargetMachine().getRelocationModel();
   bool UseGOT = Subtarget->GVIsIndirectSymbol(GV, RelocM);
 
   if (UseGOT) {
@@ -2680,7 +2691,7 @@ static bool findEXTRHalf(SDValue N, SDValue &Src, uint32_t &ShiftAmount,
   return true;
 }
 
-/// EXTR instruciton extracts a contiguous chunk of bits from two existing
+/// EXTR instruction extracts a contiguous chunk of bits from two existing
 /// registers viewed as a high/low pair. This function looks for the pattern:
 /// (or (shl VAL1, #N), (srl VAL2, #RegWidth-N)) and replaces it with an
 /// EXTR. Can't quite be done in TableGen because the two immediates aren't

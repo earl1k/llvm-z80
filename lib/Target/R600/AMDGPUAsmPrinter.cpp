@@ -118,10 +118,16 @@ void AMDGPUAsmPrinter::EmitProgramInfo(MachineFunction &MF) {
         } else if (AMDGPU::SReg_256RegClass.contains(reg)) {
           isSGPR = true;
           width = 8;
+        } else if (AMDGPU::VReg_256RegClass.contains(reg)) {
+          isSGPR = false;
+          width = 8;
+        } else if (AMDGPU::VReg_512RegClass.contains(reg)) {
+          isSGPR = false;
+          width = 16;
         } else {
           assert(!"Unknown register class");
         }
-        hwReg = RI->getEncodingValue(reg);
+        hwReg = RI->getEncodingValue(reg) & 0xff;
         maxUsed = hwReg + width - 1;
         if (isSGPR) {
           MaxSGPR = maxUsed > MaxSGPR ? maxUsed : MaxSGPR;

@@ -125,6 +125,10 @@ namespace llvm {
     std::map<ValID, std::vector<std::pair<ValID, GlobalValue*> > >
       ForwardRefBlockAddresses;
 
+    // Attribute builder reference information.
+    std::map<Value*, std::vector<unsigned> > ForwardRefAttrGroups;
+    std::map<unsigned, AttrBuilder> NumberedAttrBuilders;
+
   public:
     LLParser(MemoryBuffer *F, SourceMgr &SM, SMDiagnostic &Err, Module *m) :
       Context(m->getContext()), Lex(F, SM, Err, m->getContext()),
@@ -191,7 +195,6 @@ namespace llvm {
     bool ParseTLSModel(GlobalVariable::ThreadLocalMode &TLM);
     bool ParseOptionalThreadLocal(GlobalVariable::ThreadLocalMode &TLM);
     bool ParseOptionalAddrSpace(unsigned &AddrSpace);
-    bool ParseOptionalFuncAttrs(AttrBuilder &B);
     bool ParseOptionalParamAttrs(AttrBuilder &B);
     bool ParseOptionalReturnAttrs(AttrBuilder &B);
     bool ParseOptionalLinkage(unsigned &Linkage, bool &HasLinkage);
@@ -236,6 +239,10 @@ namespace llvm {
     bool ParseMDString(MDString *&Result);
     bool ParseMDNodeID(MDNode *&Result);
     bool ParseMDNodeID(MDNode *&Result, unsigned &SlotNo);
+    bool ParseUnnamedAttrGrp();
+    bool ParseFnAttributeValuePairs(AttrBuilder &B,
+                                    std::vector<unsigned> &FwdRefAttrGrps,
+                                    bool inAttrGrp);
 
     // Type Parsing.
     bool ParseType(Type *&Result, bool AllowVoid = false);

@@ -185,12 +185,62 @@ static uint64_t encodeLLVMAttributesForBitcode(AttributeSet Attrs,
   return EncodedAttrs;
 }
 
+static void WriteAttributeGroupTable(const ValueEnumerator &VE,
+                                     BitstreamWriter &Stream) {
+  const std::vector<AttributeSet> &Attrs = VE.getAttributeSets();
+  if (Attrs.empty()) return;
+
+  Stream.EnterSubblock(bitc::PARAMATTR_GROUP_BLOCK_ID, 3);
+
+  SmallVector<uint64_t, 64> Record;
+  for (unsigned i = 0, e = Attrs.size(); i != e; ++i) {
+    AttributeSet AS = Attrs[i];
+    for (unsigned i = 0, e = AS.getNumSlots(); i != e; ++i) {
+      AttributeSet A = AS.getSlotAttributes(i);
+
+      Record.push_back(VE.getAttributeSetID(A));
+      Record.push_back(AS.getSlotIndex(i));
+
+      for (AttributeSet::iterator I = AS.begin(0), E = AS.end(0);
+           I != E; ++I) {
+        Attribute Attr = *I;
+        if (Attr.isEnumAttribute()) {
+          Record.push_back(0);
+          Record.push_back(Attr.getKindAsEnum());
+        } else if (Attr.isAlignAttribute()) {
+          Record.push_back(1);
+          Record.push_back(Attr.getKindAsEnum());
+          Record.push_back(Attr.getValueAsInt());
+        } else {
+          StringRef Kind = Attr.getKindAsString();
+          StringRef Val = Attr.getValueAsString();
+
+          Record.push_back(Val.empty() ? 3 : 4);
+          Record.append(Kind.begin(), Kind.end());
+          Record.push_back(0);
+          if (!Val.empty()) {
+            Record.append(Val.begin(), Val.end());
+            Record.push_back(0);
+          }
+        }
+      }
+
+      Stream.EmitRecord(bitc::PARAMATTR_GRP_CODE_ENTRY, Record);
+      Record.clear();
+    }
+  }
+
+  Stream.ExitBlock();
+}
+
 static void WriteAttributeTable(const ValueEnumerator &VE,
                                 BitstreamWriter &Stream) {
   const std::vector<AttributeSet> &Attrs = VE.getAttributes();
   if (Attrs.empty()) return;
 
   Stream.EnterSubblock(bitc::PARAMATTR_BLOCK_ID, 3);
+
+  // FIXME: Remove this! It no longer works with the current attributes classes.
 
   SmallVector<uint64_t, 64> Record;
   for (unsigned i = 0, e = Attrs.size(); i != e; ++i) {
@@ -1199,7 +1249,7 @@ static void WriteInstruction(const Instruction &I, unsigned InstID,
   case Instruction::Br:
     {
       Code = bitc::FUNC_CODE_INST_BR;
-      BranchInst &II = cast<BranchInst>(I);
+      const BranchInst &II = cast<BranchInst>(I);
       Vals.push_back(VE.getValueID(II.getSuccessor(0)));
       if (II.isConditional()) {
         Vals.push_back(VE.getValueID(II.getSuccessor(1)));
@@ -1214,7 +1264,7 @@ static void WriteInstruction(const Instruction &I, unsigned InstID,
       SmallVector<uint64_t, 128> Vals64;
 
       Code = bitc::FUNC_CODE_INST_SWITCH;
-      SwitchInst &SI = cast<SwitchInst>(I);
+      const SwitchInst &SI = cast<SwitchInst>(I);
 
       uint32_t SwitchRecordHeader = SI.hash() | (SWITCH_INST_MAGIC << 16);
       Vals64.push_back(SwitchRecordHeader);
@@ -1223,9 +1273,9 @@ static void WriteInstruction(const Instruction &I, unsigned InstID,
       pushValue64(SI.getCondition(), InstID, Vals64, VE);
       Vals64.push_back(VE.getValueID(SI.getDefaultDest()));
       Vals64.push_back(SI.getNumCases());
-      for (SwitchInst::CaseIt i = SI.case_begin(), e = SI.case_end();
+      for (SwitchInst::ConstCaseIt i = SI.case_begin(), e = SI.case_end();
            i != e; ++i) {
-        IntegersSubset& CaseRanges = i.getCaseValueEx();
+        const IntegersSubset& CaseRanges = i.getCaseValueEx();
         unsigned Code, Abbrev; // will unused.
 
         if (CaseRanges.isSingleNumber()) {
@@ -1853,6 +1903,9 @@ static void WriteModule(const Module *M, BitstreamWriter &Stream) {
 
   // Emit blockinfo, which defines the standard abbreviations etc.
   WriteBlockInfo(VE, Stream);
+
+  // Emit information about attribute groups.
+  WriteAttributeGroupTable(VE, Stream);
 
   // Emit information about parameter attributes.
   WriteAttributeTable(VE, Stream);

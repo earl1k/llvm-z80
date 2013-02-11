@@ -117,7 +117,11 @@ public:
   unsigned getCastInstrCost(unsigned Opcode, Type *Dst,
                                       Type *Src) const;
 
+  unsigned getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondTy) const;
+
   unsigned getVectorInstrCost(unsigned Opcode, Type *Val, unsigned Index) const;
+
+  unsigned getAddressComputationCost(Type *Val) const;
   /// @}
 };
 
@@ -302,12 +306,32 @@ unsigned ARMTTI::getCastInstrCost(unsigned Opcode, Type *Dst,
 
 unsigned ARMTTI::getVectorInstrCost(unsigned Opcode, Type *ValTy,
                                     unsigned Index) const {
-  // Penalize inserting into an D-subregister.
+  // Penalize inserting into an D-subregister. We end up with a three times
+  // lower estimated throughput on swift.
   if (ST->isSwift() &&
       Opcode == Instruction::InsertElement &&
       ValTy->isVectorTy() &&
       ValTy->getScalarSizeInBits() <= 32)
-    return 2;
+    return 3;
 
   return TargetTransformInfo::getVectorInstrCost(Opcode, ValTy, Index);
+}
+
+unsigned ARMTTI::getCmpSelInstrCost(unsigned Opcode, Type *ValTy,
+                                    Type *CondTy) const {
+
+  int ISD = TLI->InstructionOpcodeToISD(Opcode);
+  // On NEON a a vector select gets lowered to vbsl.
+  if (ST->hasNEON() && ValTy->isVectorTy() && ISD == ISD::SELECT) {
+    std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(ValTy);
+    return LT.first;
+  }
+
+  return TargetTransformInfo::getCmpSelInstrCost(Opcode, ValTy, CondTy);
+}
+
+unsigned ARMTTI::getAddressComputationCost(Type *Ty) const {
+  // In many cases the address computation is not merged into the instruction
+  // addressing mode.
+  return 1;
 }

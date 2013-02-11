@@ -15,6 +15,7 @@
 #include "R600RegisterInfo.h"
 #include "AMDGPUTargetMachine.h"
 #include "R600Defines.h"
+#include "R600InstrInfo.h"
 #include "R600MachineFunctionInfo.h"
 
 using namespace llvm;
@@ -43,6 +44,18 @@ BitVector R600RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(AMDGPU::PRED_SEL_ZERO);
   Reserved.set(AMDGPU::PRED_SEL_ONE);
 
+  for (TargetRegisterClass::iterator I = AMDGPU::R600_AddrRegClass.begin(),
+                        E = AMDGPU::R600_AddrRegClass.end(); I != E; ++I) {
+    Reserved.set(*I);
+  }
+
+  const R600InstrInfo *RII = static_cast<const R600InstrInfo*>(&TII);
+  std::vector<unsigned> IndirectRegs = RII->getIndirectReservedRegs(MF);
+  for (std::vector<unsigned>::iterator I = IndirectRegs.begin(),
+                                       E = IndirectRegs.end();
+                                       I != E; ++I) {
+    Reserved.set(*I);
+  }
   return Reserved;
 }
 
@@ -71,9 +84,10 @@ const TargetRegisterClass * R600RegisterInfo::getCFGStructurizerRegClass(
 unsigned R600RegisterInfo::getSubRegFromChannel(unsigned Channel) const {
   switch (Channel) {
     default: assert(!"Invalid channel index"); return 0;
-    case 0: return AMDGPU::sel_x;
-    case 1: return AMDGPU::sel_y;
-    case 2: return AMDGPU::sel_z;
-    case 3: return AMDGPU::sel_w;
+    case 0: return AMDGPU::sub0;
+    case 1: return AMDGPU::sub1;
+    case 2: return AMDGPU::sub2;
+    case 3: return AMDGPU::sub3;
   }
 }
+

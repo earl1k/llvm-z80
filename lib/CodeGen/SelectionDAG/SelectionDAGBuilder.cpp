@@ -3259,8 +3259,7 @@ void SelectionDAGBuilder::visitAlloca(const AllocaInst &I) {
 
   // Inform the Frame Information that we have just allocated a variable-sized
   // object.
-  FuncInfo.MF->getFrameInfo()->CreateVariableSizedObject(Align ? Align : 1,
-                                 I.getAlignment(), &I);
+  FuncInfo.MF->getFrameInfo()->CreateVariableSizedObject(Align ? Align : 1);
 }
 
 void SelectionDAGBuilder::visitLoad(const LoadInst &I) {
@@ -3520,7 +3519,7 @@ void SelectionDAGBuilder::visitAtomicLoad(const LoadInst &I) {
 
   EVT VT = TLI.getValueType(I.getType());
 
-  if (I.getAlignment() * 8 < VT.getSizeInBits())
+  if (I.getAlignment() < VT.getSizeInBits() / 8)
     report_fatal_error("Cannot generate unaligned atomic load");
 
   SDValue L =
@@ -3550,7 +3549,7 @@ void SelectionDAGBuilder::visitAtomicStore(const StoreInst &I) {
 
   EVT VT = TLI.getValueType(I.getValueOperand()->getType());
 
-  if (I.getAlignment() * 8 < VT.getSizeInBits())
+  if (I.getAlignment() < VT.getSizeInBits() / 8)
     report_fatal_error("Cannot generate unaligned atomic store");
 
   if (TLI.getInsertFencesForAtomic())
@@ -6591,10 +6590,6 @@ void SelectionDAGISel::LowerArguments(const BasicBlock *LLVMBB) {
   DebugLoc dl = SDB->getCurDebugLoc();
   const DataLayout *TD = TLI.getDataLayout();
   SmallVector<ISD::InputArg, 16> Ins;
-
-  // Check whether the function can return without sret-demotion.
-  SmallVector<ISD::OutputArg, 4> Outs;
-  GetReturnInfo(F.getReturnType(), F.getAttributes(), Outs, TLI);
 
   if (!FuncInfo->CanLowerReturn) {
     // Put in an sret pointer parameter before all the other parameters.

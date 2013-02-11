@@ -52,6 +52,13 @@ Non-comprehensive list of changes in this release
   easy-to-write reStructuredText. See `llvm/docs/README.txt` for more
   information.
 
+* TargetTransformInfo (TTI) is a new interface that can be used by IR-level
+  passes to obtain target-specific information, such as the costs of
+  instructions. Only "Lowering" passes such as LSR and the vectorizer are
+  allowed to use the TTI infrastructure.
+
+* We've improved the X86 and ARM cost model.
+
 * ... next change ...
 
 .. NOTE
@@ -63,6 +70,32 @@ Non-comprehensive list of changes in this release
    -------------------
 
    Makes programs 10x faster by doing Special New Thing.
+
+Loop Vectorizer
+---------------
+
+We've continued the work on the loop vectorizer. The loop vectorizer now
+has the following features:
+
+- Loops with unknown trip count.
+- Runtime checks of pointers
+- Reductions, Inductions
+- If Conversion
+- Pointer induction variables
+- Reverse iterators
+- Vectorization of mixed types
+- Vectorization of function calls
+- Partial unrolling during vectorization
+
+R600 Backend
+------------
+
+The R600 backend was added in this release, it supports AMD GPUs
+(HD2XXX - HD7XXX).  This backend is used in AMD's Open Source
+graphics / compute drivers which are developed as part of the `Mesa3D
+<http://www.mesa3d.org>`_ project.
+
+
 
 Additional Information
 ======================

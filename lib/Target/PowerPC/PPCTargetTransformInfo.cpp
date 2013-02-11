@@ -194,6 +194,24 @@ unsigned PPCTTI::getVectorInstrCost(unsigned Opcode, Type *Val,
                                     unsigned Index) const {
   assert(Val->isVectorTy() && "This must be a vector type");
 
+  int ISD = TLI->InstructionOpcodeToISD(Opcode);
+  assert(ISD && "Invalid opcode");
+
+  // Estimated cost of a load-hit-store delay.  This was obtained
+  // experimentally as a minimum needed to prevent unprofitable
+  // vectorization for the paq8p benchmark.  It may need to be
+  // raised further if other unprofitable cases remain.
+  unsigned LHSPenalty = 12;
+
+  // Vector element insert/extract with Altivec is very expensive,
+  // because they require store and reload with the attendant
+  // processor stall for load-hit-store.  Until VSX is available,
+  // these need to be estimated as very costly.
+  if (ISD == ISD::EXTRACT_VECTOR_ELT ||
+      ISD == ISD::INSERT_VECTOR_ELT)
+    return LHSPenalty +
+      TargetTransformInfo::getVectorInstrCost(Opcode, Val, Index);
+
   return TargetTransformInfo::getVectorInstrCost(Opcode, Val, Index);
 }
 

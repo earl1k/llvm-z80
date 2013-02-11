@@ -737,6 +737,36 @@ The compiler declares the supported values of *name*. Specifying a
 collector which will cause the compiler to alter its output in order to
 support the named garbage collection algorithm.
 
+.. _attrgrp:
+
+Attribute Groups
+----------------
+
+Attribute groups are groups of attributes that are referenced by objects within
+the IR. They are important for keeping ``.ll`` files readable, because a lot of
+functions will use the same set of attributes. In the degenerative case of a
+``.ll`` file that corresponds to a single ``.c`` file, the single attribute
+group will capture the important command line flags used to build that file.
+
+An attribute group is a module-level object. To use an attribute group, an
+object references the attribute group's ID (e.g. ``#37``). An object may refer
+to more than one attribute group. In that situation, the attributes from the
+different groups are merged.
+
+Here is an example of attribute groups for a function that should always be
+inlined, has a stack alignment of 4, and which shouldn't use SSE instructions:
+
+.. code-block:: llvm
+
+   ; Target-independent attributes:
+   #0 = attributes { alwaysinline alignstack=4 }
+
+   ; Target-dependent attributes:
+   #1 = attributes { "no-sse" }
+
+   ; Function @f has attributes: alwaysinline, alignstack=4, and "no-sse".
+   define void @f() #0 #1 { ... }
+
 .. _fnattrs:
 
 Function Attributes
@@ -782,6 +812,17 @@ example:
 ``naked``
     This attribute disables prologue / epilogue emission for the
     function. This can have very system-specific consequences.
+``noduplicate``
+    This attribute indicates that calls to the function cannot be
+    duplicated. A call to a ``noduplicate`` function may be moved
+    within its parent function, but may not be duplicated within
+    its parent function.
+
+    A function containing a ``noduplicate`` call may still
+    be an inlining candidate, provided that the call is not
+    duplicated by inlining. That implies that the function has
+    internal linkage and only has one call site, so the original
+    call is dead after inlining.
 ``noimplicitfloat``
     This attributes disables implicit floating point instructions.
 ``noinline``
@@ -874,17 +915,6 @@ example:
     show that no exceptions passes by it. This is normally the case for
     the ELF x86-64 abi, but it can be disabled for some compilation
     units.
-``noduplicate``
-    This attribute indicates that calls to the function cannot be
-    duplicated. A call to a ``noduplicate`` function may be moved
-    within its parent function, but may not be duplicated within
-    its parent function.
-
-    A function containing a ``noduplicate`` call may still
-    be an inlining candidate, provided that the call is not
-    duplicated by inlining. That implies that the function has
-    internal linkage and only has one call site, so the original
-    call is dead after inlining.
 
 .. _moduleasm:
 

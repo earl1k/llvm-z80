@@ -1,18 +1,4 @@
 
-let Namespace = "AMDGPU" in {
-  def low : SubRegIndex;
-  def high : SubRegIndex;
-
-  def sub0 : SubRegIndex;
-  def sub1 : SubRegIndex;
-  def sub2 : SubRegIndex;
-  def sub3 : SubRegIndex;
-  def sub4 : SubRegIndex;
-  def sub5 : SubRegIndex;
-  def sub6 : SubRegIndex;
-  def sub7 : SubRegIndex;
-}
-
 class SIReg <string n, bits<16> encoding = 0> : Register<n> {
   let Namespace = "AMDGPU";
   let HWEncoding = encoding;
@@ -20,13 +6,15 @@ class SIReg <string n, bits<16> encoding = 0> : Register<n> {
 
 class SI_64 <string n, list<Register> subregs, bits<16> encoding> : RegisterWithSubRegs<n, subregs> {
   let Namespace = "AMDGPU";
-  let SubRegIndices = [low, high];
+  let SubRegIndices = [sub0, sub1];
   let HWEncoding = encoding;
 }
 
 class SGPR_32 <bits<16> num, string name> : SIReg<name, num>;
 
-class VGPR_32 <bits<16> num, string name> : SIReg<name, num>;
+class VGPR_32 <bits<16> num, string name> : SIReg<name, num> {
+  let HWEncoding{8} = 1;
+}
 
 // Special Registers
 def VCC : SIReg<"VCC", 106>;
@@ -73,12 +61,12 @@ def SGPR_32 : RegisterClass<"AMDGPU", [f32, i32], 32,
                             (add (sequence "SGPR%u", 0, 101))>;
 
 // SGPR 64-bit registers
-def SGPR_64 : RegisterTuples<[low, high],
+def SGPR_64 : RegisterTuples<[sub0, sub1],
                              [(add (decimate SGPR_32, 2)),
                               (add(decimate (rotl SGPR_32, 1), 2))]>;
 
 // SGPR 128-bit registers
-def SGPR_128 : RegisterTuples<[sel_x, sel_y, sel_z, sel_w],
+def SGPR_128 : RegisterTuples<[sub0, sub1, sub2, sub3],
                               [(add (decimate SGPR_32, 4)),
                                (add (decimate (rotl SGPR_32, 1), 4)),
                                (add (decimate (rotl SGPR_32, 2), 4)),
@@ -104,16 +92,47 @@ def VGPR_32 : RegisterClass<"AMDGPU", [f32, i32], 32,
                             (add (sequence "VGPR%u", 0, 255))>;
 
 // VGPR 64-bit registers
-def VGPR_64 : RegisterTuples<[low, high],
+def VGPR_64 : RegisterTuples<[sub0, sub1],
                              [(add VGPR_32),
                               (add (rotl VGPR_32, 1))]>;
 
 // VGPR 128-bit registers
-def VGPR_128 : RegisterTuples<[sel_x, sel_y, sel_z, sel_w],
+def VGPR_128 : RegisterTuples<[sub0, sub1, sub2, sub3],
                               [(add VGPR_32),
                                (add (rotl VGPR_32, 1)),
                                (add (rotl VGPR_32, 2)),
                                (add (rotl VGPR_32, 3))]>;
+
+// VGPR 256-bit registers
+def VGPR_256 : RegisterTuples<[sub0, sub1, sub2, sub3, sub4, sub5, sub6, sub7],
+                              [(add VGPR_32),
+                               (add (rotl VGPR_32, 1)),
+                               (add (rotl VGPR_32, 2)),
+                               (add (rotl VGPR_32, 3)),
+                               (add (rotl VGPR_32, 4)),
+                               (add (rotl VGPR_32, 5)),
+                               (add (rotl VGPR_32, 6)),
+                               (add (rotl VGPR_32, 7))]>;
+
+// VGPR 512-bit registers
+def VGPR_512 : RegisterTuples<[sub0, sub1, sub2, sub3, sub4, sub5, sub6, sub7,
+                               sub8, sub9, sub10, sub11, sub12, sub13, sub14, sub15],
+                              [(add VGPR_32),
+                               (add (rotl VGPR_32, 1)),
+                               (add (rotl VGPR_32, 2)),
+                               (add (rotl VGPR_32, 3)),
+                               (add (rotl VGPR_32, 4)),
+                               (add (rotl VGPR_32, 5)),
+                               (add (rotl VGPR_32, 6)),
+                               (add (rotl VGPR_32, 7)),
+                               (add (rotl VGPR_32, 8)),
+                               (add (rotl VGPR_32, 9)),
+                               (add (rotl VGPR_32, 10)),
+                               (add (rotl VGPR_32, 11)),
+                               (add (rotl VGPR_32, 12)),
+                               (add (rotl VGPR_32, 13)),
+                               (add (rotl VGPR_32, 14)),
+                               (add (rotl VGPR_32, 15))]>;
 
 // Register class for all scalar registers (SGPRs + Special Registers)
 def SReg_32 : RegisterClass<"AMDGPU", [f32, i32], 32,
@@ -129,7 +148,7 @@ def SReg_128 : RegisterClass<"AMDGPU", [v4f32, v4i32], 128, (add SGPR_128)>;
 def SReg_256 : RegisterClass<"AMDGPU", [v8i32], 256, (add SGPR_256)>;
 
 // Register class for all vector registers (VGPRs + Interploation Registers)
-def VReg_32 : RegisterClass<"AMDGPU", [f32, i32], 32,
+def VReg_32 : RegisterClass<"AMDGPU", [f32, i32, v1i32], 32,
     (add VGPR_32,
     PERSP_SAMPLE_I, PERSP_SAMPLE_J,
     PERSP_CENTER_I, PERSP_CENTER_J,
@@ -150,9 +169,13 @@ def VReg_32 : RegisterClass<"AMDGPU", [f32, i32], 32,
     )
 >;
 
-def VReg_64 : RegisterClass<"AMDGPU", [i64], 64, (add VGPR_64)>;
+def VReg_64 : RegisterClass<"AMDGPU", [i64, v2i32], 64, (add VGPR_64)>;
 
-def VReg_128 : RegisterClass<"AMDGPU", [v4f32], 128, (add VGPR_128)>;
+def VReg_128 : RegisterClass<"AMDGPU", [v4f32, v4i32], 128, (add VGPR_128)>;
+
+def VReg_256 : RegisterClass<"AMDGPU", [v8i32], 256, (add VGPR_256)>;
+
+def VReg_512 : RegisterClass<"AMDGPU", [v16i32], 512, (add VGPR_512)>;
 
 // AllReg_* - A set of all scalar and vector registers of a given width.
 def AllReg_32 : RegisterClass<"AMDGPU", [f32, i32], 32, (add VReg_32, SReg_32)>;

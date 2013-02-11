@@ -13,11 +13,7 @@
 ///
 /// The optimizations performed include elimination of redundant, partially
 /// redundant, and inconsequential reference count operations, elimination of
-/// redundant weak pointer operations, pattern-matching and replacement of
-/// low-level operations into higher-level operations, and numerous minor
-/// simplifications.
-///
-/// This file also defines a simple ARC-aware AliasAnalysis.
+/// redundant weak pointer operations, and numerous minor simplifications.
 ///
 /// WARNING: This file knows about certain library functions. It recognizes them
 /// by name, and hardwires knowledge of their semantics.
@@ -451,31 +447,31 @@ namespace {
     PtrState() : KnownPositiveRefCount(false), Partial(false),
                  Seq(S_None) {}
 
-    inline void SetKnownPositiveRefCount() {
+    void SetKnownPositiveRefCount() {
       KnownPositiveRefCount = true;
     }
 
-    inline void ClearRefCount() {
+    void ClearRefCount() {
       KnownPositiveRefCount = false;
     }
 
-    inline bool IsKnownIncremented() const {
+    bool IsKnownIncremented() const {
       return KnownPositiveRefCount;
     }
 
-    inline void SetSeq(Sequence NewSeq) {
+    void SetSeq(Sequence NewSeq) {
       Seq = NewSeq;
     }
 
-    inline Sequence GetSeq() const {
+    Sequence GetSeq() const {
       return Seq;
     }
 
-    inline void ClearSequenceProgress() {
+    void ClearSequenceProgress() {
       ResetSequenceProgress(S_None);
     }
 
-    inline void ResetSequenceProgress(Sequence NewSeq) {
+    void ResetSequenceProgress(Sequence NewSeq) {
       Seq = NewSeq;
       Partial = false;
       RRI.clear();
