@@ -58,6 +58,9 @@ namespace llvm {
     // getBREncoding
     unsigned getBREncoding(const MCInst &MI, unsigned OpNo,
       SmallVectorImpl<MCFixup> &Fixups) const;
+    // getXMemOpValue
+    unsigned getXMemOpValue(const MCInst &MI, unsigned OpNo,
+      SmallVectorImpl<MCFixup> &Fixups) const;
   }; // end class Z80MCCodeEmitter
 } // end namespace llvm
 
@@ -156,6 +159,16 @@ unsigned Z80MCCodeEmitter::getBREncoding(const MCInst &MI, unsigned OpNo,
   // Add a fixup for the branch target.
   Fixups.push_back(MCFixup::Create(1, MO.getExpr(), FK_PCRel_2));
 
+  return 0;
+}
+
+unsigned Z80MCCodeEmitter::getXMemOpValue(const MCInst &MI, unsigned OpNo,
+  SmallVectorImpl<MCFixup> &Fixups) const
+{
+  const MCOperand &MOReg = MI.getOperand(OpNo);
+  const MCOperand &MOImm = MI.getOperand(OpNo+1);
+  if (MOReg.isReg() && MOImm.isImm())
+      return static_cast<unsigned>(MOImm.getImm());
   return 0;
 }
 

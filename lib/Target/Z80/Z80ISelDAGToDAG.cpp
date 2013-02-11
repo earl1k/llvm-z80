@@ -77,11 +77,11 @@ bool Z80DAGToDAGISel::SelectXAddr(SDValue N, SDValue &Base, SDValue &Disp)
 {
   switch (N->getOpcode())
   {
-  default: return false;
   case ISD::FrameIndex:
     FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(N);
     Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i16);
     Disp = CurDAG->getTargetConstant(0, MVT::i8);
     return true;
   }
+  return false;
 }

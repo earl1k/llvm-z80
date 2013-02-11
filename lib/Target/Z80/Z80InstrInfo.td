@@ -78,7 +78,8 @@ def cc : Operand<i8> {
 }
 
 def xmem : Operand<i16> {
-  let PrintMethod = "printXMemOperand";
+  let PrintMethod   = "printXMemOperand";
+  let EncoderMethod = "getXMemOpValue";
   let MIOperandInfo = (ops GR16, i8imm);
 }
 
@@ -162,7 +163,7 @@ let canFoldAsLoad = 1, isReMaterializable = 1 in {
     "load\t{$dst, ($src)}", [(set GR8:$dst, (load GR16:$src))]>;
   def LOAD16 : I<0x00, (outs GR16:$dst), (ins GR16:$src),
     "load\t{$dst, ($src)}", [(set GR16:$dst, (load GR16:$src))]>;
-  def LD8rxm : IRy<0x46, (outs BR8:$dst), (ins xmem:$src),
+  def LD8rxm : IRyI8<0x46, (outs BR8:$dst), (ins xmem:$src),
     "ld\t{$dst, ($src)}", [(set BR8:$dst, (load xaddr:$src))]>;
 }
 def STORE8  : I<0x00, (outs), (ins GR16:$dst, GR8:$src),
