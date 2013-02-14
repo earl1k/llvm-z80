@@ -53,6 +53,7 @@ using namespace llvm;
 static const uint64_t kDefaultShadowScale = 3;
 static const uint64_t kDefaultShadowOffset32 = 1ULL << 29;
 static const uint64_t kDefaultShadowOffset64 = 1ULL << 44;
+static const uint64_t kDefaultShort64bitShadowOffset = 0x7FFF8000;  // < 2G.
 static const uint64_t kPPC64_ShadowOffset64 = 1ULL << 41;
 
 static const size_t kMaxStackMallocSize = 1 << 16;  // 64K
@@ -67,7 +68,7 @@ static const char *kAsanRegisterGlobalsName = "__asan_register_globals";
 static const char *kAsanUnregisterGlobalsName = "__asan_unregister_globals";
 static const char *kAsanPoisonGlobalsName = "__asan_before_dynamic_init";
 static const char *kAsanUnpoisonGlobalsName = "__asan_after_dynamic_init";
-static const char *kAsanInitName = "__asan_init";
+static const char *kAsanInitName = "__asan_init_v1";
 static const char *kAsanHandleNoReturnName = "__asan_handle_no_return";
 static const char *kAsanMappingOffsetName = "__asan_mapping_offset";
 static const char *kAsanMappingScaleName = "__asan_mapping_scale";
@@ -133,6 +134,9 @@ static cl::opt<int> ClMappingScale("asan-mapping-scale",
        cl::desc("scale of asan shadow mapping"), cl::Hidden, cl::init(0));
 static cl::opt<int> ClMappingOffsetLog("asan-mapping-offset-log",
        cl::desc("offset of asan shadow mapping"), cl::Hidden, cl::init(-1));
+static cl::opt<bool> ClShort64BitOffset("asan-short-64bit-mapping-offset",
+       cl::desc("Use short immediate constant as the mapping offset for 64bit"),
+       cl::Hidden, cl::init(true));
 
 // Optimization flags. Not user visible, used mostly for testing
 // and benchmarking the tool.
@@ -198,19 +202,25 @@ static ShadowMapping getShadowMapping(const Module &M, int LongSize,
                                       bool ZeroBaseShadow) {
   llvm::Triple TargetTriple(M.getTargetTriple());
   bool IsAndroid = TargetTriple.getEnvironment() == llvm::Triple::Android;
+  bool IsMacOSX = TargetTriple.getOS() == llvm::Triple::MacOSX;
   bool IsPPC64 = TargetTriple.getArch() == llvm::Triple::ppc64;
+  bool IsX86_64 = TargetTriple.getArch() == llvm::Triple::x86_64;
 
   ShadowMapping Mapping;
 
   // OR-ing shadow offset if more efficient (at least on x86),
   // but on ppc64 we have to use add since the shadow offset is not neccesary
   // 1/8-th of the address space.
-  Mapping.OrShadowOffset = !IsPPC64;
+  Mapping.OrShadowOffset = !IsPPC64 && !ClShort64BitOffset;
 
   Mapping.Offset = (IsAndroid || ZeroBaseShadow) ? 0 :
       (LongSize == 32 ? kDefaultShadowOffset32 :
        IsPPC64 ? kPPC64_ShadowOffset64 : kDefaultShadowOffset64);
-  if (ClMappingOffsetLog >= 0) {
+  if (!ZeroBaseShadow && ClShort64BitOffset && IsX86_64 && !IsMacOSX) {
+    assert(LongSize == 64);
+    Mapping.Offset = kDefaultShort64bitShadowOffset;
+  }
+  if (!ZeroBaseShadow && ClMappingOffsetLog >= 0) {
     // Zero offset log is the special case.
     Mapping.Offset = (ClMappingOffsetLog == 0) ? 0 : 1ULL << ClMappingOffsetLog;
   }

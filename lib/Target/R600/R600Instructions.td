@@ -399,7 +399,7 @@ class R600_TEX <bits<11> inst, string opName, list<dag> pattern,
 def TEX_SHADOW : PatLeaf<
   (imm),
   [{uint32_t TType = (uint32_t)N->getZExtValue();
-    return (TType >= 6 && TType <= 8) || TType == 13;
+    return (TType >= 6 && TType <= 8) || (TType >= 11 && TType <= 13);
   }]
 >;
 
@@ -1489,6 +1489,10 @@ def VTX_READ_PARAM_16_eg : VTX_READ_16_eg <0,
 
 def VTX_READ_PARAM_32_eg : VTX_READ_32_eg <0,
   [(set (i32 R600_TReg32_X:$dst), (load_param ADDRVTX_READ:$ptr))]
+>;
+
+def VTX_READ_PARAM_128_eg : VTX_READ_128_eg <0,
+  [(set (v4i32 R600_Reg128:$dst), (load_param ADDRVTX_READ:$ptr))]
 >;
 
 //===----------------------------------------------------------------------===//

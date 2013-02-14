@@ -59,6 +59,11 @@ Non-comprehensive list of changes in this release
 
 * We've improved the X86 and ARM cost model.
 
+* The Attributes classes have been completely rewritten and expanded. They now
+  support not only enumerated attributes and alignments, but "string"
+  attributes, which are useful for passing information to code generation. See
+  `How To Use Attributes <HowToUseAttributes.html>`_ for more details.
+
 * ... next change ...
 
 .. NOTE
@@ -70,6 +75,20 @@ Non-comprehensive list of changes in this release
    -------------------
 
    Makes programs 10x faster by doing Special New Thing.
+
+AArch64 target
+--------------
+
+We've added support for AArch64, ARM's 64-bit architecture. Development is still
+in fairly early stages, but we expect successful compilation when:
+
+- compiling standard compliant C99 and C++03 with Clang;
+- using Linux as a target platform;
+- where code + static data doesn't exceed 4GB in size (heap allocated data has
+  no limitation).
+
+Some additional functionality is also implemented, notably DWARF debugging,
+GNU-style thread local storage and inline assembly.
 
 Loop Vectorizer
 ---------------

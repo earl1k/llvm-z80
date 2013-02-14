@@ -444,7 +444,7 @@ static void decodeLLVMAttributesForBitcode(AttrBuilder &B,
 
   if (Alignment)
     B.addAlignmentAttr(Alignment);
-  B.addRawValue(((EncodedAttrs & (0xffffULL << 32)) >> 11) |
+  B.addRawValue(((EncodedAttrs & (0xfffffULL << 32)) >> 11) |
                 (EncodedAttrs & 0xffff));
 }
 
@@ -494,6 +494,14 @@ bool BitcodeReader::ParseAttributeBlock() {
       Attrs.clear();
       break;
     }
+    case bitc::PARAMATTR_CODE_ENTRY: { // ENTRY: [attrgrp0, attrgrp1, ...]
+      for (unsigned i = 0, e = Record.size(); i != e; ++i)
+        Attrs.push_back(MAttributeGroups[Record[i]]);
+
+      MAttributes.push_back(AttributeSet::get(Context, Attrs));
+      Attrs.clear();
+      break;
+    }
     }
   }
 }
@@ -531,8 +539,7 @@ bool BitcodeReader::ParseAttributeGroupBlock() {
       if (Record.size() < 3)
         return Error("Invalid ENTRY record");
 
-      // FIXME: Record[0] is the 'group ID'. What should we do with it here?
-
+      uint64_t GrpID = Record[0];
       uint64_t Idx = Record[1]; // Index of the object this attribute refers to.
 
       AttrBuilder B;
@@ -545,27 +552,29 @@ bool BitcodeReader::ParseAttributeGroupBlock() {
           else
             B.addStackAlignmentAttr(Record[++i]);
         } else {                     // String attribute
+          assert((Record[i] == 3 || Record[i] == 4) &&
+                 "Invalid attribute group entry");
           bool HasValue = (Record[i++] == 4);
           SmallString<64> KindStr;
           SmallString<64> ValStr;
 
           while (Record[i] != 0 && i != e)
             KindStr += Record[i++];
-          assert(Record[i] == 0 && "Kind string not terminated with 0");
+          assert(Record[i] == 0 && "Kind string not null terminated");
 
           if (HasValue) {
             // Has a value associated with it.
-            ++i; // Skip the '0' that terminates the kind string.
+            ++i; // Skip the '0' that terminates the "kind" string.
             while (Record[i] != 0 && i != e)
               ValStr += Record[i++];
-            assert(Record[i] == 0 && "Value string not terminated with 0");
+            assert(Record[i] == 0 && "Value string not null terminated");
           }
 
           B.addAttribute(KindStr.str(), ValStr.str());
         }
       }
 
-      MAttributeGroups.push_back(AttributeSet::get(Context, Idx, B));
+      MAttributeGroups[GrpID] = AttributeSet::get(Context, Idx, B);
       break;
     }
     }

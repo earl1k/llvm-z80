@@ -40,6 +40,11 @@ DisableEdgeSplitting("disable-phi-elim-edge-splitting", cl::init(false),
                      cl::Hidden, cl::desc("Disable critical edge splitting "
                                           "during PHI elimination"));
 
+static cl::opt<bool>
+SplitAllCriticalEdges("phi-elim-split-all-critical-edges", cl::init(false),
+                      cl::Hidden, cl::desc("Split all critical edges during "
+                                           "PHI elimination"));
+
 namespace {
   class PHIElimination : public MachineFunctionPass {
     MachineRegisterInfo *MRI; // Machine register information
@@ -129,7 +134,7 @@ bool PHIElimination::runOnMachineFunction(MachineFunction &MF) {
 
   // Split critical edges to help the coalescer. This does not yet support
   // updating LiveIntervals, so we disable it.
-  if (!DisableEdgeSplitting && LV && !LIS) {
+  if (!DisableEdgeSplitting && (LV || LIS)) {
     MachineLoopInfo *MLI = getAnalysisIfAvailable<MachineLoopInfo>();
     for (MachineFunction::iterator I = MF.begin(), E = MF.end(); I != E; ++I)
       Changed |= SplitPHIEdges(MF, *I, MLI);
@@ -157,8 +162,8 @@ bool PHIElimination::runOnMachineFunction(MachineFunction &MF) {
   // Clean up the lowered PHI instructions.
   for (LoweredPHIMap::iterator I = LoweredPHIs.begin(), E = LoweredPHIs.end();
        I != E; ++I) {
-   if (LIS)
-     LIS->RemoveMachineInstrFromMaps(I->first);
+    if (LIS)
+      LIS->RemoveMachineInstrFromMaps(I->first);
     MF.DeleteMachineInstr(I->first);
   }
 
@@ -462,7 +467,11 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
         bool isLiveOut = false;
         for (MachineBasicBlock::succ_iterator SI = opBlock.succ_begin(),
              SE = opBlock.succ_end(); SI != SE; ++SI) {
-          if (SrcLI.liveAt(LIS->getMBBStartIdx(*SI))) {
+          SlotIndex startIdx = LIS->getMBBStartIdx(*SI);
+          VNInfo *VNI = SrcLI.getVNInfoAt(startIdx);
+
+          // Definitions by other PHIs are not truly live-in for our purposes.
+          if (VNI && VNI->def != startIdx) {
             isLiveOut = true;
             break;
           }
@@ -550,10 +559,10 @@ bool PHIElimination::SplitPHIEdges(MachineFunction &MF,
 
       // Avoid splitting backedges of loops. It would introduce small
       // out-of-line blocks into the loop which is very bad for code placement.
-      if (PreMBB == &MBB)
+      if (PreMBB == &MBB && !SplitAllCriticalEdges)
         continue;
       const MachineLoop *PreLoop = MLI ? MLI->getLoopFor(PreMBB) : 0;
-      if (IsLoopHeader && PreLoop == CurLoop)
+      if (IsLoopHeader && PreLoop == CurLoop && !SplitAllCriticalEdges)
         continue;
 
       // LV doesn't consider a phi use live-out, so isLiveOut only returns true
@@ -562,7 +571,7 @@ bool PHIElimination::SplitPHIEdges(MachineFunction &MF,
       // there is a risk it may not be coalesced away.
       //
       // If the copy would be a kill, there is no need to split the edge.
-      if (!isLiveOutPastPHIs(Reg, PreMBB))
+      if (!isLiveOutPastPHIs(Reg, PreMBB) && !SplitAllCriticalEdges)
         continue;
 
       DEBUG(dbgs() << PrintReg(Reg) << " live-out before critical edge BB#"
@@ -577,7 +586,7 @@ bool PHIElimination::SplitPHIEdges(MachineFunction &MF,
       // is likely to be left after coalescing. If we are looking at a loop
       // exiting edge, split it so we won't insert code in the loop, otherwise
       // don't bother.
-      bool ShouldSplit = !isLiveIn(Reg, &MBB);
+      bool ShouldSplit = !isLiveIn(Reg, &MBB) || SplitAllCriticalEdges;
 
       // Check for a loop exiting edge.
       if (!ShouldSplit && CurLoop != PreLoop) {

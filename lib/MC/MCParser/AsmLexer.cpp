@@ -162,21 +162,65 @@ static void SkipIgnoredIntegerSuffix(const char *&CurPtr) {
     CurPtr += 3;
 }
 
+// Look ahead to search for first non-hex digit, if it's [hH], then we treat the
+// integer as a hexadecimal, possibly with leading zeroes.
+static unsigned doLookAhead(const char *&CurPtr, unsigned DefaultRadix) {
+  const char *FirstHex = 0;
+  const char *LookAhead = CurPtr;
+  while (1) {
+    if (isdigit(*LookAhead)) {
+      ++LookAhead;
+    } else if (isxdigit(*LookAhead)) {
+      if (!FirstHex)
+        FirstHex = LookAhead;
+      ++LookAhead;
+    } else {
+      break;
+    }
+  }
+  bool isHex = *LookAhead == 'h' || *LookAhead == 'H';
+  bool isBinary = LookAhead[-1] == 'b' || LookAhead[-1] == 'B';
+  CurPtr = (isBinary || isHex || !FirstHex) ? LookAhead : FirstHex;
+  if (isHex)
+    return 16;
+  if (isBinary) {
+    --CurPtr;
+    return 2;
+  }
+  return DefaultRadix;
+}
+
 /// LexDigit: First character is [0-9].
 ///   Local Label: [0-9][:]
-///   Forward/Backward Label: [0-9][fb]
-///   Binary integer: 0b[01]+
+///   Forward/Backward Label: [0-9]+f or [0-9]b
+///   Binary integer: 0b[01]+ or [01][bB]
 ///   Octal integer: 0[0-7]+
-///   Hex integer: 0x[0-9a-fA-F]+
+///   Hex integer: 0x[0-9a-fA-F]+ or [0x]?[0-9][0-9a-fA-F]*[hH]
 ///   Decimal integer: [1-9][0-9]*
 AsmToken AsmLexer::LexDigit() {
+
+  // Backward Label: [0-9]b
+  if (*CurPtr == 'b') {
+    // See if we actually have "0b" as part of something like "jmp 0b\n"
+    if (!isdigit(CurPtr[1])) {
+      long long Value;
+      StringRef Result(TokStart, CurPtr - TokStart);
+      if (Result.getAsInteger(10, Value))
+        return ReturnError(TokStart, "invalid backward label");
+
+      return AsmToken(AsmToken::Integer, Result, Value);
+    }
+  }
+
+  // Binary integer: 1[01]*[bB]
   // Decimal integer: [1-9][0-9]*
+  // Hexidecimal integer: [1-9][0-9a-fA-F]*[hH]
   if (CurPtr[-1] != '0' || CurPtr[0] == '.') {
-    while (isdigit(*CurPtr))
-      ++CurPtr;
+    unsigned Radix = doLookAhead(CurPtr, 10);
+    bool isDecimal = Radix == 10;
 
     // Check for floating point literals.
-    if (*CurPtr == '.' || *CurPtr == 'e') {
+    if (isDecimal && (*CurPtr == '.' || *CurPtr == 'e')) {
       ++CurPtr;
       return LexFloatLiteral();
     }
@@ -184,14 +228,19 @@ AsmToken AsmLexer::LexDigit() {
     StringRef Result(TokStart, CurPtr - TokStart);
 
     long long Value;
-    if (Result.getAsInteger(10, Value)) {
+    if (Result.getAsInteger(Radix, Value)) {
       // Allow positive values that are too large to fit into a signed 64-bit
       // integer, but that do fit in an unsigned one, we just convert them over.
       unsigned long long UValue;
-      if (Result.getAsInteger(10, UValue))
-        return ReturnError(TokStart, "invalid decimal number");
+      if (Result.getAsInteger(Radix, UValue))
+        return ReturnError(TokStart, isDecimal ? "invalid decimal number" :
+                           "invalid hexdecimal number");
       Value = (long long)UValue;
     }
+
+    // Consume the [bB][hH].
+    if (Radix == 2 || Radix == 16)
+      ++CurPtr;
 
     // The darwin/x86 (and x86-64) assembler accepts and ignores ULL and LL
     // suffixes on integer literals.
@@ -200,15 +249,9 @@ AsmToken AsmLexer::LexDigit() {
     return AsmToken(AsmToken::Integer, Result, Value);
   }
 
+  // Binary integer: 0b[01]+
   if (*CurPtr == 'b') {
-    ++CurPtr;
-    // See if we actually have "0b" as part of something like "jmp 0b\n"
-    if (!isdigit(CurPtr[0])) {
-      --CurPtr;
-      StringRef Result(TokStart, CurPtr - TokStart);
-      return AsmToken(AsmToken::Integer, Result, 0);
-    }
-    const char *NumStart = CurPtr;
+    const char *NumStart = ++CurPtr;
     while (CurPtr[0] == '0' || CurPtr[0] == '1')
       ++CurPtr;
 
@@ -229,6 +272,7 @@ AsmToken AsmLexer::LexDigit() {
     return AsmToken(AsmToken::Integer, Result, Value);
   }
 
+  // Hex integer: 0x[0-9a-fA-F]+
   if (*CurPtr == 'x') {
     ++CurPtr;
     const char *NumStart = CurPtr;
@@ -243,6 +287,10 @@ AsmToken AsmLexer::LexDigit() {
     if (StringRef(TokStart, CurPtr - TokStart).getAsInteger(0, Result))
       return ReturnError(TokStart, "invalid hexadecimal number");
 
+    // Consume the optional [hH].
+    if (*CurPtr == 'h' || *CurPtr == 'H')
+      ++CurPtr;
+
     // The darwin/x86 (and x86-64) assembler accepts and ignores ULL and LL
     // suffixes on integer literals.
     SkipIgnoredIntegerSuffix(CurPtr);
@@ -251,14 +299,22 @@ AsmToken AsmLexer::LexDigit() {
                     (int64_t)Result);
   }
 
-  // Must be an octal number, it starts with 0.
-  while (*CurPtr >= '0' && *CurPtr <= '9')
-    ++CurPtr;
-
-  StringRef Result(TokStart, CurPtr - TokStart);
+  // Binary: 0[01]*[Bb], but not 0b.
+  // Octal: 0[0-7]*
+  // Hexidecimal: [0][0-9a-fA-F]*[hH]
   long long Value;
-  if (Result.getAsInteger(8, Value))
-    return ReturnError(TokStart, "invalid octal number");
+  unsigned Radix = doLookAhead(CurPtr, 8);
+  bool isBinary = Radix == 2;
+  bool isOctal = Radix == 8;
+  StringRef Result(TokStart, CurPtr - TokStart);
+  if (Result.getAsInteger(Radix, Value))
+    return ReturnError(TokStart, isOctal ? "invalid octal number" :
+                       isBinary ? "invalid binary number" :
+                       "invalid hexdecimal number");
+
+  // Consume the [bB][hH].
+  if (Radix == 2 || Radix == 16)
+    ++CurPtr;
 
   // The darwin/x86 (and x86-64) assembler accepts and ignores ULL and LL
   // suffixes on integer literals.

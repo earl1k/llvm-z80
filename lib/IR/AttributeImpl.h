@@ -170,11 +170,15 @@ public:
   static AttributeSetNode *get(LLVMContext &C, ArrayRef<Attribute> Attrs);
 
   bool hasAttribute(Attribute::AttrKind Kind) const;
+  bool hasAttribute(StringRef Kind) const;
   bool hasAttributes() const { return !AttrList.empty(); }
+
+  Attribute getAttribute(Attribute::AttrKind Kind) const;
+  Attribute getAttribute(StringRef Kind) const;
 
   unsigned getAlignment() const;
   unsigned getStackAlignment() const;
-  std::string getAsString() const;
+  std::string getAsString(bool InAttrGrp) const;
 
   typedef SmallVectorImpl<Attribute>::iterator       iterator;
   typedef SmallVectorImpl<Attribute>::const_iterator const_iterator;

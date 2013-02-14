@@ -95,6 +95,8 @@ public:
     StackProtectReq,       ///< Stack protection required.
     StackProtectStrong,    ///< Strong Stack protection.
     StructRet,             ///< Hidden pointer to structure to return
+    ThreadSafety,          ///< Thread safety checking is on.
+    UninitializedChecks,   ///< Checking for uses of uninitialized memory is on.
     UWTable,               ///< Function must be in a unwind table
     ZExt,                  ///< Zero extended before/after call
 
@@ -169,7 +171,7 @@ public:
 
   /// \brief The Attribute is converted to a string of equivalent mnemonic. This
   /// is, presumably, for writing out the mnemonics for the assembly writer.
-  std::string getAsString() const;
+  std::string getAsString(bool InAttrGrp = false) const;
 
   /// \brief Equality and non-equality operators.
   bool operator==(Attribute A) const { return pImpl == A.pImpl; }
@@ -301,12 +303,21 @@ public:
   /// \brief Return true if the attribute exists at the given index.
   bool hasAttribute(unsigned Index, Attribute::AttrKind Kind) const;
 
+  /// \brief Return true if the attribute exists at the given index.
+  bool hasAttribute(unsigned Index, StringRef Kind) const;
+
   /// \brief Return true if attribute exists at the given index.
   bool hasAttributes(unsigned Index) const;
 
   /// \brief Return true if the specified attribute is set for at least one
   /// parameter or for the return value.
   bool hasAttrSomewhere(Attribute::AttrKind Attr) const;
+
+  /// \brief Return the attribute object that exists at the given index.
+  Attribute getAttribute(unsigned Index, Attribute::AttrKind Kind) const;
+
+  /// \brief Return the attribute object that exists at the given index.
+  Attribute getAttribute(unsigned Index, StringRef Kind) const;
 
   /// \brief Return the alignment for the specified function parameter.
   unsigned getParamAlignment(unsigned Idx) const;
@@ -315,7 +326,7 @@ public:
   unsigned getStackAlignment(unsigned Index) const;
 
   /// \brief Return the attributes at the index as a string.
-  std::string getAsString(unsigned Index) const;
+  std::string getAsString(unsigned Index, bool InAttrGrp = false) const;
 
   typedef ArrayRef<Attribute>::iterator iterator;
 
@@ -416,7 +427,7 @@ public:
   AttrBuilder &addAttribute(Attribute A);
 
   /// \brief Add the target-dependent attribute to the builder.
-  AttrBuilder &addAttribute(StringRef A, StringRef V);
+  AttrBuilder &addAttribute(StringRef A, StringRef V = StringRef());
 
   /// \brief Remove an attribute from the builder.
   AttrBuilder &removeAttribute(Attribute::AttrKind Val);
@@ -507,6 +518,8 @@ public:
       .removeAttribute(Attribute::NonLazyBind)
       .removeAttribute(Attribute::ReturnsTwice)
       .removeAttribute(Attribute::AddressSafety)
+      .removeAttribute(Attribute::ThreadSafety)
+      .removeAttribute(Attribute::UninitializedChecks)
       .removeAttribute(Attribute::MinSize)
       .removeAttribute(Attribute::NoDuplicate);
   }

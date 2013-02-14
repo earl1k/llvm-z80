@@ -13,6 +13,7 @@
 
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -443,8 +444,12 @@ private:
   bool ParseDirectiveIrpc(SMLoc DirectiveLoc); // ".irpc"
   bool ParseDirectiveEndr(SMLoc DirectiveLoc); // ".endr"
 
-  // "_emit"
-  bool ParseDirectiveEmit(SMLoc DirectiveLoc, ParseStatementInfo &Info);
+  // "_emit" or "__emit"
+  bool ParseDirectiveMSEmit(SMLoc DirectiveLoc, ParseStatementInfo &Info,
+                            size_t Len);
+
+  // "align"
+  bool ParseDirectiveMSAlign(SMLoc DirectiveLoc, ParseStatementInfo &Info);
 
   void initializeDirectiveKindMap();
 };
@@ -1446,9 +1451,14 @@ bool AsmParser::ParseStatement(ParseStatementInfo &Info) {
     return Error(IDLoc, "unknown directive");
   }
 
-  // _emit
-  if (ParsingInlineAsm && IDVal == "_emit")
-    return ParseDirectiveEmit(IDLoc, Info);
+  // __asm _emit or __asm __emit
+  if (ParsingInlineAsm && (IDVal == "_emit" || IDVal == "__emit" ||
+                           IDVal == "_EMIT" || IDVal == "__EMIT"))
+    return ParseDirectiveMSEmit(IDLoc, Info, IDVal.size());
+
+  // __asm align
+  if (ParsingInlineAsm && (IDVal == "align" || IDVal == "ALIGN"))
+    return ParseDirectiveMSAlign(IDLoc, Info);
 
   CheckForValidSection();
 
@@ -1621,7 +1631,8 @@ void AsmParser::DiagHandler(const SMDiagnostic &Diag, void *Context) {
 // we can't do that. AsmLexer.cpp should probably be changed to handle
 // '@' as a special case when needed.
 static bool isIdentifierChar(char c) {
-  return isalnum(c) || c == '_' || c == '$' || c == '.';
+  return isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$' ||
+         c == '.';
 }
 
 bool AsmParser::expandMacro(raw_svector_ostream &OS, StringRef Body,
@@ -1645,7 +1656,8 @@ bool AsmParser::expandMacro(raw_svector_ostream &OS, StringRef Body,
           continue;
 
         char Next = Body[Pos + 1];
-        if (Next == '$' || Next == 'n' || isdigit(Next))
+        if (Next == '$' || Next == 'n' ||
+            isdigit(static_cast<unsigned char>(Next)))
           break;
       } else {
         // This macro has parameters, look for \foo, \bar, etc.
@@ -3093,7 +3105,8 @@ void AsmParser::CheckForBadMacro(SMLoc DirectiveLoc, StringRef Name,
       if (Body[Pos] != '$' || Pos + 1 == End)
         continue;
       char Next = Body[Pos + 1];
-      if (Next == '$' || Next == 'n' || isdigit(Next))
+      if (Next == '$' || Next == 'n' ||
+          isdigit(static_cast<unsigned char>(Next)))
         break;
     }
 
@@ -3985,7 +3998,7 @@ bool AsmParser::ParseDirectiveEndr(SMLoc DirectiveLoc) {
   return false;
 }
 
-bool AsmParser::ParseDirectiveEmit(SMLoc IDLoc, ParseStatementInfo &Info) {
+bool AsmParser::ParseDirectiveMSEmit(SMLoc IDLoc, ParseStatementInfo &Info, size_t Len) {
   const MCExpr *Value;
   SMLoc ExprLoc = getLexer().getLoc();
   if (ParseExpression(Value))
@@ -3997,8 +4010,36 @@ bool AsmParser::ParseDirectiveEmit(SMLoc IDLoc, ParseStatementInfo &Info) {
   if (!isUIntN(8, IntValue) && !isIntN(8, IntValue))
     return Error(ExprLoc, "literal value out of range for directive");
 
-  Info.AsmRewrites->push_back(AsmRewrite(AOK_Emit, IDLoc, 5));
+  Info.AsmRewrites->push_back(AsmRewrite(AOK_Emit, IDLoc, Len));
   return false;
+}
+
+bool AsmParser::ParseDirectiveMSAlign(SMLoc IDLoc, ParseStatementInfo &Info) {
+  const MCExpr *Value;
+  SMLoc ExprLoc = getLexer().getLoc();
+  if (ParseExpression(Value))
+    return true;
+  const MCConstantExpr *MCE = dyn_cast<MCConstantExpr>(Value);
+  if (!MCE)
+    return Error(ExprLoc, "unexpected expression in align");
+  uint64_t IntValue = MCE->getValue();
+  if (!isPowerOf2_64(IntValue))
+    return Error(ExprLoc, "literal value not a power of two greater then zero");
+
+  Info.AsmRewrites->push_back(AsmRewrite(AOK_Align, IDLoc, 5, Log2_64(IntValue)));
+  return false;
+}
+
+// We are comparing pointers, but the pointers are relative to a single string.
+// Thus, this should always be deterministic.
+static int RewritesSort (const void *A, const void *B) {
+  const AsmRewrite *AsmRewriteA = static_cast<const AsmRewrite*>(A);
+  const AsmRewrite *AsmRewriteB = static_cast<const AsmRewrite*>(B);
+  if (AsmRewriteA->Loc.getPointer() < AsmRewriteB->Loc.getPointer())
+    return -1;
+  if (AsmRewriteB->Loc.getPointer() < AsmRewriteA->Loc.getPointer())
+    return 1;
+  return 0;
 }
 
 bool AsmParser::ParseMSInlineAsm(void *AsmLoc, std::string &AsmString,
@@ -4125,10 +4166,12 @@ bool AsmParser::ParseMSInlineAsm(void *AsmLoc, std::string &AsmString,
   AsmRewriteKind PrevKind = AOK_Imm;
   raw_string_ostream OS(AsmStringIR);
   const char *Start = SrcMgr.getMemoryBuffer(0)->getBufferStart();
+  array_pod_sort (AsmStrRewrites.begin(), AsmStrRewrites.end(), RewritesSort);
   for (SmallVectorImpl<struct AsmRewrite>::iterator
          I = AsmStrRewrites.begin(), E = AsmStrRewrites.end(); I != E; ++I) {
     const char *Loc = (*I).Loc.getPointer();
 
+    unsigned AdditionalSkip = 0;
     AsmRewriteKind Kind = (*I).Kind;
 
     // Emit everything up to the immediate/expression.  If the previous rewrite
@@ -4176,6 +4219,15 @@ bool AsmParser::ParseMSInlineAsm(void *AsmLoc, std::string &AsmString,
     case AOK_Emit:
       OS << ".byte";
       break;
+    case AOK_Align: {
+      unsigned Val = (*I).Val;
+      OS << ".align " << Val;
+
+      // Skip the original immediate.
+      assert (Val < 10 && "Expected alignment less then 2^10.");
+      AdditionalSkip = (Val < 4) ? 2 : Val < 7 ? 3 : 4;
+      break;
+    }
     case AOK_DotOperator:
       OS << (*I).Val;
       break;
@@ -4183,7 +4235,7 @@ bool AsmParser::ParseMSInlineAsm(void *AsmLoc, std::string &AsmString,
 
     // Skip the original expression.
     if (Kind != AOK_SizeDirective)
-      Start = Loc + (*I).Len;
+      Start = Loc + (*I).Len + AdditionalSkip;
   }
 
   // Emit the remainder of the asm string.

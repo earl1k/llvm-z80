@@ -150,7 +150,7 @@ unsigned Attribute::getStackAlignment() const {
   return pImpl->getValueAsInt();
 }
 
-std::string Attribute::getAsString() const {
+std::string Attribute::getAsString(bool InAttrGrp) const {
   if (!pImpl) return "";
 
   if (hasAttribute(Attribute::AddressSafety))
@@ -205,6 +205,10 @@ std::string Attribute::getAsString() const {
     return "sspstrong";
   if (hasAttribute(Attribute::StructRet))
     return "sret";
+  if (hasAttribute(Attribute::ThreadSafety))
+    return "thread_safety";
+  if (hasAttribute(Attribute::UninitializedChecks))
+    return "uninitialized_checks";
   if (hasAttribute(Attribute::UWTable))
     return "uwtable";
   if (hasAttribute(Attribute::ZExt))
@@ -217,15 +221,23 @@ std::string Attribute::getAsString() const {
   //
   if (hasAttribute(Attribute::Alignment)) {
     std::string Result;
-    Result += "align ";
+    Result += "align";
+    Result += (InAttrGrp) ? "=" : " ";
     Result += utostr(getValueAsInt());
     return Result;
   }
+
   if (hasAttribute(Attribute::StackAlignment)) {
     std::string Result;
-    Result += "alignstack(";
-    Result += utostr(getValueAsInt());
-    Result += ")";
+    Result += "alignstack";
+    if (InAttrGrp) {
+      Result += "=";
+      Result += utostr(getValueAsInt());
+    } else {
+      Result += "(";
+      Result += utostr(getValueAsInt());
+      Result += ")";
+    }
     return Result;
   }
 
@@ -233,7 +245,6 @@ std::string Attribute::getAsString() const {
   //
   //   "kind"
   //   "kind" = "value"
-  //   "kind" = ( "value1" "value2" "value3" )
   //
   if (isStringAttribute()) {
     std::string Result;
@@ -242,8 +253,7 @@ std::string Attribute::getAsString() const {
     StringRef Val = pImpl->getValueAsString();
     if (Val.empty()) return Result;
 
-    Result += " = ";
-    Result += '\"' + Val.str() + '"';
+    Result += "=\"" + Val.str() + '"';
     return Result;
   }
 
@@ -382,6 +392,8 @@ uint64_t AttributeImpl::getAttrMask(Attribute::AttrKind Val) {
   case Attribute::MinSize:         return 1ULL << 33;
   case Attribute::NoDuplicate:     return 1ULL << 34;
   case Attribute::StackProtectStrong: return 1ULL << 35;
+  case Attribute::ThreadSafety:    return 1ULL << 36;
+  case Attribute::UninitializedChecks: return 1ULL << 37;
   }
   llvm_unreachable("Unsupported attribute type");
 }
@@ -400,7 +412,7 @@ AttributeSetNode *AttributeSetNode::get(LLVMContext &C,
   FoldingSetNodeID ID;
 
   SmallVector<Attribute, 8> SortedAttrs(Attrs.begin(), Attrs.end());
-  std::sort(SortedAttrs.begin(), SortedAttrs.end());
+  array_pod_sort(SortedAttrs.begin(), SortedAttrs.end());
 
   for (SmallVectorImpl<Attribute>::iterator I = SortedAttrs.begin(),
          E = SortedAttrs.end(); I != E; ++I)
@@ -429,6 +441,30 @@ bool AttributeSetNode::hasAttribute(Attribute::AttrKind Kind) const {
   return false;
 }
 
+bool AttributeSetNode::hasAttribute(StringRef Kind) const {
+  for (SmallVectorImpl<Attribute>::const_iterator I = AttrList.begin(),
+         E = AttrList.end(); I != E; ++I)
+    if (I->hasAttribute(Kind))
+      return true;
+  return false;
+}
+
+Attribute AttributeSetNode::getAttribute(Attribute::AttrKind Kind) const {
+  for (SmallVectorImpl<Attribute>::const_iterator I = AttrList.begin(),
+         E = AttrList.end(); I != E; ++I)
+    if (I->hasAttribute(Kind))
+      return *I;
+  return Attribute();
+}
+
+Attribute AttributeSetNode::getAttribute(StringRef Kind) const {
+  for (SmallVectorImpl<Attribute>::const_iterator I = AttrList.begin(),
+         E = AttrList.end(); I != E; ++I)
+    if (I->hasAttribute(Kind))
+      return *I;
+  return Attribute();
+}
+
 unsigned AttributeSetNode::getAlignment() const {
   for (SmallVectorImpl<Attribute>::const_iterator I = AttrList.begin(),
          E = AttrList.end(); I != E; ++I)
@@ -445,11 +481,11 @@ unsigned AttributeSetNode::getStackAlignment() const {
   return 0;
 }
 
-std::string AttributeSetNode::getAsString() const {
+std::string AttributeSetNode::getAsString(bool InAttrGrp) const {
   std::string Str = "";
   for (SmallVectorImpl<Attribute>::const_iterator I = AttrList.begin(),
          E = AttrList.end(); I != E; ) {
-    Str += I->getAsString();
+    Str += I->getAsString(InAttrGrp);
     if (++I != E) Str += " ";
   }
   return Str;
@@ -748,6 +784,11 @@ bool AttributeSet::hasAttribute(unsigned Index, Attribute::AttrKind Kind) const{
   return ASN ? ASN->hasAttribute(Kind) : false;
 }
 
+bool AttributeSet::hasAttribute(unsigned Index, StringRef Kind) const {
+  AttributeSetNode *ASN = getAttributes(Index);
+  return ASN ? ASN->hasAttribute(Kind) : false;
+}
+
 bool AttributeSet::hasAttributes(unsigned Index) const {
   AttributeSetNode *ASN = getAttributes(Index);
   return ASN ? ASN->hasAttributes() : false;
@@ -767,6 +808,18 @@ bool AttributeSet::hasAttrSomewhere(Attribute::AttrKind Attr) const {
   return false;
 }
 
+Attribute AttributeSet::getAttribute(unsigned Index,
+                                     Attribute::AttrKind Kind) const {
+  AttributeSetNode *ASN = getAttributes(Index);
+  return ASN ? ASN->getAttribute(Kind) : Attribute();
+}
+
+Attribute AttributeSet::getAttribute(unsigned Index,
+                                     StringRef Kind) const {
+  AttributeSetNode *ASN = getAttributes(Index);
+  return ASN ? ASN->getAttribute(Kind) : Attribute();
+}
+
 unsigned AttributeSet::getParamAlignment(unsigned Index) const {
   AttributeSetNode *ASN = getAttributes(Index);
   return ASN ? ASN->getAlignment() : 0;
@@ -777,9 +830,10 @@ unsigned AttributeSet::getStackAlignment(unsigned Index) const {
   return ASN ? ASN->getStackAlignment() : 0;
 }
 
-std::string AttributeSet::getAsString(unsigned Index) const {
+std::string AttributeSet::getAsString(unsigned Index,
+                                      bool InAttrGrp) const {
   AttributeSetNode *ASN = getAttributes(Index);
-  return ASN ? ASN->getAsString() : std::string("");
+  return ASN ? ASN->getAsString(InAttrGrp) : std::string("");
 }
 
 /// \brief The attributes for the specified index are returned.
@@ -925,14 +979,22 @@ AttrBuilder &AttrBuilder::removeAttributes(AttributeSet A, uint64_t Index) {
   assert(Idx != ~0U && "Couldn't find index in AttributeSet!");
 
   for (AttributeSet::iterator I = A.begin(Idx), E = A.end(Idx); I != E; ++I) {
-    // FIXME: Support string attributes.
-    Attribute::AttrKind Kind = I->getKindAsEnum();
-    Attrs.erase(Kind);
+    Attribute Attr = *I;
+    if (Attr.isEnumAttribute() || Attr.isAlignAttribute()) {
+      Attribute::AttrKind Kind = I->getKindAsEnum();
+      Attrs.erase(Kind);
 
-    if (Kind == Attribute::Alignment)
-      Alignment = 0;
-    else if (Kind == Attribute::StackAlignment)
-      StackAlignment = 0;
+      if (Kind == Attribute::Alignment)
+        Alignment = 0;
+      else if (Kind == Attribute::StackAlignment)
+        StackAlignment = 0;
+    } else {
+      assert(Attr.isStringAttribute() && "Invalid attribute type!");
+      std::map<std::string, std::string>::iterator
+        Iter = TargetDepAttrs.find(Attr.getKindAsString());
+      if (Iter != TargetDepAttrs.end())
+        TargetDepAttrs.erase(Iter);
+    }
   }
 
   return *this;
@@ -1008,10 +1070,16 @@ bool AttrBuilder::hasAttributes(AttributeSet A, uint64_t Index) const {
   assert(Idx != ~0U && "Couldn't find the index!");
 
   for (AttributeSet::iterator I = A.begin(Idx), E = A.end(Idx);
-       I != E; ++I)
-    // FIXME: Support string attributes.
-    if (Attrs.count(I->getKindAsEnum()))
-      return true;
+       I != E; ++I) {
+    Attribute Attr = *I;
+    if (Attr.isEnumAttribute() || Attr.isAlignAttribute()) {
+      if (Attrs.count(I->getKindAsEnum()))
+        return true;
+    } else {
+      assert(Attr.isStringAttribute() && "Invalid attribute kind!");
+      return TargetDepAttrs.find(Attr.getKindAsString())!=TargetDepAttrs.end();
+    }
+  }
 
   return false;
 }

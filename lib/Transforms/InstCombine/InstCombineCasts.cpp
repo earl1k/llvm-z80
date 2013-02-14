@@ -1041,8 +1041,8 @@ static bool CanEvaluateSExtd(Value *V, Type *Ty) {
 }
 
 Instruction *InstCombiner::visitSExt(SExtInst &CI) {
-  // If this sign extend is only used by a truncate, let the truncate by
-  // eliminated before we try to optimize this zext.
+  // If this sign extend is only used by a truncate, let the truncate be
+  // eliminated before we try to optimize this sext.
   if (CI.hasOneUse() && isa<TruncInst>(CI.use_back()))
     return 0;
 
@@ -1738,11 +1738,22 @@ Instruction *InstCombiner::visitBitCast(BitCastInst &CI) {
   }
 
   if (VectorType *SrcVTy = dyn_cast<VectorType>(SrcTy)) {
-    if (SrcVTy->getNumElements() == 1 && !DestTy->isVectorTy()) {
-      Value *Elem =
-        Builder->CreateExtractElement(Src,
-                   Constant::getNullValue(Type::getInt32Ty(CI.getContext())));
-      return CastInst::Create(Instruction::BitCast, Elem, DestTy);
+    if (SrcVTy->getNumElements() == 1) {
+      // If our destination is not a vector, then make this a straight
+      // scalar-scalar cast.
+      if (!DestTy->isVectorTy()) {
+        Value *Elem =
+          Builder->CreateExtractElement(Src,
+                     Constant::getNullValue(Type::getInt32Ty(CI.getContext())));
+        return CastInst::Create(Instruction::BitCast, Elem, DestTy);
+      }
+
+      // Otherwise, see if our source is an insert. If so, then use the scalar
+      // component directly.
+      if (InsertElementInst *IEI =
+            dyn_cast<InsertElementInst>(CI.getOperand(0)))
+        return CastInst::Create(Instruction::BitCast, IEI->getOperand(1),
+                                DestTy);
     }
   }
 
