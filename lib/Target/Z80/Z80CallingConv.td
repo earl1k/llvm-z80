@@ -29,10 +29,10 @@ def RetCC_Z80 : CallingConv<[
 
 def CC_Z80 : CallingConv<[
   // Assign i8 arguments in registers
-  CCIfType<[i8], CCAssignToReg<[A, B, C]>>,
+  CCIfType<[i8], CCAssignToReg<[A, H, L]>>,
 
   // Assign i16 arguments in registers
-  CCIfType<[i16], CCAssignToReg<[HL, BC, DE]>>
+  CCIfType<[i16], CCAssignToReg<[HL]>>
 ]>;
 
 //===----------------------------------------------------------------------===//
@@ -41,4 +41,4 @@ def CC_Z80 : CallingConv<[
 
 def CSR_NoRegs : CalleeSavedRegs<(add)>;
 
-def CSR_DE : CalleeSavedRegs<(add DE)>;
+def CSR_16 : CalleeSavedRegs<(add BC, DE, IX, IY)>;
