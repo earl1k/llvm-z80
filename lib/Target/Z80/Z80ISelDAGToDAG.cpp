@@ -78,10 +78,41 @@ bool Z80DAGToDAGISel::SelectXAddr(SDValue N, SDValue &Base, SDValue &Disp)
   switch (N->getOpcode())
   {
   case ISD::FrameIndex:
-    FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(N);
-    Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i16);
-    Disp = CurDAG->getTargetConstant(0, MVT::i8);
-    return true;
+    if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(N))
+    {
+      Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i16);
+      Disp = CurDAG->getTargetConstant(0, MVT::i8);
+      return true;
+    }
+    break;
+  case ISD::CopyFromReg:
+    if (RegisterSDNode *RN = dyn_cast<RegisterSDNode>(N.getOperand(1)))
+    {
+      unsigned Reg = RN->getReg();
+      if (Reg == Z80::IX || Reg == Z80::IY)
+      {
+        Base = N;
+        Disp = CurDAG->getTargetConstant(0, MVT::i8);
+        return true;
+      }
+    }
+    break;
+  case ISD::ADD:
+    if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(N.getOperand(1)))
+    {
+      if (N.getOperand(0).getOpcode() == ISD::CopyFromReg)
+      {
+        RegisterSDNode *RN = dyn_cast<RegisterSDNode>(N.getOperand(0).getOperand(1));
+        unsigned Reg = RN->getReg();
+        if (Reg == Z80::IX || Reg == Z80::IY)
+        {
+          Base = N.getOperand(0);
+          Disp = CurDAG->getTargetConstant(CN->getZExtValue(), MVT::i8);
+          return true;
+        }
+      }
+    }
+    break;
   }
   return false;
 }

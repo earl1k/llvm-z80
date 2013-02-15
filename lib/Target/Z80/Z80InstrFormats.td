@@ -168,6 +168,16 @@ class II8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
 }
 
 //===----------------------------------------------------------------------===//
+// Simple Instruction with I[8], R[z]
+//===----------------------------------------------------------------------===//
+
+class II8Rz<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+  : II8<opc, outs, ins, asmstr, pattern> {
+  bits<3> Rz;
+  let Inst{2-0} = Rz;
+}
+
+//===----------------------------------------------------------------------===//
 // Simple Instruction with I[16]
 //===----------------------------------------------------------------------===//
 

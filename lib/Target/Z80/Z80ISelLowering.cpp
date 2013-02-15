@@ -185,6 +185,7 @@ SDValue Z80TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   CallingConv::ID CallConv              = CLI.CallConv;
   bool isVarArg                         = CLI.IsVarArg;
 
+  MachineFunction &MF = DAG.getMachineFunction();
   // Z80 target does not yet support tail call optimization
   isTailCall = false;
 
@@ -195,7 +196,7 @@ SDValue Z80TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   CCInfo.AnalyzeCallOperands(Outs, CC_Z80);
 
-  // Get a count of how many butes are to be pushed on the stack
+  // Get a count of how many bytes are to be pushed on the stack
   unsigned NumBytes = CCInfo.getNextStackOffset();
 
   Chain = DAG.getCALLSEQ_START(Chain, DAG.getConstant(NumBytes,
@@ -231,8 +232,35 @@ SDValue Z80TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     if (VA.isRegLoc()) {
       RegsToPass.push_back(std::make_pair(VA.getLocReg(), Arg));
     }
-    else assert(0 && "non register pass is not implemented yet!");
+    else
+    {
+      assert(VA.isMemLoc());
+
+      unsigned FP = MF.getTarget().getRegisterInfo()->getFrameRegister(MF);
+
+      if (StackPtr.getNode() == 0)
+        StackPtr = DAG.getCopyFromReg(Chain, dl, FP, getPointerTy());
+
+      SDValue PtrOff = DAG.getNode(ISD::ADD, dl, getPointerTy(),
+        StackPtr, DAG.getIntPtrConstant(VA.getLocMemOffset()));
+
+      SDValue MemOp;
+      ISD::ArgFlagsTy Flags = Outs[i].Flags;
+
+      if (Flags.isByVal()) assert(0 && "Not implemented yet!");
+
+      MemOp = DAG.getStore(Chain, dl, Arg, PtrOff, MachinePointerInfo(),
+        false, false, 0);
+
+      MemOpChains.push_back(MemOp);
+    }
   }
+
+  // Transform all store nodes into one single node because all store nodes are
+  // independent of each other.
+  if (!MemOpChains.empty())
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
+                        &MemOpChains[0], MemOpChains.size());
 
   // Build a sequence of copy-to-reg nodes chained together with token chain and
   // flag operands which copy the outgoing args into registers. The Flag is

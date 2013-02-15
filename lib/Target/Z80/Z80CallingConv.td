@@ -31,8 +31,14 @@ def CC_Z80 : CallingConv<[
   // Assign i8 arguments in registers
   CCIfType<[i8], CCAssignToReg<[A, H, L]>>,
 
+  // Assign other i8 arguments to stack slots
+  CCIfType<[i8], CCAssignToStack<1, 1>>,
+
   // Assign i16 arguments in registers
-  CCIfType<[i16], CCAssignToReg<[HL]>>
+  CCIfType<[i16], CCAssignToReg<[HL]>>,
+
+  // Assign other i16 arguments to stack slots
+  CCIfType<[i16], CCAssignToStack<2, 1>>
 ]>;
 
 //===----------------------------------------------------------------------===//
@@ -41,4 +47,4 @@ def CC_Z80 : CallingConv<[
 
 def CSR_NoRegs : CalleeSavedRegs<(add)>;
 
-def CSR_16 : CalleeSavedRegs<(add BC, DE, IX, IY)>;
+def CSR_16 : CalleeSavedRegs<(add BC, DE)>;

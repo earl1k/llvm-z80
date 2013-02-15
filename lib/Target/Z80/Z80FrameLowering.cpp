@@ -39,10 +39,11 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF) const
     *static_cast<const Z80InstrInfo*>(MF.getTarget().getInstrInfo());
   DebugLoc dl = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
 
-  uint64_t StackSize = MFI->getStackSize();
-  uint64_t FrameSize = Z80FI->getCalleeSavedFrameSize();
+  uint64_t StackSize     = MFI->getStackSize();
+  uint64_t CallFrameSize = MFI->getMaxCallFrameSize();
+  uint64_t FrameSize     = Z80FI->getCalleeSavedFrameSize();
 
-  uint64_t NumBytes = StackSize - FrameSize;
+  uint64_t NumBytes = StackSize + CallFrameSize - FrameSize;
 
   assert(hasFP(MF) && "Support only emitPrologue with FP");
 
@@ -82,9 +83,11 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
     llvm_unreachable("Can only insert epilog into returning blocks");
 
   // Get the number of bytes to allocate from the FrameInfo
-  uint64_t StackSize = MFI->getStackSize();
-  uint64_t FrameSize = Z80FI->getCalleeSavedFrameSize();
-  uint64_t NumBytes = StackSize - FrameSize;
+  uint64_t StackSize     = MFI->getStackSize();
+  uint64_t CallFrameSize = MFI->getMaxCallFrameSize();
+  uint64_t FrameSize     = Z80FI->getCalleeSavedFrameSize();
+
+  uint64_t NumBytes = StackSize + CallFrameSize - FrameSize;
 
   // Skip the callee-saved pop instructions.
   while (MBBI != MBB.begin())
