@@ -84,10 +84,15 @@ def xmem : Operand<i16> {
 }
 
 //===----------------------------------------------------------------------===//
-// Complex Pattern Definitions.
+// Complex and other pattern definitions.
 //===----------------------------------------------------------------------===//
 
 def xaddr : ComplexPattern<iPTR, 2, "SelectXAddr", [], []>;
+
+def rst : PatLeaf<(i16 imm:$dst), [{
+  return (N->getZExtValue() & 0x38) == N->getZExtValue();
+}]>;
+
 //===----------------------------------------------------------------------===//
 // Instruction list.
 //===----------------------------------------------------------------------===//
@@ -132,6 +137,8 @@ let Defs = [SP], Uses = [SP] in {
 let isCall = 1, Uses = [SP] in {
   def CALL : II16<0xCD, (outs), (ins calltarget:$dst, variable_ops),
     "call\t{$dst}", [(Z80call imm:$dst)]>;
+  def RST  : Irst<0xC7, (outs), (ins i16imm:$dst, variable_ops),
+    "rst\t$dst", [(Z80call rst:$dst)]>;
 }
 
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
