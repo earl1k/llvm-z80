@@ -55,8 +55,6 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF) const
   {
     unsigned FP = TII.getRegisterInfo().getFrameRegister(MF);
 
-    BuildMI(MBB, MBBI, dl, TII.get(Z80::PUSH16r))
-      .addReg(FP, RegState::Kill);
     BuildMI(MBB, MBBI, dl, TII.get(Z80::LD16ri), FP)
       .addImm(-NumBytes);
     BuildMI(MBB, MBBI, dl, TII.get(Z80::ADD16rSP), FP);
@@ -108,7 +106,6 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
     BuildMI(MBB, MBBI, dl, TII.get(Z80::ADD16rSP), FP);
     BuildMI(MBB, MBBI, dl, TII.get(Z80::LD16SPr))
       .addReg(FP, RegState::Kill);
-    BuildMI(MBB, MBBI, dl, TII.get(Z80::POP16r), FP);
   }
 }
 

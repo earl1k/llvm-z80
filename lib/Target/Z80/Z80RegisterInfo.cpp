@@ -45,7 +45,7 @@ Z80RegisterInfo::Z80RegisterInfo(Z80TargetMachine &tm, const TargetInstrInfo &ti
 const uint16_t* Z80RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const
 {
   static const uint16_t CalleeSavedRegs[] = {
-    Z80::BC, Z80::DE,
+    Z80::BC, Z80::DE, Z80::IX, Z80::IY,
     0
   };
   return CalleeSavedRegs;

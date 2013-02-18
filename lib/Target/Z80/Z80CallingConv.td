@@ -47,4 +47,4 @@ def CC_Z80 : CallingConv<[
 
 def CSR_NoRegs : CalleeSavedRegs<(add)>;
 
-def CSR_16 : CalleeSavedRegs<(add BC, DE)>;
+def CSR_16 : CalleeSavedRegs<(add BC, DE, IX, IY)>;
