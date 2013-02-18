@@ -161,8 +161,8 @@ class IRpI16<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
 // Simple Instruction with I[8]
 //===----------------------------------------------------------------------===//
 
-class II8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
-  : I<opc, outs, ins, asmstr, pattern, 2> {
+class II8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern,
+  int size = 2> : I<opc, outs, ins, asmstr, pattern, size> {
   bits<8> imm;
   let Inst{15-8} = imm;
 }
@@ -175,6 +175,16 @@ class II8Rz<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   : II8<opc, outs, ins, asmstr, pattern> {
   bits<3> Rz;
   let Inst{2-0} = Rz;
+}
+
+//===----------------------------------------------------------------------===//
+// Simple Instruction with I[8], I[8]
+//===----------------------------------------------------------------------===//
+
+class II8I8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+  : II8<opc, outs, ins, asmstr, pattern, 3> {
+  bits<8> imm2;
+  let Inst{23-16} = imm2;
 }
 
 //===----------------------------------------------------------------------===//

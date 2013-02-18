@@ -174,6 +174,8 @@ def STORE16 : I<0x00, (outs), (ins GR16:$dst, GR16:$src),
   "store\t{($dst), $src}", [(store GR16:$src, GR16:$dst)]>;
 def LD8xmr : II8Rz<0x70, (outs), (ins xmem:$dst, BR8:$Rz),
   "ld\t{($dst), $Rz}", [(store BR8:$Rz, xaddr:$dst)]>;
+def LD8xmi : II8I8<0x36, (outs), (ins xmem:$dst, i8imm:$imm2),
+  "ld\t{($dst), $imm2}", [(store (i8 imm:$imm2), xaddr:$dst)]>;
 //===----------------------------------------------------------------------===//
 // Arithmetic Instructions
 //===----------------------------------------------------------------------===//
