@@ -100,9 +100,10 @@ bool Z80DAGToDAGISel::SelectXAddr(SDValue N, SDValue &Base, SDValue &Disp)
   case ISD::ADD:
     if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(N.getOperand(1)))
     {
-      if (N.getOperand(0).getOpcode() == ISD::CopyFromReg)
+      SDValue Op0 = N.getOperand(0);
+      if (Op0.getOpcode() == ISD::CopyFromReg)
       {
-        RegisterSDNode *RN = dyn_cast<RegisterSDNode>(N.getOperand(0).getOperand(1));
+        RegisterSDNode *RN = dyn_cast<RegisterSDNode>(Op0.getOperand(1));
         unsigned Reg = RN->getReg();
         if (Reg == Z80::IX || Reg == Z80::IY)
         {
@@ -110,6 +111,12 @@ bool Z80DAGToDAGISel::SelectXAddr(SDValue N, SDValue &Base, SDValue &Disp)
           Disp = CurDAG->getTargetConstant(CN->getZExtValue(), MVT::i8);
           return true;
         }
+      }
+      else if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(Op0))
+      {
+        Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i16);
+        Disp = CurDAG->getTargetConstant(CN->getZExtValue(), MVT::i8);
+        return true;
       }
     }
     break;

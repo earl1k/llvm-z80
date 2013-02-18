@@ -39,6 +39,9 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
 
   setTruncStoreAction(MVT::i16, MVT::i8, Expand);
 
+  setOperationAction(ISD::LOAD,  MVT::i16, Custom);
+  setOperationAction(ISD::STORE, MVT::i16, Custom);
+
   setOperationAction(ISD::ZERO_EXTEND, MVT::i16, Custom);
   setOperationAction(ISD::SIGN_EXTEND, MVT::i16, Custom);
 
@@ -363,6 +366,8 @@ SDValue Z80TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const
   case ISD::SELECT_CC:     return LowerSelectCC(Op, DAG);
   case ISD::BR_CC:         return LowerBrCC(Op, DAG);
   case ISD::GlobalAddress: return LowerGlobalAddress(Op, DAG);
+  case ISD::STORE:         return LowerStore(Op, DAG);
+  case ISD::LOAD:          return LowerLoad(Op, DAG);
   default:
     llvm_unreachable("unimplemented operation");
   }
@@ -619,6 +624,83 @@ SDValue Z80TargetLowering::LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) con
   SDValue Result = DAG.getTargetGlobalAddress(GV, dl, VT, Offset);
 
   return DAG.getNode(Z80ISD::WRAPPER, dl, VT, Result);
+}
+
+SDValue Z80TargetLowering::LowerStore(SDValue Op, SelectionDAG &DAG) const
+{
+  StoreSDNode *ST = dyn_cast<StoreSDNode>(Op);
+  DebugLoc dl     = Op.getDebugLoc();
+  SDValue Chain   = ST->getChain();
+  SDValue BasePtr = ST->getBasePtr();
+  SDValue Value   = ST->getOperand(1);
+
+  assert(!ST->isTruncatingStore() && "Truncating Store isn't supported yet!");
+  assert(!ST->isIndexed() && "Indexed Store isn't supported yet!");
+  
+  switch (BasePtr.getOpcode())
+  {
+  default: llvm_unreachable("Invalid store operand");
+  case ISD::FrameIndex:
+  case ISD::CopyFromReg:
+    break;
+  }
+
+  SDValue Lo, Hi;
+  if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Value)) {
+    Lo = DAG.getConstant(CN->getZExtValue() & 0xFF, MVT::i8);
+    Hi = DAG.getConstant((CN->getZExtValue()>>8) & 0xFF, MVT::i8);
+  }
+  else if (Value.getOpcode() == ISD::CopyFromReg) {
+    if (RegisterSDNode *RN = dyn_cast<RegisterSDNode>(Value.getOperand(1))) {
+      unsigned Reg = RN->getReg();
+      Lo = DAG.getTargetExtractSubreg(Z80::subreg_lo, dl, MVT::i8, Value);
+      Hi = DAG.getTargetExtractSubreg(Z80::subreg_hi, dl, MVT::i8, Value);
+    }
+  }
+  else assert(0 && "Not implemented yet!");
+  SDValue StoreLow = DAG.getStore(Chain, dl, Lo, BasePtr,
+    ST->getPointerInfo(), ST->isVolatile(),
+    ST->isNonTemporal(), ST->getAlignment());
+  SDValue HighAddr = DAG.getNode(ISD::ADD, dl, MVT::i16, BasePtr,
+    DAG.getConstant(1, MVT::i16));
+  SDValue StoreHigh = DAG.getStore(Chain, dl, Hi, HighAddr,
+    ST->getPointerInfo(), ST->isVolatile(),
+    ST->isNonTemporal(), ST->getAlignment());
+  return DAG.getNode(ISD::TokenFactor, dl, MVT::Other, StoreLow, StoreHigh);
+}
+
+SDValue Z80TargetLowering::LowerLoad(SDValue Op, SelectionDAG &DAG) const
+{
+  LoadSDNode *LD  = cast<LoadSDNode>(Op);
+  DebugLoc dl     = LD->getDebugLoc();
+  SDValue Chain   = LD->getChain();
+  SDValue BasePtr = LD->getBasePtr();
+
+  assert(!LD->isIndexed() && "Indexed load isn't supported yet!");
+  assert(LD->getExtensionType() == ISD::NON_EXTLOAD && "Extload isn't supported yet!");
+
+  switch (BasePtr.getOpcode())
+  {
+  default: llvm_unreachable("invalid load operand");
+  case ISD::CopyFromReg:
+  case ISD::FrameIndex:
+    break;
+  }
+  SDValue Lo = DAG.getLoad(MVT::i8, dl, Chain, BasePtr,
+    MachinePointerInfo(), LD->isVolatile(), LD->isNonTemporal(),
+    LD->isInvariant(), LD->getAlignment());
+  SDValue HighAddr = DAG.getNode(ISD::ADD, dl, MVT::i16, BasePtr,
+    DAG.getConstant(1, MVT::i16));
+  SDValue Hi = DAG.getLoad(MVT::i8, dl, Chain, HighAddr,
+    MachinePointerInfo(), LD->isVolatile(), LD->isNonTemporal(),
+    LD->isInvariant(), LD->getAlignment());
+
+  SDValue LoRes = DAG.getTargetInsertSubreg(Z80::subreg_lo, dl,
+    MVT::i16, DAG.getUNDEF(MVT::i16), Lo);
+  SDValue HiRes = DAG.getTargetInsertSubreg(Z80::subreg_hi, dl,
+    MVT::i16, LoRes, Hi);
+
+  return HiRes;
 }
 
 //===----------------------------------------------------------------------===//
