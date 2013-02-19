@@ -18,6 +18,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 using namespace llvm;
 
 Z80FrameLowering::Z80FrameLowering(const Z80TargetMachine &tm)
@@ -26,7 +27,8 @@ Z80FrameLowering::Z80FrameLowering(const Z80TargetMachine &tm)
 
 bool Z80FrameLowering::hasFP(const MachineFunction &MF) const
 {
-  return true;
+  const MachineFrameInfo *MFI = MF.getFrameInfo();
+  return (MFI->hasCalls() || (MFI->getNumObjects() > 0));
 }
 
 void Z80FrameLowering::emitPrologue(MachineFunction &MF) const
@@ -45,13 +47,11 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF) const
 
   uint64_t NumBytes = StackSize + CallFrameSize - FrameSize;
 
-  assert(hasFP(MF) && "Support only emitPrologue with FP");
-
   // Skip the callee-saved push instructions.
   while (MBBI != MBB.end() && (MBBI->getOpcode() == Z80::PUSH16r))
     MBBI++;
 
-  if (NumBytes)
+  if (NumBytes || hasFP(MF))
   {
     unsigned FP = TII.getRegisterInfo().getFrameRegister(MF);
 
@@ -75,8 +75,6 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
   unsigned RetOpcode = MBBI->getOpcode();
   DebugLoc dl = MBBI->getDebugLoc();
 
-  assert(hasFP(MF) && "Support only emitEpilogue with FP");
-
   if (RetOpcode != Z80::RET)
     llvm_unreachable("Can only insert epilog into returning blocks");
 
@@ -97,7 +95,7 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
     MBBI--;
   }
 
-  if (NumBytes)
+  if (NumBytes || hasFP(MF))
   {
     unsigned FP = TII.getRegisterInfo().getFrameRegister(MF);
 
@@ -155,4 +153,16 @@ bool Z80FrameLowering::restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
     BuildMI(MBB, MI, dl, TII.get(Z80::POP16r), CSI[i].getReg());
 
   return true;
+}
+
+void Z80FrameLowering::processFunctionBeforeCalleeSavedScan(
+  MachineFunction &MF, RegScavenger *RS) const
+{
+  MachineFrameInfo *MFI = MF.getFrameInfo();
+
+  if (hasFP(MF))
+  {
+    unsigned FP = MF.getTarget().getRegisterInfo()->getFrameRegister(MF);
+    MF.getRegInfo().setPhysRegUsed(FP);
+  }
 }

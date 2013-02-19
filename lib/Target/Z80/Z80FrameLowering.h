@@ -27,6 +27,9 @@ namespace llvm {
     void emitPrologue(MachineFunction &MF) const;
     void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const;
 
+    void processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
+      RegScavenger *RS = NULL) const;
+
     bool spillCalleeSavedRegisters(MachineBasicBlock &MBB,
       MachineBasicBlock::iterator MI,
       const std::vector<CalleeSavedInfo> &CSI,
