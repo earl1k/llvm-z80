@@ -38,8 +38,8 @@ using namespace llvm;
 namespace {
 
 class R600MCCodeEmitter : public AMDGPUMCCodeEmitter {
-  R600MCCodeEmitter(const R600MCCodeEmitter &); // DO NOT IMPLEMENT
-  void operator=(const R600MCCodeEmitter &); // DO NOT IMPLEMENT
+  R600MCCodeEmitter(const R600MCCodeEmitter &) LLVM_DELETED_FUNCTION;
+  void operator=(const R600MCCodeEmitter &) LLVM_DELETED_FUNCTION;
   const MCInstrInfo &MCII;
   const MCRegisterInfo &MRI;
   const MCSubtargetInfo &STI;
@@ -165,7 +165,8 @@ void R600MCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
     case AMDGPU::VTX_READ_GLOBAL_8_eg:
     case AMDGPU::VTX_READ_GLOBAL_32_eg:
     case AMDGPU::VTX_READ_GLOBAL_128_eg:
-    case AMDGPU::TEX_VTX_CONSTBUF: {
+    case AMDGPU::TEX_VTX_CONSTBUF:
+    case AMDGPU::TEX_VTX_TEXBUF : {
       uint64_t InstWord01 = getBinaryCodeForInstr(MI, Fixups);
       uint32_t InstWord2 = MI.getOperand(2).getImm(); // Offset
 

@@ -21,40 +21,23 @@
 //
 //===----------------------------------------------------------------------===//
 
-class VOP3b_2IN <bits<9> op, string opName, RegisterClass dstClass,
-                 RegisterClass src0Class, RegisterClass src1Class,
-                 list<dag> pattern>
-  : VOP3b <op, (outs dstClass:$vdst),
-               (ins src0Class:$src0, src1Class:$src1, InstFlag:$src2, InstFlag:$sdst,
-                    InstFlag:$omod, InstFlag:$neg),
-           opName, pattern
->;
-
-
-class VOP3_1_32 <bits<9> op, string opName, list<dag> pattern>
-  : VOP3b_2IN <op, opName, SReg_1, AllReg_32, VReg_32, pattern>;
-
 class VOP3_32 <bits<9> op, string opName, list<dag> pattern>
-  : VOP3 <op, (outs VReg_32:$dst), (ins AllReg_32:$src0, VReg_32:$src1, VReg_32:$src2, i32imm:$src3, i32imm:$src4, i32imm:$src5, i32imm:$src6), opName, pattern>;
+  : VOP3 <op, (outs VReg_32:$dst), (ins VSrc_32:$src0, VReg_32:$src1, VReg_32:$src2, i32imm:$src3, i32imm:$src4, i32imm:$src5, i32imm:$src6), opName, pattern>;
 
 class VOP3_64 <bits<9> op, string opName, list<dag> pattern>
-  : VOP3 <op, (outs VReg_64:$dst), (ins AllReg_64:$src0, VReg_64:$src1, VReg_64:$src2, i32imm:$src3, i32imm:$src4, i32imm:$src5, i32imm:$src6), opName, pattern>;
-
+  : VOP3 <op, (outs VReg_64:$dst), (ins VSrc_64:$src0, VReg_64:$src1, VReg_64:$src2, i32imm:$src3, i32imm:$src4, i32imm:$src5, i32imm:$src6), opName, pattern>;
 
 class SOP1_32 <bits<8> op, string opName, list<dag> pattern>
-  : SOP1 <op, (outs SReg_32:$dst), (ins SReg_32:$src0), opName, pattern>;
+  : SOP1 <op, (outs SReg_32:$dst), (ins SSrc_32:$src0), opName, pattern>;
 
 class SOP1_64 <bits<8> op, string opName, list<dag> pattern>
-  : SOP1 <op, (outs SReg_64:$dst), (ins SReg_64:$src0), opName, pattern>;
+  : SOP1 <op, (outs SReg_64:$dst), (ins SSrc_64:$src0), opName, pattern>;
 
 class SOP2_32 <bits<7> op, string opName, list<dag> pattern>
-  : SOP2 <op, (outs SReg_32:$dst), (ins SReg_32:$src0, SReg_32:$src1), opName, pattern>;
+  : SOP2 <op, (outs SReg_32:$dst), (ins SSrc_32:$src0, SSrc_32:$src1), opName, pattern>;
 
 class SOP2_64 <bits<7> op, string opName, list<dag> pattern>
-  : SOP2 <op, (outs SReg_64:$dst), (ins SReg_64:$src0, SReg_64:$src1), opName, pattern>;
-
-class SOP2_VCC <bits<7> op, string opName, list<dag> pattern>
-  : SOP2 <op, (outs SReg_1:$vcc), (ins SReg_64:$src0, SReg_64:$src1), opName, pattern>;
+  : SOP2 <op, (outs SReg_64:$dst), (ins SSrc_64:$src0, SSrc_64:$src1), opName, pattern>;
 
 class VOP1_Helper <bits<8> op, RegisterClass vrc, RegisterClass arc,
                    string opName, list<dag> pattern> : 
@@ -63,7 +46,7 @@ class VOP1_Helper <bits<8> op, RegisterClass vrc, RegisterClass arc,
   >;
 
 multiclass VOP1_32 <bits<8> op, string opName, list<dag> pattern> {
-  def _e32: VOP1_Helper <op, VReg_32, AllReg_32, opName, pattern>;
+  def _e32: VOP1_Helper <op, VReg_32, VSrc_32, opName, pattern>;
   def _e64 : VOP3_32 <{1, 1, op{6}, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
                       opName, []
   >;
@@ -71,7 +54,7 @@ multiclass VOP1_32 <bits<8> op, string opName, list<dag> pattern> {
 
 multiclass VOP1_64 <bits<8> op, string opName, list<dag> pattern> {
 
-  def _e32 : VOP1_Helper <op, VReg_64, AllReg_64, opName, pattern>;
+  def _e32 : VOP1_Helper <op, VReg_64, VSrc_64, opName, pattern>;
 
   def _e64 : VOP3_64 <
     {1, 1, op{6}, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
@@ -87,7 +70,7 @@ class VOP2_Helper <bits<6> op, RegisterClass vrc, RegisterClass arc,
 
 multiclass VOP2_32 <bits<6> op, string opName, list<dag> pattern> {
 
-  def _e32 : VOP2_Helper <op, VReg_32, AllReg_32, opName, pattern>;
+  def _e32 : VOP2_Helper <op, VReg_32, VSrc_32, opName, pattern>;
 
   def _e64 : VOP3_32 <{1, 0, 0, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
                       opName, []
@@ -95,7 +78,7 @@ multiclass VOP2_32 <bits<6> op, string opName, list<dag> pattern> {
 }
 
 multiclass VOP2_64 <bits<6> op, string opName, list<dag> pattern> {
-  def _e32: VOP2_Helper <op, VReg_64, AllReg_64, opName, pattern>;
+  def _e32: VOP2_Helper <op, VReg_64, VSrc_64, opName, pattern>;
 
   def _e64 : VOP3_64 <
     {1, 0, 0, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
@@ -109,38 +92,97 @@ class SOPK_32 <bits<5> op, string opName, list<dag> pattern>
 class SOPK_64 <bits<5> op, string opName, list<dag> pattern>
   : SOPK <op, (outs SReg_64:$dst), (ins i16imm:$src0), opName, pattern>;
 
-class VOPC_Helper <bits<8> op, RegisterClass vrc, RegisterClass arc,
-                 string opName, list<dag> pattern> :
-  VOPC <
-    op, (ins arc:$src0, vrc:$src1), opName, pattern
-  >;
+multiclass VOPC_Helper <bits<8> op, RegisterClass vrc, RegisterClass arc,
+                        string opName, list<dag> pattern> {
 
-multiclass VOPC_32 <bits<9> op, string opName, list<dag> pattern> {
-
-  def _e32 : VOPC_Helper <
-    {op{7}, op{6}, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
-    VReg_32, AllReg_32, opName, pattern
-  >;
-
-  def _e64 : VOP3_1_32 <
-    op,
-    opName, pattern
-  >;
-}
-
-multiclass VOPC_64 <bits<8> op, string opName, list<dag> pattern> {
-
-  def _e32 : VOPC_Helper <op, VReg_64, AllReg_64, opName, pattern>;
-
-  def _e64 : VOP3_64 <
+  def _e32 : VOPC <op, (ins arc:$src0, vrc:$src1), opName, pattern>;
+  def _e64 : VOP3 <
     {0, op{7}, op{6}, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
-    opName, []
-  >;
+    (outs SReg_64:$dst),
+    (ins arc:$src0, vrc:$src1,
+         InstFlag:$abs, InstFlag:$clamp,
+         InstFlag:$omod, InstFlag:$neg),
+    opName, pattern
+  > {
+    let SRC2 = 0x80;
+  }
 }
+
+multiclass VOPC_32 <bits<8> op, string opName, list<dag> pattern>
+  : VOPC_Helper <op, VReg_32, VSrc_32, opName, pattern>;
+
+multiclass VOPC_64 <bits<8> op, string opName, list<dag> pattern>
+  : VOPC_Helper <op, VReg_64, VSrc_64, opName, pattern>;
 
 class SOPC_32 <bits<7> op, string opName, list<dag> pattern>
-  : SOPC <op, (outs SCCReg:$dst), (ins SReg_32:$src0, SReg_32:$src1), opName, pattern>;
+  : SOPC <op, (outs SCCReg:$dst), (ins SSrc_32:$src0, SSrc_32:$src1), opName, pattern>;
 
 class SOPC_64 <bits<7> op, string opName, list<dag> pattern>
-  : SOPC <op, (outs SCCReg:$dst), (ins SReg_64:$src0, SReg_64:$src1), opName, pattern>;
+  : SOPC <op, (outs SCCReg:$dst), (ins SSrc_64:$src0, SSrc_64:$src1), opName, pattern>;
+
+class MIMG_Load_Helper <bits<7> op, string asm> : MIMG <
+  op,
+  (outs VReg_128:$vdata),
+  (ins i32imm:$dmask, i1imm:$unorm, i1imm:$glc, i1imm:$da, i1imm:$r128,
+       i1imm:$tfe, i1imm:$lwe, i1imm:$slc, VReg_32:$vaddr,
+       GPR4Align<SReg_256>:$srsrc, GPR4Align<SReg_128>:$ssamp),
+  asm,
+  []> {
+  let mayLoad = 1;
+  let mayStore = 0;
+}
+
+class MTBUF_Store_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBUF <
+  op,
+  (outs),
+  (ins regClass:$vdata, i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc,
+   i1imm:$addr64, i8imm:$dfmt, i8imm:$nfmt, VReg_32:$vaddr,
+   GPR4Align<SReg_128>:$srsrc, i1imm:$slc, i1imm:$tfe, SSrc_32:$soffset),
+  asm,
+  []> {
+  let mayStore = 1;
+  let mayLoad = 0;
+}
+
+class MUBUF_Load_Helper <bits<7> op, string asm, RegisterClass regClass> : MUBUF <
+  op,
+  (outs regClass:$dst),
+  (ins i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc, i1imm:$addr64,
+       i1imm:$lds, VReg_32:$vaddr, GPR4Align<SReg_128>:$srsrc, i1imm:$slc,
+       i1imm:$tfe, SSrc_32:$soffset),
+  asm,
+  []> {
+  let mayLoad = 1;
+  let mayStore = 0;
+}
+
+class MTBUF_Load_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBUF <
+  op,
+  (outs regClass:$dst),
+  (ins i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc, i1imm:$addr64,
+       i8imm:$dfmt, i8imm:$nfmt, VReg_32:$vaddr, GPR4Align<SReg_128>:$srsrc,
+       i1imm:$slc, i1imm:$tfe, SSrc_32:$soffset),
+  asm,
+  []> {
+  let mayLoad = 1;
+  let mayStore = 0;
+}
+
+multiclass SMRD_Helper <bits<5> op, string asm, RegisterClass dstClass> {
+  def _IMM : SMRD <
+             op, 1,
+             (outs dstClass:$dst),
+             (ins GPR2Align<SReg_64>:$sbase, i32imm:$offset),
+             asm,
+             []
+  >;
+
+  def _SGPR : SMRD <
+              op, 0,
+              (outs dstClass:$dst),
+              (ins GPR2Align<SReg_64>:$sbase, SReg_32:$soff),
+              asm,
+              []
+  >;
+}
 

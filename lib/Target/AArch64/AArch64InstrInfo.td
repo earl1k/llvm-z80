@@ -1,3 +1,16 @@
+//===----- AArch64InstrInfo.td - AArch64 Instruction Info ----*- tablegen -*-=//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// This file describes the AArch64 scalar instructions in TableGen format.
+//
+//===----------------------------------------------------------------------===//
+
 include "AArch64InstrFormats.td"
 
 //===----------------------------------------------------------------------===//
@@ -1638,7 +1651,7 @@ class A64I_dp_1src_impl<bit sf, bits<6> opcode, string asmop,
                    itin>;
 
 multiclass A64I_dp_1src <bits<6> opcode, string asmop> {
-  let neverHasSideEffects = 1 in {
+  let hasSideEffects = 0 in {
     def ww : A64I_dp_1src_impl<0b0, opcode, asmop, [], GPR32, NoItinerary>;
     def xx : A64I_dp_1src_impl<0b1, opcode, asmop, [], GPR64, NoItinerary>;
   }
@@ -2436,16 +2449,12 @@ class A64I_LDRlitSimple<bits<2> opc, bit v, RegisterClass OutReg,
                  "ldr\t$Rt, $Imm19", patterns, NoItinerary>;
 
 let mayLoad = 1 in {
-  def LDRw_lit : A64I_LDRlitSimple<0b00, 0b0, GPR32,
-                              [(set (i32 GPR32:$Rt), (load constpool:$Imm19))]>;
-  def LDRx_lit : A64I_LDRlitSimple<0b01, 0b0, GPR64,
-                              [(set (i64 GPR64:$Rt), (load constpool:$Imm19))]>;
+  def LDRw_lit : A64I_LDRlitSimple<0b00, 0b0, GPR32>;
+  def LDRx_lit : A64I_LDRlitSimple<0b01, 0b0, GPR64>;
 }
 
-def LDRs_lit  : A64I_LDRlitSimple<0b00, 0b1, FPR32,
-                              [(set (f32 FPR32:$Rt), (load constpool:$Imm19))]>;
-def LDRd_lit  : A64I_LDRlitSimple<0b01, 0b1, FPR64,
-                              [(set (f64 FPR64:$Rt), (load constpool:$Imm19))]>;
+def LDRs_lit  : A64I_LDRlitSimple<0b00, 0b1, FPR32>;
+def LDRd_lit  : A64I_LDRlitSimple<0b01, 0b1, FPR64>;
 
 let mayLoad = 1 in {
   def LDRq_lit : A64I_LDRlitSimple<0b10, 0b1, FPR128>;
@@ -3894,7 +3903,7 @@ multiclass A64I_movwSizes<bits<2> opc, string asmop, dag ins32bit,
 }
 
 let isMoveImm = 1, isReMaterializable = 1,
-    isAsCheapAsAMove = 1, neverHasSideEffects = 1 in {
+    isAsCheapAsAMove = 1, hasSideEffects = 0 in {
   defm MOVN : A64I_movwSizes<0b00, "movn",
                              (ins movn32_imm:$FullImm),
                              (ins movn64_imm:$FullImm)>;
@@ -3980,7 +3989,7 @@ def adrp_label : Operand<i64> {
   let OperandType = "OPERAND_PCREL";
 }
 
-let neverHasSideEffects = 1 in {
+let hasSideEffects = 0 in {
   def ADRxi : A64I_PCADR<0b0, (outs GPR64:$Rd), (ins adr_label:$Label),
                          "adr\t$Rd, $Label", [], NoItinerary>;
 
@@ -4552,22 +4561,6 @@ def : Pat<(and (A64Bfi GPR64:$src, GPR64:$Rn, imm:$ImmR, imm:$ImmS),
 }
 
 //===----------------------------------------------------------------------===//
-// Constant island entries
-//===----------------------------------------------------------------------===//
-
-// The constant island pass needs to create "instructions" in the middle of the
-// instruction stream to reresent its constants.
-
-def cpinst_operand : Operand<i32>;
-
-def CONSTPOOL_ENTRY : PseudoInst<(outs), (ins cpinst_operand:$instid,
-                                              cpinst_operand:$cpidx,
-                                              i32imm:$size), []> {
-  let neverHasSideEffects = 1;
-  let isNotDuplicable = 1;
-}
-
-//===----------------------------------------------------------------------===//
 // Miscellaneous patterns
 //===----------------------------------------------------------------------===//
 
@@ -4885,6 +4878,8 @@ defm : uimm12_pats<(A64WrapperSmall texternalsym:$Hi, texternalsym:$Lo12,
                                     ALIGN),
                    (ADRPxi texternalsym:$Hi), (i64 texternalsym:$Lo12)>;
 
+defm : uimm12_pats<(A64WrapperSmall tconstpool:$Hi, tconstpool:$Lo12, ALIGN),
+                   (ADRPxi tconstpool:$Hi), (i64 tconstpool:$Lo12)>;
 
 // We also want to use uimm12 instructions for local variables at the moment.
 def tframeindex_XFORM : SDNodeXForm<frameindex, [{

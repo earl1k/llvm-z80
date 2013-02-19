@@ -326,12 +326,11 @@ bool X86FastISel::X86FastEmitExtend(ISD::NodeType Opc, EVT DstVT,
                                     unsigned &ResultReg) {
   unsigned RR = FastEmit_r(SrcVT.getSimpleVT(), DstVT.getSimpleVT(), Opc,
                            Src, /*TODO: Kill=*/false);
-
-  if (RR != 0) {
-    ResultReg = RR;
-    return true;
-  } else
+  if (RR == 0)
     return false;
+
+  ResultReg = RR;
+  return true;
 }
 
 /// X86SelectAddress - Attempt to fill in an address from the given value.
@@ -727,7 +726,7 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
 
   // Don't handle popping bytes on return for now.
   if (X86MFInfo->getBytesToPopOnReturn() != 0)
-    return 0;
+    return false;
 
   // fastcc with -tailcallopt is intended to provide a guaranteed
   // tail call optimization. Fastisel doesn't know how to do that.
@@ -1378,7 +1377,6 @@ bool X86FastISel::TryEmitSmallMemcpy(X86AddressMode DestAM,
     else if (Len >= 2)
       VT = MVT::i16;
     else {
-      assert(Len == 1);
       VT = MVT::i8;
     }
 

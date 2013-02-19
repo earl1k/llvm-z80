@@ -26,9 +26,11 @@
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/system_error.h"
+#include "llvm/Support/Threading.h"
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
@@ -46,6 +48,10 @@ void llvm::initializeCore(PassRegistry &Registry) {
 
 void LLVMInitializeCore(LLVMPassRegistryRef R) {
   initializeCore(*unwrap(R));
+}
+
+void LLVMShutdown() {
+  llvm_shutdown();
 }
 
 /*===-- Error handling ----------------------------------------------------===*/
@@ -2369,6 +2375,29 @@ LLVMBool LLVMCreateMemoryBufferWithSTDIN(LLVMMemoryBufferRef *OutMemBuf,
   return 1;
 }
 
+LLVMMemoryBufferRef LLVMCreateMemoryBufferWithMemoryRange(
+    const char *InputData,
+    size_t InputDataLength,
+    const char *BufferName,
+    LLVMBool RequiresNullTerminator) {
+
+  return wrap(MemoryBuffer::getMemBuffer(
+      StringRef(InputData, InputDataLength),
+      StringRef(BufferName),
+      RequiresNullTerminator));
+}
+
+LLVMMemoryBufferRef LLVMCreateMemoryBufferWithMemoryRangeCopy(
+    const char *InputData,
+    size_t InputDataLength,
+    const char *BufferName) {
+
+  return wrap(MemoryBuffer::getMemBufferCopy(
+      StringRef(InputData, InputDataLength),
+      StringRef(BufferName)));
+}
+
+
 void LLVMDisposeMemoryBuffer(LLVMMemoryBufferRef MemBuf) {
   delete unwrap(MemBuf);
 }
@@ -2412,4 +2441,18 @@ LLVMBool LLVMFinalizeFunctionPassManager(LLVMPassManagerRef FPM) {
 
 void LLVMDisposePassManager(LLVMPassManagerRef PM) {
   delete unwrap(PM);
+}
+
+/*===-- Threading ------------------------------------------------------===*/
+
+LLVMBool LLVMStartMultithreaded() {
+  return llvm_start_multithreaded();
+}
+
+void LLVMStopMultithreaded() {
+  llvm_stop_multithreaded();
+}
+
+LLVMBool LLVMIsMultithreaded() {
+  return llvm_is_multithreaded();
 }

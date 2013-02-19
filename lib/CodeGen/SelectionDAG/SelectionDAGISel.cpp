@@ -354,6 +354,10 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
   TTI = getAnalysisIfAvailable<TargetTransformInfo>();
   GFI = Fn.hasGC() ? &getAnalysis<GCModuleInfo>().getFunctionInfo(Fn) : 0;
 
+  TargetSubtargetInfo &ST =
+    const_cast<TargetSubtargetInfo&>(TM.getSubtarget<TargetSubtargetInfo>());
+  ST.resetSubtargetFeatures(MF);
+
   DEBUG(dbgs() << "\n\n\n=== " << Fn.getName() << "\n");
 
   SplitCriticalSideEffectEdges(const_cast<Function&>(Fn), this);
@@ -368,6 +372,7 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
 
   SDB->init(GFI, *AA, LibInfo);
 
+  MF->setHasMSInlineAsm(false);
   SelectAllBasicBlocks(Fn);
 
   // If the first basic block in the function has live ins that need to be
@@ -438,24 +443,26 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
 
   // Determine if there are any calls in this machine function.
   MachineFrameInfo *MFI = MF->getFrameInfo();
-  if (!MFI->hasCalls()) {
-    for (MachineFunction::const_iterator
-           I = MF->begin(), E = MF->end(); I != E; ++I) {
-      const MachineBasicBlock *MBB = I;
-      for (MachineBasicBlock::const_iterator
-             II = MBB->begin(), IE = MBB->end(); II != IE; ++II) {
-        const MCInstrDesc &MCID = TM.getInstrInfo()->get(II->getOpcode());
+  for (MachineFunction::const_iterator I = MF->begin(), E = MF->end(); I != E;
+       ++I) {
 
-        if ((MCID.isCall() && !MCID.isReturn()) ||
-            II->isStackAligningInlineAsm()) {
-          MFI->setHasCalls(true);
-          goto done;
-        }
+    if (MFI->hasCalls() && MF->hasMSInlineAsm())
+      break;
+
+    const MachineBasicBlock *MBB = I;
+    for (MachineBasicBlock::const_iterator II = MBB->begin(), IE = MBB->end();
+         II != IE; ++II) {
+      const MCInstrDesc &MCID = TM.getInstrInfo()->get(II->getOpcode());
+      if ((MCID.isCall() && !MCID.isReturn()) ||
+          II->isStackAligningInlineAsm()) {
+        MFI->setHasCalls(true);
+      }
+      if (II->isMSInlineAsm()) {
+        MF->setHasMSInlineAsm(true);
       }
     }
   }
 
-  done:
   // Determine if there is a call to setjmp in the machine function.
   MF->setExposesReturnsTwice(Fn.callsFunctionThatReturnsTwice());
 

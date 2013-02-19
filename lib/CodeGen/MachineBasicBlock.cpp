@@ -698,6 +698,24 @@ MachineBasicBlock::SplitCriticalEdge(MachineBasicBlock *Succ, Pass *P) {
       }
     }
 
+  SmallVector<unsigned, 4> UsedRegs;
+  if (LIS) {
+    for (instr_iterator I = getFirstInstrTerminator(), E = instr_end();
+         I != E; ++I) {
+      MachineInstr *MI = I;
+
+      for (MachineInstr::mop_iterator OI = MI->operands_begin(),
+           OE = MI->operands_end(); OI != OE; ++OI) {
+        if (!OI->isReg() || OI->getReg() == 0)
+          continue;
+
+        unsigned Reg = OI->getReg();
+        if (std::find(UsedRegs.begin(), UsedRegs.end(), Reg) == UsedRegs.end())
+          UsedRegs.push_back(Reg);
+      }
+    }
+  }
+
   ReplaceUsesOfBlockWith(Succ, NMBB);
 
   // If updateTerminator() removes instructions, we need to remove them from
@@ -830,6 +848,10 @@ MachineBasicBlock::SplitCriticalEdge(MachineBasicBlock *Succ, Pass *P) {
         LI.removeRange(StartIndex, EndIndex);
       }
     }
+
+    // Update all intervals for registers whose uses may have been modified by
+    // updateTerminator().
+    LIS->repairIntervalsInRange(this, getFirstTerminator(), end(), UsedRegs);
   }
 
   if (MachineDominatorTree *MDT =

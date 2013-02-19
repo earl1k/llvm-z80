@@ -17,8 +17,9 @@
 #define LLVM_IR_ATTRIBUTES_H
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/FoldingSet.h"
+#include "llvm/Support/PointerLikeTypeTraits.h"
+#include <bitset>
 #include <cassert>
 #include <map>
 #include <string>
@@ -30,6 +31,7 @@ class AttributeImpl;
 class AttributeSetImpl;
 class AttributeSetNode;
 class Constant;
+template<typename T> struct DenseMapInfo;
 class LLVMContext;
 class Type;
 
@@ -100,10 +102,7 @@ public:
     UWTable,               ///< Function must be in a unwind table
     ZExt,                  ///< Zero extended before/after call
 
-    EndAttrKinds,          ///< Sentinal value useful for loops
-
-    AttrKindEmptyKey,      ///< Empty key value for DenseMapInfo
-    AttrKindTombstoneKey   ///< Tombstone key value for DenseMapInfo
+    EndAttrKinds           ///< Sentinal value useful for loops
   };
 private:
   AttributeImpl *pImpl;
@@ -182,26 +181,6 @@ public:
 
   void Profile(FoldingSetNodeID &ID) const {
     ID.AddPointer(pImpl);
-  }
-};
-
-//===----------------------------------------------------------------------===//
-/// \class
-/// \brief Provide DenseMapInfo for Attribute::AttrKinds. This is used by
-/// AttrBuilder.
-template<> struct DenseMapInfo<Attribute::AttrKind> {
-  static inline Attribute::AttrKind getEmptyKey() {
-    return Attribute::AttrKindEmptyKey;
-  }
-  static inline Attribute::AttrKind getTombstoneKey() {
-    return Attribute::AttrKindTombstoneKey;
-  }
-  static unsigned getHashValue(const Attribute::AttrKind &Val) {
-    return Val * 37U;
-  }
-  static bool isEqual(const Attribute::AttrKind &LHS,
-                      const Attribute::AttrKind &RHS) {
-    return LHS == RHS;
   }
 };
 
@@ -400,16 +379,17 @@ template<> struct DenseMapInfo<AttributeSet> {
 /// value, however, is not. So this can be used as a quick way to test for
 /// equality, presence of attributes, etc.
 class AttrBuilder {
-  DenseSet<Attribute::AttrKind> Attrs;
+  std::bitset<Attribute::EndAttrKinds> Attrs;
   std::map<std::string, std::string> TargetDepAttrs;
   uint64_t Alignment;
   uint64_t StackAlignment;
 public:
-  AttrBuilder() : Alignment(0), StackAlignment(0) {}
-  explicit AttrBuilder(uint64_t Val) : Alignment(0), StackAlignment(0) {
+  AttrBuilder() : Attrs(0), Alignment(0), StackAlignment(0) {}
+  explicit AttrBuilder(uint64_t Val)
+    : Attrs(0), Alignment(0), StackAlignment(0) {
     addRawValue(Val);
   }
-  AttrBuilder(const Attribute &A) : Alignment(0), StackAlignment(0) {
+  AttrBuilder(const Attribute &A) : Attrs(0), Alignment(0), StackAlignment(0) {
     addAttribute(A);
   }
   AttrBuilder(AttributeSet AS, unsigned Idx);
@@ -442,7 +422,10 @@ public:
   AttrBuilder &merge(const AttrBuilder &B);
 
   /// \brief Return true if the builder has the specified attribute.
-  bool contains(Attribute::AttrKind A) const;
+  bool contains(Attribute::AttrKind A) const {
+    assert((unsigned)A < Attribute::EndAttrKinds && "Attribute out of range!");
+    return Attrs[A];
+  }
 
   /// \brief Return true if the builder has the specified target-dependent
   /// attribute.
@@ -472,17 +455,9 @@ public:
   /// the form used internally in Attribute.
   AttrBuilder &addStackAlignmentAttr(unsigned Align);
 
-  // Iterators for target-independent attributes.
-  typedef DenseSet<Attribute::AttrKind>::iterator       iterator;
-  typedef DenseSet<Attribute::AttrKind>::const_iterator const_iterator;
-
-  iterator begin()             { return Attrs.begin(); }
-  iterator end()               { return Attrs.end(); }
-
-  const_iterator begin() const { return Attrs.begin(); }
-  const_iterator end() const   { return Attrs.end(); }
-
-  bool empty() const           { return Attrs.empty(); }
+  /// \brief Return true if the builder contains no target-independent
+  /// attributes.
+  bool empty() const { return Attrs.none(); }
 
   // Iterators for target-dependent attributes.
   typedef std::pair<std::string, std::string>                td_type;

@@ -39,6 +39,14 @@ class _F3R<bits<5> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   let DecoderMethod = "Decode3RInstruction";
 }
 
+// 3R with first operand as an immediate. Used for TSETR where the first
+// operand is treated as an immediate since it refers to a register number in
+// another thread.
+class _F3RImm<bits<5> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+    : _F3R<opc, outs, ins, asmstr, pattern> {
+  let DecoderMethod = "Decode3RImmInstruction";
+}
+
 class _FL3R<bits<9> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstXCore<4, outs, ins, asmstr, pattern> {
   let Inst{31-27} = opc{8-4};
@@ -148,6 +156,14 @@ class _F2R<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-11} = opc{5-1};
   let Inst{4} = opc{0};
   let DecoderMethod = "Decode2RInstruction";
+}
+
+// 2R with first operand as an immediate. Used for TSETMR where the first
+// operand is treated as an immediate since it refers to a register number in
+// another thread.
+class _F2RImm<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+    : _F2R<opc, outs, ins, asmstr, pattern> {
+  let DecoderMethod = "Decode2RImmInstruction";
 }
 
 // 2R with first operand as both a source and a destination.

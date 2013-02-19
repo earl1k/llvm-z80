@@ -2655,8 +2655,7 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     // This isn't right, although it's probably harmless on x86; liveouts
     // should be computed from returns not tail calls.  Consider a void
     // function making a tail call to a function returning int.
-    return DAG.getNode(X86ISD::TC_RETURN, dl,
-                       NodeTys, &Ops[0], Ops.size());
+    return DAG.getNode(X86ISD::TC_RETURN, dl, NodeTys, &Ops[0], Ops.size());
   }
 
   Chain = DAG.getNode(X86ISD::CALL, dl, NodeTys, &Ops[0], Ops.size());
@@ -4222,10 +4221,11 @@ static unsigned getShuffleCLImmediate(ShuffleVectorSDNode *N) {
 /// isZeroNode - Returns true if Elt is a constant zero or a floating point
 /// constant +0.0.
 bool X86::isZeroNode(SDValue Elt) {
-  return ((isa<ConstantSDNode>(Elt) &&
-           cast<ConstantSDNode>(Elt)->isNullValue()) ||
-          (isa<ConstantFPSDNode>(Elt) &&
-           cast<ConstantFPSDNode>(Elt)->getValueAPF().isPosZero()));
+  if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Elt))
+    return CN->isNullValue();
+  if (ConstantFPSDNode *CFP = dyn_cast<ConstantFPSDNode>(Elt))
+    return CFP->getValueAPF().isPosZero();
+  return false;
 }
 
 /// CommuteVectorShuffle - Swap vector_shuffle operands as well as values in
@@ -6662,9 +6662,10 @@ X86TargetLowering::LowerVectorIntExtend(SDValue Op, SelectionDAG &DAG) const {
       return SDValue();
   }
 
+  LLVMContext *Context = DAG.getContext();
   unsigned NBits = VT.getVectorElementType().getSizeInBits() << Shift;
-  EVT NeVT = EVT::getIntegerVT(*DAG.getContext(), NBits);
-  EVT NVT = EVT::getVectorVT(*DAG.getContext(), NeVT, NumElems >> Shift);
+  EVT NeVT = EVT::getIntegerVT(*Context, NBits);
+  EVT NVT = EVT::getVectorVT(*Context, NeVT, NumElems >> Shift);
 
   if (!isTypeLegal(NVT))
     return SDValue();
@@ -6683,8 +6684,21 @@ X86TargetLowering::LowerVectorIntExtend(SDValue Op, SelectionDAG &DAG) const {
     // If it's foldable, i.e. normal load with single use, we will let code
     // selection to fold it. Otherwise, we will short the conversion sequence.
     if (CIdx && CIdx->getZExtValue() == 0 &&
-        (!ISD::isNormalLoad(V.getNode()) || !V.hasOneUse()))
+        (!ISD::isNormalLoad(V.getNode()) || !V.hasOneUse())) {
+      if (V.getValueSizeInBits() > V1.getValueSizeInBits()) {
+        // The "ext_vec_elt" node is wider than the result node.
+        // In this case we should extract subvector from V.
+        // (bitcast (sclr2vec (ext_vec_elt x))) -> (bitcast (extract_subvector x)).
+        unsigned Ratio = V.getValueSizeInBits() / V1.getValueSizeInBits();
+        EVT FullVT = V.getValueType();
+        EVT SubVecVT = EVT::getVectorVT(*Context, 
+                                        FullVT.getVectorElementType(),
+                                        FullVT.getVectorNumElements()/Ratio);
+        V = DAG.getNode(ISD::EXTRACT_SUBVECTOR, DL, SubVecVT, V, 
+                        DAG.getIntPtrConstant(0));
+      }
       V1 = DAG.getNode(ISD::BITCAST, DL, V1.getValueType(), V);
+    }
   }
 
   return DAG.getNode(ISD::BITCAST, DL, VT,
@@ -10196,7 +10210,7 @@ static SDValue LowerVACOPY(SDValue Op, const X86Subtarget *Subtarget,
                        MachinePointerInfo(DstSV), MachinePointerInfo(SrcSV));
 }
 
-// getTargetVShiftNOde - Handle vector element shifts where the shift amount
+// getTargetVShiftNode - Handle vector element shifts where the shift amount
 // may or may not be a constant. Takes immediate version of shift as input.
 static SDValue getTargetVShiftNode(unsigned Opc, DebugLoc dl, EVT VT,
                                    SDValue SrcOp, SDValue ShAmt,
@@ -15661,7 +15675,7 @@ static SDValue PerformCMOVCombine(SDNode *N, SelectionDAG &DAG,
     ConstantSDNode *CmpAgainst = 0;
     if ((Cond.getOpcode() == X86ISD::CMP || Cond.getOpcode() == X86ISD::SUB) &&
         (CmpAgainst = dyn_cast<ConstantSDNode>(Cond.getOperand(1))) &&
-        dyn_cast<ConstantSDNode>(Cond.getOperand(0)) == 0) {
+        !isa<ConstantSDNode>(Cond.getOperand(0))) {
 
       if (CC == X86::COND_NE &&
           CmpAgainst == dyn_cast<ConstantSDNode>(FalseOp)) {
@@ -15941,8 +15955,7 @@ static SDValue CMPEQCombine(SDNode *N, SelectionDAG &DAG,
     if (VT == MVT::f32 || VT == MVT::f64) {
       bool ExpectingFlags = false;
       // Check for any users that want flags:
-      for (SDNode::use_iterator UI = N->use_begin(),
-             UE = N->use_end();
+      for (SDNode::use_iterator UI = N->use_begin(), UE = N->use_end();
            !ExpectingFlags && UI != UE; ++UI)
         switch (UI->getOpcode()) {
         default:
@@ -17416,7 +17429,8 @@ static SDValue performVZEXTCombine(SDNode *N, SelectionDAG &DAG,
   if (In.getOpcode() != X86ISD::VZEXT)
     return SDValue();
 
-  return DAG.getNode(X86ISD::VZEXT, N->getDebugLoc(), N->getValueType(0), In.getOperand(0));
+  return DAG.getNode(X86ISD::VZEXT, N->getDebugLoc(), N->getValueType(0),
+                     In.getOperand(0));
 }
 
 SDValue X86TargetLowering::PerformDAGCombine(SDNode *N,
@@ -17643,7 +17657,7 @@ bool X86TargetLowering::ExpandInlineAsm(CallInst *CI) const {
       AsmPieces.clear();
       const std::string &ConstraintsStr = IA->getConstraintString();
       SplitString(StringRef(ConstraintsStr).substr(5), AsmPieces, ",");
-      std::sort(AsmPieces.begin(), AsmPieces.end());
+      array_pod_sort(AsmPieces.begin(), AsmPieces.end());
       if (AsmPieces.size() == 4 &&
           AsmPieces[0] == "~{cc}" &&
           AsmPieces[1] == "~{dirflag}" &&
@@ -17661,7 +17675,7 @@ bool X86TargetLowering::ExpandInlineAsm(CallInst *CI) const {
       AsmPieces.clear();
       const std::string &ConstraintsStr = IA->getConstraintString();
       SplitString(StringRef(ConstraintsStr).substr(5), AsmPieces, ",");
-      std::sort(AsmPieces.begin(), AsmPieces.end());
+      array_pod_sort(AsmPieces.begin(), AsmPieces.end());
       if (AsmPieces.size() == 4 &&
           AsmPieces[0] == "~{cc}" &&
           AsmPieces[1] == "~{dirflag}" &&

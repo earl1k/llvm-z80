@@ -8,35 +8,8 @@
 //===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
-// SI DAG Profiles
-//===----------------------------------------------------------------------===//
-def SDTVCCBinaryOp : SDTypeProfile<1, 2, [
-  SDTCisInt<0>, SDTCisInt<1>, SDTCisSameAs<1, 2>
-]>;
-
-//===----------------------------------------------------------------------===//
 // SI DAG Nodes
 //===----------------------------------------------------------------------===//
-
-// and operation on 64-bit wide vcc
-def SIsreg1_and : SDNode<"SIISD::VCC_AND", SDTVCCBinaryOp,
-  [SDNPCommutative, SDNPAssociative]
->;
-
-// Special bitcast node for sharing VCC register between VALU and SALU
-def SIsreg1_bitcast : SDNode<"SIISD::VCC_BITCAST",
-  SDTypeProfile<1, 1, [SDTCisInt<0>, SDTCisInt<1>]>
->;
-
-// and operation on 64-bit wide vcc
-def SIvcc_and : SDNode<"SIISD::VCC_AND", SDTVCCBinaryOp,
-  [SDNPCommutative, SDNPAssociative]
->;
-
-// Special bitcast node for sharing VCC register between VALU and SALU
-def SIvcc_bitcast : SDNode<"SIISD::VCC_BITCAST",
-  SDTypeProfile<1, 1, [SDTCisInt<0>, SDTCisInt<1>]>
->;
 
 // SMRD takes a 64bit memory address and can only add an 32bit offset
 def SIadd64bit32bit : SDNode<"ISD::ADD",
@@ -66,6 +39,10 @@ def IMM12bit : ImmLeaf <
   i16,
   [{return isUInt<12>(Imm);}]
 >;
+
+class InlineImm <ValueType vt> : ImmLeaf <vt, [{
+  return -16 <= Imm && Imm <= 64;
+}]>;
 
 class InstSI <dag outs, dag ins, string asm, list<dag> pattern> :
     AMDGPUInst<outs, ins, asm, pattern> {
@@ -483,72 +460,6 @@ class VOPC <bits<8> op, dag ins, string asm, list<dag> pattern> :
 }
 
 } // End Uses = [EXEC]
-
-class MIMG_Load_Helper <bits<7> op, string asm> : MIMG <
-  op,
-  (outs VReg_128:$vdata),
-  (ins i32imm:$dmask, i1imm:$unorm, i1imm:$glc, i1imm:$da, i1imm:$r128,
-       i1imm:$tfe, i1imm:$lwe, i1imm:$slc, VReg_32:$vaddr,
-       GPR4Align<SReg_256>:$srsrc, GPR4Align<SReg_128>:$ssamp),
-  asm,
-  []> {
-  let mayLoad = 1;
-  let mayStore = 0;
-}
-
-class MUBUF_Load_Helper <bits<7> op, string asm, RegisterClass regClass> : MUBUF <
-  op,
-  (outs regClass:$dst),
-  (ins i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc, i1imm:$addr64,
-       i1imm:$lds, VReg_32:$vaddr, GPR4Align<SReg_128>:$srsrc, i1imm:$slc,
-       i1imm:$tfe, SReg_32:$soffset),
-  asm,
-  []> {
-  let mayLoad = 1;
-  let mayStore = 0;
-}
-
-class MTBUF_Load_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBUF <
-  op,
-  (outs regClass:$dst),
-  (ins i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc, i1imm:$addr64,
-       i8imm:$dfmt, i8imm:$nfmt, VReg_32:$vaddr, GPR4Align<SReg_128>:$srsrc,
-       i1imm:$slc, i1imm:$tfe, SReg_32:$soffset),
-  asm,
-  []> {
-  let mayLoad = 1;
-  let mayStore = 0;
-}
-
-class MTBUF_Store_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBUF <
-  op,
-  (outs),
-  (ins regClass:$vdata, i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc,
-   i1imm:$addr64, i8imm:$dfmt, i8imm:$nfmt, VReg_32:$vaddr,
-   GPR4Align<SReg_128>:$srsrc, i1imm:$slc, i1imm:$tfe, SReg_32:$soffset),
-  asm,
-  []> {
-  let mayStore = 1;
-  let mayLoad = 0;
-}
-
-multiclass SMRD_Helper <bits<5> op, string asm, RegisterClass dstClass> {
-  def _IMM : SMRD <
-             op, 1,
-             (outs dstClass:$dst),
-             (ins GPR2Align<SReg_64>:$sbase, i32imm:$offset),
-             asm,
-             []
-  >;
-
-  def _SGPR : SMRD <
-              op, 0,
-              (outs dstClass:$dst),
-              (ins GPR2Align<SReg_64>:$sbase, SReg_32:$soff),
-              asm,
-              []
-  >;
-}
 
 include "SIInstrFormats.td"
 include "SIInstructions.td"

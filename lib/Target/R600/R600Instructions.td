@@ -540,7 +540,7 @@ def INTERP_LOAD_P0 : R600_1OP <0xE0, "INTERP_LOAD_P0", []>;
 // Export Instructions
 //===----------------------------------------------------------------------===//
 
-def ExportType : SDTypeProfile<0, 5, [SDTCisFP<0>, SDTCisInt<1>]>;
+def ExportType : SDTypeProfile<0, 7, [SDTCisFP<0>, SDTCisInt<1>]>;
 
 def EXPORT: SDNode<"AMDGPUISD::EXPORT", ExportType,
   [SDNPHasChain, SDNPSideEffect]>;
@@ -612,22 +612,12 @@ multiclass ExportPattern<Instruction ExportInst, bits<8> cf_inst> {
         (v4f32 (IMPLICIT_DEF)), 1, 60, 7, 7, 7, 7, cf_inst, 0)
   >;
 
-  def : Pat<(EXPORT (v4f32 R600_Reg128:$src), (i32 0),
-    (i32 imm:$type), (i32 imm:$arraybase), (i32 imm)),
-        (ExportInst R600_Reg128:$src, imm:$type, imm:$arraybase,
-        0, 1, 2, 3, cf_inst, 0)
-  >;
-  def : Pat<(EXPORT (v4f32 R600_Reg128:$src), (i32 1),
-    (i32 imm:$type), (i32 imm:$arraybase), (i32 imm)),
-        (ExportInst R600_Reg128:$src, imm:$type, imm:$arraybase,
-        0, 1, 2, 3, cf_inst, 0)
+  def : Pat<(EXPORT (v4f32 R600_Reg128:$src), (i32 imm:$base), (i32 imm:$type),
+    (i32 imm:$swz_x), (i32 imm:$swz_y), (i32 imm:$swz_z), (i32 imm:$swz_w)),
+        (ExportInst R600_Reg128:$src, imm:$type, imm:$base,
+        imm:$swz_x, imm:$swz_y, imm:$swz_z, imm:$swz_w, cf_inst, 0)
   >;
 
-  def : Pat<(int_R600_store_swizzle (v4f32 R600_Reg128:$src), imm:$arraybase,
-      imm:$type),
-    (ExportInst R600_Reg128:$src, imm:$type, imm:$arraybase,
-        0, 1, 2, 3, cf_inst, 0)
-  >;
 }
 
 multiclass SteamOutputExportPattern<Instruction ExportInst,
@@ -654,7 +644,7 @@ multiclass SteamOutputExportPattern<Instruction ExportInst,
       4095, imm:$mask, buf3inst, 0)>;
 }
 
-let isTerminator = 1, usesCustomInserter = 1 in {
+let usesCustomInserter = 1 in {
 
 class ExportSwzInst : InstR600ISA<(
     outs),
@@ -668,7 +658,7 @@ class ExportSwzInst : InstR600ISA<(
   let Inst{63-32} = Word1;
 }
 
-} // End isTerminator = 1, usesCustomInserter = 1
+} // End usesCustomInserter = 1
 
 class ExportBufInst : InstR600ISA<(
     outs),
@@ -959,8 +949,13 @@ class MUL_LIT_Common <bits<5> inst> : R600_3OP <
 
 class MULADD_Common <bits<5> inst> : R600_3OP <
   inst, "MULADD",
+  []
+>;
+
+class MULADD_IEEE_Common <bits<5> inst> : R600_3OP <
+  inst, "MULADD_IEEE",
   [(set (f32 R600_Reg32:$dst),
-   (IL_mad R600_Reg32:$src0, R600_Reg32:$src1, R600_Reg32:$src2))]
+   (fadd (fmul R600_Reg32:$src0, R600_Reg32:$src1), R600_Reg32:$src2))]
 >;
 
 class CNDE_Common <bits<5> inst> : R600_3OP <
@@ -1117,6 +1112,7 @@ let Predicates = [isR600] in {
 
   def MUL_LIT_r600 : MUL_LIT_Common<0x0C>;
   def MULADD_r600 : MULADD_Common<0x10>;
+  def MULADD_IEEE_r600 : MULADD_IEEE_Common<0x14>;
   def CNDE_r600 : CNDE_Common<0x18>;
   def CNDGT_r600 : CNDGT_Common<0x19>;
   def CNDGE_r600 : CNDGE_Common<0x1A>;
@@ -1256,6 +1252,7 @@ let Predicates = [isEGorCayman] in {
   >;
 
   def MULADD_eg : MULADD_Common<0x14>;
+  def MULADD_IEEE_eg : MULADD_IEEE_Common<0x18>;
   def ASHR_eg : ASHR_Common<0x15>;
   def LSHR_eg : LSHR_Common<0x16>;
   def LSHL_eg : LSHL_Common<0x17>;
@@ -1717,6 +1714,60 @@ def TEX_VTX_CONSTBUF :
 //
 // Inst{127-96} = 0;
 }
+
+def TEX_VTX_TEXBUF:
+  InstR600ISA <(outs R600_Reg128:$dst), (ins MEMxi:$ptr, i32imm:$BUFFER_ID), "TEX_VTX_EXPLICIT_READ $dst, $ptr",
+      [(set R600_Reg128:$dst, (int_R600_load_texbuf ADDRGA_VAR_OFFSET:$ptr, imm:$BUFFER_ID))]>,
+VTX_WORD1_GPR, VTX_WORD0 {
+
+let VC_INST = 0;
+let FETCH_TYPE = 2;
+let FETCH_WHOLE_QUAD = 0;
+let SRC_REL = 0;
+let SRC_SEL_X = 0;
+let DST_REL = 0;
+let USE_CONST_FIELDS = 1;
+let NUM_FORMAT_ALL = 0;
+let FORMAT_COMP_ALL = 0;
+let SRF_MODE_ALL = 1;
+let MEGA_FETCH_COUNT = 16;
+let DST_SEL_X        = 0;
+let DST_SEL_Y        = 1;
+let DST_SEL_Z        = 2;
+let DST_SEL_W        = 3;
+let DATA_FORMAT      = 0;
+
+let Inst{31-0} = Word0;
+let Inst{63-32} = Word1;
+
+// LLVM can only encode 64-bit instructions, so these fields are manually
+// encoded in R600CodeEmitter
+//
+// bits<16> OFFSET;
+// bits<2>  ENDIAN_SWAP = 0;
+// bits<1>  CONST_BUF_NO_STRIDE = 0;
+// bits<1>  MEGA_FETCH = 0;
+// bits<1>  ALT_CONST = 0;
+// bits<2>  BUFFER_INDEX_MODE = 0;
+
+
+
+// VTX_WORD2 (LLVM can only encode 64-bit instructions, so WORD2 encoding
+// is done in R600CodeEmitter
+//
+// Inst{79-64} = OFFSET;
+// Inst{81-80} = ENDIAN_SWAP;
+// Inst{82}    = CONST_BUF_NO_STRIDE;
+// Inst{83}    = MEGA_FETCH;
+// Inst{84}    = ALT_CONST;
+// Inst{86-85} = BUFFER_INDEX_MODE;
+// Inst{95-86} = 0; Reserved
+
+// VTX_WORD3 (Padding)
+//
+// Inst{127-96} = 0;
+}
+
 
 
 //===--------------------------------------------------------------------===//

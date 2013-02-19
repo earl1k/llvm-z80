@@ -57,17 +57,6 @@ AArch64TargetLowering::AArch64TargetLowering(AArch64TargetMachine &TM)
   addRegisterClass(MVT::f64, &AArch64::FPR64RegClass);
   addRegisterClass(MVT::f128, &AArch64::FPR128RegClass);
 
-  // And the vectors
-  addRegisterClass(MVT::v8i8, &AArch64::VPR64RegClass);
-  addRegisterClass(MVT::v4i16, &AArch64::VPR64RegClass);
-  addRegisterClass(MVT::v2i32, &AArch64::VPR64RegClass);
-  addRegisterClass(MVT::v2f32, &AArch64::VPR64RegClass);
-  addRegisterClass(MVT::v16i8, &AArch64::VPR128RegClass);
-  addRegisterClass(MVT::v8i16, &AArch64::VPR128RegClass);
-  addRegisterClass(MVT::v4i32, &AArch64::VPR128RegClass);
-  addRegisterClass(MVT::v4f32, &AArch64::VPR128RegClass);
-  addRegisterClass(MVT::v2f64, &AArch64::VPR128RegClass);
-
   computeRegisterProperties();
 
   // Some atomic operations can be folded into load-acquire or store-release
@@ -1877,8 +1866,14 @@ AArch64TargetLowering::LowerGlobalAddressELF(SDValue Op,
     // Weak symbols can't use ADRP/ADD pair since they should evaluate to
     // zero when undefined. In PIC mode the GOT can take care of this, but in
     // absolute mode we use a constant pool load.
-    return DAG.getLoad(PtrVT, dl, DAG.getEntryNode(),
-                       DAG.getConstantPool(GV, GN->getValueType(0)),
+    SDValue PoolAddr;
+    PoolAddr = DAG.getNode(AArch64ISD::WrapperSmall, dl, PtrVT,
+                           DAG.getTargetConstantPool(GV, PtrVT, 0, 0,
+                                                     AArch64II::MO_NO_FLAG),
+                           DAG.getTargetConstantPool(GV, PtrVT, 0, 0,
+                                                     AArch64II::MO_LO12),
+                           DAG.getConstant(8, MVT::i32));
+    return DAG.getLoad(PtrVT, dl, DAG.getEntryNode(), PoolAddr,
                        MachinePointerInfo::getConstantPool(),
                        /*isVolatile=*/ false,  /*isNonTemporal=*/ true,
                        /*isInvariant=*/ true, 8);
@@ -2517,7 +2512,7 @@ static bool findMaskedBFI(SDValue N, SDValue &BFI, uint64_t &Mask,
     N = N.getOperand(0);
   } else {
     // Mask is the whole width.
-    Mask = (1ULL << N.getValueType().getSizeInBits()) - 1;
+    Mask = -1ULL >> (64 - N.getValueType().getSizeInBits());
   }
 
   if (N.getOpcode() == AArch64ISD::BFI) {
@@ -2595,7 +2590,7 @@ static SDValue tryCombineToBFI(SDNode *N,
                             DAG.getConstant(Width, MVT::i64));
 
   // Mask is trivial
-  if ((LHSMask | RHSMask) == (1ULL << VT.getSizeInBits()) - 1)
+  if ((LHSMask | RHSMask) == (-1ULL >> (64 - VT.getSizeInBits())))
     return BFI;
 
   return DAG.getNode(ISD::AND, DL, VT, BFI,
@@ -2665,7 +2660,7 @@ static SDValue tryCombineToLargerBFI(SDNode *N,
                     BFI.getOperand(2), BFI.getOperand(3));
 
   // If the masking is trivial, we don't need to create it.
-  if ((ExtraMask | ExistingMask) == (1ULL << VT.getSizeInBits()) - 1)
+  if ((ExtraMask | ExistingMask) == (-1ULL >> (64 - VT.getSizeInBits())))
     return BFI;
 
   return DAG.getNode(ISD::AND, DL, VT, BFI,

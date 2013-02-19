@@ -74,6 +74,16 @@ void MipsAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     if (emitPseudoExpansionLowering(OutStreamer, &*I))
       continue;
 
+    // The inMips16Mode() test is not permanent.
+    // Some instructions are marked as pseudo right now which
+    // would make the test fail for the wrong reason but
+    // that will be fixed soon. We need this here because we are
+    // removing another test for this situation downstream in the
+    // callchain.
+    //
+    if (I->isPseudo() && !Subtarget->inMips16Mode())
+      llvm_unreachable("Pseudo opcode found in EmitInstruction()");
+
     MCInst TmpInst0;
     MCInstLowering.Lower(I, TmpInst0);
     OutStreamer.EmitInstruction(TmpInst0);
@@ -236,10 +246,11 @@ void MipsAsmPrinter::EmitFunctionBodyStart() {
     raw_svector_ostream OS(Str);
     printSavedRegsBitmask(OS);
     OutStreamer.EmitRawText(OS.str());
-
-    OutStreamer.EmitRawText(StringRef("\t.set\tnoreorder"));
-    OutStreamer.EmitRawText(StringRef("\t.set\tnomacro"));
-    OutStreamer.EmitRawText(StringRef("\t.set\tnoat"));
+    if (!Subtarget->inMips16Mode()) {
+      OutStreamer.EmitRawText(StringRef("\t.set\tnoreorder"));
+      OutStreamer.EmitRawText(StringRef("\t.set\tnomacro"));
+      OutStreamer.EmitRawText(StringRef("\t.set\tnoat"));
+    }
   }
 }
 
@@ -250,9 +261,11 @@ void MipsAsmPrinter::EmitFunctionBodyEnd() {
   // always be at the function end, and we can't emit and
   // break with BB logic.
   if (OutStreamer.hasRawTextSupport()) {
-    OutStreamer.EmitRawText(StringRef("\t.set\tat"));
-    OutStreamer.EmitRawText(StringRef("\t.set\tmacro"));
-    OutStreamer.EmitRawText(StringRef("\t.set\treorder"));
+    if (!Subtarget->inMips16Mode()) {
+      OutStreamer.EmitRawText(StringRef("\t.set\tat"));
+      OutStreamer.EmitRawText(StringRef("\t.set\tmacro"));
+      OutStreamer.EmitRawText(StringRef("\t.set\treorder"));
+    }
     OutStreamer.EmitRawText("\t.end\t" + Twine(CurrentFnSym->getName()));
   }
 }

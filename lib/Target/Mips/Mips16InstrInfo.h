@@ -93,10 +93,11 @@ public:
   //
   // build the proper one based on the Imm field
   //
-  void BuildAddiuSpImm(MachineBasicBlock &MBB,
-                           MachineBasicBlock::iterator II, DebugLoc DL,
-                           int64_t Imm) const;
 
+  const MCInstrDesc& AddiuSpImm(int64_t Imm) const;
+
+  void BuildAddiuSpImm
+    (MachineBasicBlock &MBB, MachineBasicBlock::iterator I, int64_t Imm) const;
 
 private:
   virtual unsigned GetAnalyzableBrOpc(unsigned Opc) const;
@@ -114,6 +115,13 @@ private:
                                      MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator I) const;
 
+  void ExpandFEXT_T8I816_ins(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator I,
+                             unsigned BtOpc, unsigned CmpOpc) const;
+
+  void ExpandFEXT_T8I8I16_ins(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+    unsigned BtOpc, unsigned CmpiOpc, unsigned CmpiXOpc) const;
 
 };
 

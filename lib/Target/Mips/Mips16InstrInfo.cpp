@@ -21,6 +21,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
@@ -131,10 +132,55 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 
 bool Mips16InstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
   MachineBasicBlock &MBB = *MI->getParent();
-
   switch(MI->getDesc().getOpcode()) {
   default:
     return false;
+  case Mips::BteqzT8CmpX16:
+    ExpandFEXT_T8I816_ins(MBB, MI, Mips::BteqzX16, Mips::CmpRxRy16);
+    break;
+  case Mips::BteqzT8CmpiX16:
+    ExpandFEXT_T8I8I16_ins(MBB, MI, Mips::BteqzX16,
+                           Mips::CmpiRxImm16, Mips::CmpiRxImmX16);
+    break;
+  case Mips::BteqzT8SltX16:
+    ExpandFEXT_T8I816_ins(MBB, MI, Mips::BteqzX16, Mips::SltRxRy16);
+    break;
+  case Mips::BteqzT8SltiX16:
+    ExpandFEXT_T8I8I16_ins(MBB, MI, Mips::BteqzX16,
+                           Mips::SltiRxImm16, Mips::SltiRxImmX16);
+    break;
+  case Mips::BteqzT8SltuX16:
+    // TBD: figure out a way to get this or remove the instruction
+    // altogether.
+    ExpandFEXT_T8I816_ins(MBB, MI, Mips::BteqzX16, Mips::SltuRxRy16);
+    break;
+  case Mips::BteqzT8SltiuX16:
+    ExpandFEXT_T8I8I16_ins(MBB, MI, Mips::BteqzX16,
+                           Mips::SltiuRxImm16, Mips::SltiuRxImmX16);
+    break;
+  case Mips::BtnezT8CmpX16:
+    ExpandFEXT_T8I816_ins(MBB, MI, Mips::BtnezX16, Mips::CmpRxRy16);
+    break;
+  case Mips::BtnezT8CmpiX16:
+    ExpandFEXT_T8I8I16_ins(MBB, MI, Mips::BtnezX16,
+                           Mips::CmpiRxImm16, Mips::CmpiRxImmX16);
+    break;
+  case Mips::BtnezT8SltX16:
+    ExpandFEXT_T8I816_ins(MBB, MI, Mips::BtnezX16, Mips::SltRxRy16);
+    break;
+  case Mips::BtnezT8SltiX16:
+    ExpandFEXT_T8I8I16_ins(MBB, MI, Mips::BtnezX16,
+                           Mips::SltiRxImm16, Mips::SltiRxImmX16);
+    break;
+  case Mips::BtnezT8SltuX16:
+    // TBD: figure out a way to get this or remove the instruction
+    // altogether.
+    ExpandFEXT_T8I816_ins(MBB, MI, Mips::BtnezX16, Mips::SltuRxRy16);
+    break;
+  case Mips::BtnezT8SltiuX16:
+    ExpandFEXT_T8I8I16_ins(MBB, MI, Mips::BtnezX16,
+                           Mips::SltiuRxImm16, Mips::SltiuRxImmX16);
+    break;
   case Mips::RetRA16:
     ExpandRetRA16(MBB, MI, Mips::JrcRa16);
     break;
@@ -184,7 +230,7 @@ void Mips16InstrInfo::makeFrame(unsigned SP, int64_t FrameSize,
       int64_t Remainder = FrameSize - Base;
       BuildMI(MBB, I, DL, get(Mips::SaveRaF16)). addImm(Base);
       if (isInt<16>(-Remainder))
-        BuildAddiuSpImm(MBB, I, DL, -Remainder);
+        BuildAddiuSpImm(MBB, I, -Remainder);
       else
         adjustStackPtrBig(SP, -Remainder, MBB, I, Mips::V0, Mips::V1);
     }
@@ -225,7 +271,7 @@ void Mips16InstrInfo::restoreFrame(unsigned SP, int64_t FrameSize,
                        // returns largest possible n bit unsigned integer
       int64_t Remainder = FrameSize - Base;
       if (isInt<16>(Remainder))
-        BuildAddiuSpImm(MBB, I, DL, Remainder);
+        BuildAddiuSpImm(MBB, I, Remainder);
       else
         adjustStackPtrBig(SP, Remainder, MBB, I, Mips::A0, Mips::A1);
       BuildMI(MBB, I, DL, get(Mips::RestoreRaF16)). addImm(Base);
@@ -297,9 +343,8 @@ void Mips16InstrInfo::adjustStackPtrBigUnrestricted(unsigned SP, int64_t Amount,
 void Mips16InstrInfo::adjustStackPtr(unsigned SP, int64_t Amount,
                                      MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator I) const {
-  DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
   if (isInt<16>(Amount))  // need to change to addiu sp, ....and isInt<16>
-    BuildAddiuSpImm(MBB, I, DL, Amount);
+    BuildAddiuSpImm(MBB, I, Amount);
   else
     adjustStackPtrBigUnrestricted(SP, Amount, MBB, I);
 }
@@ -400,13 +445,46 @@ void Mips16InstrInfo::ExpandRetRA16(MachineBasicBlock &MBB,
   BuildMI(MBB, I, I->getDebugLoc(), get(Opc));
 }
 
-void Mips16InstrInfo::BuildAddiuSpImm(
-  MachineBasicBlock &MBB,
-  MachineBasicBlock::iterator II, DebugLoc DL, int64_t Imm) const {
-  if (validSpImm8(Imm))
-    BuildMI(MBB, II, DL, get(Mips::AddiuSpImm16)).addImm(Imm);
+
+void Mips16InstrInfo::ExpandFEXT_T8I816_ins(
+  MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+  unsigned BtOpc, unsigned CmpOpc) const {
+  unsigned regX = I->getOperand(0).getReg();
+  unsigned regY = I->getOperand(1).getReg();
+  MachineBasicBlock *target = I->getOperand(2).getMBB();
+  BuildMI(MBB, I, I->getDebugLoc(), get(CmpOpc)).addReg(regX).addReg(regY);
+  BuildMI(MBB, I, I->getDebugLoc(), get(BtOpc)).addMBB(target);
+
+}
+
+void Mips16InstrInfo::ExpandFEXT_T8I8I16_ins(
+  MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+  unsigned BtOpc, unsigned CmpiOpc, unsigned CmpiXOpc) const {
+  unsigned regX = I->getOperand(0).getReg();
+  int64_t imm = I->getOperand(1).getImm();
+  MachineBasicBlock *target = I->getOperand(2).getMBB();
+  unsigned CmpOpc;
+  if (isUInt<8>(imm))
+    CmpOpc = CmpiOpc;
+  else if (isUInt<16>(imm))
+    CmpOpc = CmpiXOpc;
   else
-    BuildMI(MBB, II, DL, get(Mips::AddiuSpImmX16)).addImm(Imm);
+    llvm_unreachable("immediate field not usable");
+  BuildMI(MBB, I, I->getDebugLoc(), get(CmpOpc)).addReg(regX).addImm(imm);
+  BuildMI(MBB, I, I->getDebugLoc(), get(BtOpc)).addMBB(target);
+}
+
+const MCInstrDesc &Mips16InstrInfo::AddiuSpImm(int64_t Imm) const {
+  if (validSpImm8(Imm))
+    return get(Mips::AddiuSpImm16);
+  else
+    return get(Mips::AddiuSpImmX16);
+}
+
+void Mips16InstrInfo::BuildAddiuSpImm
+  (MachineBasicBlock &MBB, MachineBasicBlock::iterator I, int64_t Imm) const {
+  DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
+  BuildMI(MBB, I, DL, AddiuSpImm(Imm)).addImm(Imm);
 }
 
 const MipsInstrInfo *llvm::createMips16InstrInfo(MipsTargetMachine &TM) {

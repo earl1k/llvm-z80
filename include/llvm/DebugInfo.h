@@ -522,6 +522,10 @@ namespace llvm {
       return getFieldAs<DICompositeType>(13);
     }
 
+    unsigned getFlags() const {
+      return getUnsignedField(14);
+    }
+
     unsigned isArtificial() const    {
       if (getVersion() <= llvm::LLVMDebugVersion8)
         return getUnsignedField(14);
@@ -568,6 +572,10 @@ namespace llvm {
         return getCompileUnit().getFilename();
 
       return getFieldAs<DIFile>(6).getDirectory();
+    }
+
+    DIFile getFile() const {
+      return getFieldAs<DIFile>(6);
     }
 
     /// getScopeLineNumber - Get the beginning of the scope of the

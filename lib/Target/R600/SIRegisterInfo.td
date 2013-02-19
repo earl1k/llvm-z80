@@ -22,8 +22,6 @@ def EXEC_LO : SIReg <"EXEC LO", 126>;
 def EXEC_HI : SIReg <"EXEC HI", 127>;
 def EXEC : SI_64<"EXEC", [EXEC_LO, EXEC_HI], 126>;
 def SCC : SIReg<"SCC", 253>;
-def SREG_LIT_0 : SIReg <"S LIT 0", 128>;
-def SI_LITERAL_CONSTANT : SIReg<"LITERAL CONSTANT", 255>;
 def M0 : SIReg <"M0", 124>;
 
 //Interpolation registers
@@ -136,12 +134,10 @@ def VGPR_512 : RegisterTuples<[sub0, sub1, sub2, sub3, sub4, sub5, sub6, sub7,
 
 // Register class for all scalar registers (SGPRs + Special Registers)
 def SReg_32 : RegisterClass<"AMDGPU", [f32, i32], 32,
-    (add SGPR_32,  SREG_LIT_0, M0, EXEC_LO, EXEC_HI)
+    (add SGPR_32, M0, EXEC_LO, EXEC_HI)
 >;
 
-def SReg_64 : RegisterClass<"AMDGPU", [i64], 64, (add SGPR_64, VCC, EXEC)>;
-
-def SReg_1 : RegisterClass<"AMDGPU", [i1], 1, (add VCC, SGPR_64, EXEC)>;
+def SReg_64 : RegisterClass<"AMDGPU", [i1, i64], 64, (add SGPR_64, VCC, EXEC)>;
 
 def SReg_128 : RegisterClass<"AMDGPU", [v4f32, v4i32], 128, (add SGPR_128)>;
 
@@ -177,10 +173,14 @@ def VReg_256 : RegisterClass<"AMDGPU", [v8i32], 256, (add VGPR_256)>;
 
 def VReg_512 : RegisterClass<"AMDGPU", [v16i32], 512, (add VGPR_512)>;
 
-// AllReg_* - A set of all scalar and vector registers of a given width.
-def AllReg_32 : RegisterClass<"AMDGPU", [f32, i32], 32, (add VReg_32, SReg_32)>;
+// [SV]Src_* operands can have either an immediate or an register
+def SSrc_32 : RegisterClass<"AMDGPU", [i32, f32], 32, (add SReg_32)>;
 
-def AllReg_64 : RegisterClass<"AMDGPU", [f64, i64], 64, (add SReg_64, VReg_64)>;
+def SSrc_64 : RegisterClass<"AMDGPU", [i1, i64], 64, (add SReg_64)>;
+
+def VSrc_32 : RegisterClass<"AMDGPU", [i32, f32], 32, (add VReg_32, SReg_32)>;
+
+def VSrc_64 : RegisterClass<"AMDGPU", [i64], 64, (add SReg_64, VReg_64)>;
 
 // Special register classes for predicates and the M0 register
 def SCCReg : RegisterClass<"AMDGPU", [i1], 1, (add SCC)>;

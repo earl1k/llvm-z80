@@ -89,3 +89,42 @@ entry:
 ; CHECK-NOT: = alloca
 ; CHECK: ret void
 
+define void @LongDoubleTest(x86_fp80* nocapture %a) nounwind uwtable address_safety {
+entry:
+    store x86_fp80 0xK3FFF8000000000000000, x86_fp80* %a, align 16
+    ret void
+}
+
+; CHECK: LongDoubleTest
+; CHECK: __asan_report_store_n
+; CHECK: __asan_report_store_n
+; CHECK: ret void
+
+
+define void @i40test(i40* %a, i40* %b) nounwind uwtable address_safety {
+  entry:
+  %t = load i40* %a
+  store i40 %t, i40* %b, align 8
+  ret void
+}
+
+; CHECK: i40test
+; CHECK: __asan_report_load_n{{.*}}, i64 5)
+; CHECK: __asan_report_load_n{{.*}}, i64 5)
+; CHECK: __asan_report_store_n{{.*}}, i64 5)
+; CHECK: __asan_report_store_n{{.*}}, i64 5)
+; CHECK: ret void
+
+define void @i80test(i80* %a, i80* %b) nounwind uwtable address_safety {
+  entry:
+  %t = load i80* %a
+  store i80 %t, i80* %b, align 8
+  ret void
+}
+
+; CHECK: i80test
+; CHECK: __asan_report_load_n{{.*}}, i64 10)
+; CHECK: __asan_report_load_n{{.*}}, i64 10)
+; CHECK: __asan_report_store_n{{.*}}, i64 10)
+; CHECK: __asan_report_store_n{{.*}}, i64 10)
+; CHECK: ret void

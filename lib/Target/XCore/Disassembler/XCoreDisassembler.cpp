@@ -100,6 +100,11 @@ static DecodeStatus Decode2RInstruction(MCInst &Inst,
                                         uint64_t Address,
                                         const void *Decoder);
 
+static DecodeStatus Decode2RImmInstruction(MCInst &Inst,
+                                           unsigned Insn,
+                                           uint64_t Address,
+                                           const void *Decoder);
+
 static DecodeStatus DecodeR2RInstruction(MCInst &Inst,
                                          unsigned Insn,
                                          uint64_t Address,
@@ -139,6 +144,11 @@ static DecodeStatus Decode3RInstruction(MCInst &Inst,
                                         unsigned Insn,
                                         uint64_t Address,
                                         const void *Decoder);
+
+static DecodeStatus Decode3RImmInstruction(MCInst &Inst,
+                                           unsigned Insn,
+                                           uint64_t Address,
+                                           const void *Decoder);
 
 static DecodeStatus Decode2RUSInstruction(MCInst &Inst,
                                           unsigned Insn,
@@ -313,6 +323,9 @@ Decode2OpInstructionFail(MCInst &Inst, unsigned Insn, uint64_t Address,
   case 0x16:
     Inst.setOpcode(XCore::EQ_2rus);
     return Decode2RUSInstruction(Inst, Insn, Address, Decoder);
+  case 0x17:
+    Inst.setOpcode(XCore::TSETR_3r);
+    return Decode3RImmInstruction(Inst, Insn, Address, Decoder);
   case 0x18:
     Inst.setOpcode(XCore::LSS_3r);
     return Decode3RInstruction(Inst, Insn, Address, Decoder);
@@ -332,6 +345,19 @@ Decode2RInstruction(MCInst &Inst, unsigned Insn, uint64_t Address,
     return Decode2OpInstructionFail(Inst, Insn, Address, Decoder);
 
   DecodeGRRegsRegisterClass(Inst, Op1, Address, Decoder);
+  DecodeGRRegsRegisterClass(Inst, Op2, Address, Decoder);
+  return S;
+}
+
+static DecodeStatus
+Decode2RImmInstruction(MCInst &Inst, unsigned Insn, uint64_t Address,
+                       const void *Decoder) {
+  unsigned Op1, Op2;
+  DecodeStatus S = Decode2OpInstruction(Insn, Op1, Op2);
+  if (S != MCDisassembler::Success)
+    return Decode2OpInstructionFail(Inst, Insn, Address, Decoder);
+
+  Inst.addOperand(MCOperand::CreateImm(Op1));
   DecodeGRRegsRegisterClass(Inst, Op2, Address, Decoder);
   return S;
 }
@@ -509,6 +535,19 @@ Decode3RInstruction(MCInst &Inst, unsigned Insn, uint64_t Address,
   DecodeStatus S = Decode3OpInstruction(Insn, Op1, Op2, Op3);
   if (S == MCDisassembler::Success) {
     DecodeGRRegsRegisterClass(Inst, Op1, Address, Decoder);
+    DecodeGRRegsRegisterClass(Inst, Op2, Address, Decoder);
+    DecodeGRRegsRegisterClass(Inst, Op3, Address, Decoder);
+  }
+  return S;
+}
+
+static DecodeStatus
+Decode3RImmInstruction(MCInst &Inst, unsigned Insn, uint64_t Address,
+                       const void *Decoder) {
+  unsigned Op1, Op2, Op3;
+  DecodeStatus S = Decode3OpInstruction(Insn, Op1, Op2, Op3);
+  if (S == MCDisassembler::Success) {
+    Inst.addOperand(MCOperand::CreateImm(Op1));
     DecodeGRRegsRegisterClass(Inst, Op2, Address, Decoder);
     DecodeGRRegsRegisterClass(Inst, Op3, Address, Decoder);
   }

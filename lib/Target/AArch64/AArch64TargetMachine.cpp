@@ -7,6 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
+// This file contains the implementation of the AArch64TargetMachine
+// methods. Principally just setting up the passes needed to generate correct
+// code on this architecture.
 //
 //===----------------------------------------------------------------------===//
 
@@ -63,7 +66,7 @@ TargetPassConfig *AArch64TargetMachine::createPassConfig(PassManagerBase &PM) {
 
 bool AArch64PassConfig::addPreEmitPass() {
   addPass(&UnpackMachineBundlesID);
-  addPass(createAArch64ConstantIslandPass());
+  addPass(createAArch64BranchFixupPass());
   return true;
 }
 

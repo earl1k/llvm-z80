@@ -121,6 +121,9 @@ protected:
   /// HasRTM - Processor has RTM instructions.
   bool HasRTM;
 
+  /// HasADX - Processor has ADX instructions.
+  bool HasADX;
+
   /// IsBTMemSlow - True if BT (bit test) of memory instructions are slow.
   bool IsBTMemSlow;
 
@@ -165,11 +168,13 @@ protected:
   InstrItineraryData InstrItins;
 
 private:
+  /// StackAlignOverride - Override the stack alignment.
+  unsigned StackAlignOverride;
+
   /// In64BitMode - True if compiling for 64-bit, false for 32-bit.
   bool In64BitMode;
 
 public:
-
   /// This constructor initializes the data members to match that
   /// of the specified triple.
   ///
@@ -194,6 +199,12 @@ public:
   /// instruction.
   void AutoDetectSubtargetFeatures();
 
+  /// \brief Reset the features for the X86 target.
+  virtual void resetSubtargetFeatures(const MachineFunction *MF);
+private:
+  void initializeEnvironment();
+  void resetSubtargetFeatures(StringRef CPU, StringRef FS);
+public:
   /// Is this x86_64? (disregarding specific ABI / programming model)
   bool is64Bit() const {
     return In64BitMode;
@@ -242,6 +253,7 @@ public:
   bool hasBMI() const { return HasBMI; }
   bool hasBMI2() const { return HasBMI2; }
   bool hasRTM() const { return HasRTM; }
+  bool hasADX() const { return HasADX; }
   bool isBTMemSlow() const { return IsBTMemSlow; }
   bool isUnalignedMemAccessFast() const { return IsUAMemFast; }
   bool hasVectorUAMem() const { return HasVectorUAMem; }

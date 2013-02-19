@@ -27,15 +27,11 @@ class SITargetLowering : public AMDGPUTargetLowering {
               MachineBasicBlock::iterator I, unsigned Opocde) const;
   void LowerSI_INTERP(MachineInstr *MI, MachineBasicBlock &BB,
               MachineBasicBlock::iterator I, MachineRegisterInfo & MRI) const;
-  void LowerSI_INTERP_CONST(MachineInstr *MI, MachineBasicBlock &BB,
-              MachineBasicBlock::iterator I, MachineRegisterInfo &MRI) const;
   void LowerSI_WQM(MachineInstr *MI, MachineBasicBlock &BB,
               MachineBasicBlock::iterator I, MachineRegisterInfo & MRI) const;
   void LowerSI_V_CNDLT(MachineInstr *MI, MachineBasicBlock &BB,
               MachineBasicBlock::iterator I, MachineRegisterInfo & MRI) const;
 
-  SDValue Loweri1ContextSwitch(SDValue Op, SelectionDAG &DAG,
-                                           unsigned VCCNode) const;
   SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
@@ -47,7 +43,6 @@ public:
   virtual EVT getSetCCResultType(EVT VT) const;
   virtual SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const;
   virtual SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const;
-  virtual const char* getTargetNodeName(unsigned Opcode) const;
 };
 
 } // End namespace llvm
