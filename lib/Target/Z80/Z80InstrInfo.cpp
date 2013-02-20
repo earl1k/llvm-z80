@@ -314,8 +314,9 @@ unsigned Z80InstrInfo::InsertBranch(MachineBasicBlock &MBB,
   if (Cond.empty())
   {
     // Unconditional branch?
-    assert(FBB && "Unconditional branch with multiple successors!");
+    assert(!FBB && "Unconditional branch with multiple successors!");
     BuildMI(&MBB, DL, get(Z80::JP)).addMBB(TBB);
+    return 1;
   }
 
   // Conditional branch.

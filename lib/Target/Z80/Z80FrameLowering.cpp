@@ -51,7 +51,7 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF) const
   while (MBBI != MBB.end() && (MBBI->getOpcode() == Z80::PUSH16r))
     MBBI++;
 
-  if (NumBytes || hasFP(MF))
+  if (NumBytes)
   {
     unsigned FP = TII.getRegisterInfo().getFrameRegister(MF);
 
@@ -95,7 +95,7 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
     MBBI--;
   }
 
-  if (NumBytes || hasFP(MF))
+  if (NumBytes)
   {
     unsigned FP = TII.getRegisterInfo().getFrameRegister(MF);
 
