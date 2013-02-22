@@ -79,10 +79,10 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     {
       // DestReg - GR8
       // SrcReg  - GR8
-      if (RI.getSubRegIndex(Z80::IX, DestReg) &&
-          RI.getSubRegIndex(Z80::IX, SrcReg) ||
-          RI.getSubRegIndex(Z80::IY, DestReg) &&
-          RI.getSubRegIndex(Z80::IY, SrcReg))
+      if ((RI.getSubRegIndex(Z80::IX, DestReg) &&
+          RI.getSubRegIndex(Z80::IX, SrcReg)) ||
+          (RI.getSubRegIndex(Z80::IY, DestReg) &&
+          RI.getSubRegIndex(Z80::IY, SrcReg)))
       {
         BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
           .addReg(SrcReg, getKillRegState(KillSrc));

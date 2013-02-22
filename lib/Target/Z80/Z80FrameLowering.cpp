@@ -158,8 +158,6 @@ bool Z80FrameLowering::restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
 void Z80FrameLowering::processFunctionBeforeCalleeSavedScan(
   MachineFunction &MF, RegScavenger *RS) const
 {
-  MachineFrameInfo *MFI = MF.getFrameInfo();
-
   if (hasFP(MF))
   {
     unsigned FP = MF.getTarget().getRegisterInfo()->getFrameRegister(MF);

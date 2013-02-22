@@ -651,11 +651,8 @@ SDValue Z80TargetLowering::LowerStore(SDValue Op, SelectionDAG &DAG) const
     Hi = DAG.getConstant((CN->getZExtValue()>>8) & 0xFF, MVT::i8);
   }
   else if (Value.getOpcode() == ISD::CopyFromReg) {
-    if (RegisterSDNode *RN = dyn_cast<RegisterSDNode>(Value.getOperand(1))) {
-      unsigned Reg = RN->getReg();
-      Lo = DAG.getTargetExtractSubreg(Z80::subreg_lo, dl, MVT::i8, Value);
-      Hi = DAG.getTargetExtractSubreg(Z80::subreg_hi, dl, MVT::i8, Value);
-    }
+    Lo = DAG.getTargetExtractSubreg(Z80::subreg_lo, dl, MVT::i8, Value);
+    Hi = DAG.getTargetExtractSubreg(Z80::subreg_hi, dl, MVT::i8, Value);
   }
   else assert(0 && "Not implemented yet!");
   SDValue StoreLow = DAG.getStore(Chain, dl, Lo, BasePtr,
