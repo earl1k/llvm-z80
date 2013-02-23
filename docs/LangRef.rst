@@ -720,6 +720,11 @@ Currently, only the following parameter attributes are defined:
     This indicates that the pointer parameter can be excised using the
     :ref:`trampoline intrinsics <int_trampoline>`. This is not a valid
     attribute for return values.
+``nobuiltin``
+    This indicates that the callee function at a call site is not
+    recognized as a built-in function. LLVM will retain the original call
+    and not replace it with equivalent code based on the semantics of the
+    built-in function.
 
 .. _gc:
 
@@ -2535,6 +2540,7 @@ The loop identifier metadata is implemented using a metadata that refers to
 itself as follows:
 
 .. code-block:: llvm
+
     !0 = metadata !{ metadata !0 }
 
 '``llvm.loop.parallel``' Metadata

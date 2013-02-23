@@ -390,7 +390,13 @@ bool X86RegisterInfo::hasBasePointer(const MachineFunction &MF) const {
 
    // When we need stack realignment and there are dynamic allocas, we can't
    // reference off of the stack pointer, so we reserve a base pointer.
-   if (needsStackRealignment(MF) && MFI->hasVarSizedObjects())
+   //
+   // This is also true if the function contain MS-style inline assembly.  We
+   // do this because if any stack changes occur in the inline assembly, e.g.,
+   // "pusha", then any C local variable or C argument references in the
+   // inline assembly will be wrong because the SP is not properly tracked.
+   if ((needsStackRealignment(MF) && MFI->hasVarSizedObjects()) ||
+       MF.hasMSInlineAsm())
      return true;
 
    return false;
@@ -439,107 +445,6 @@ bool X86RegisterInfo::hasReservedSpillSlot(const MachineFunction &MF,
     return true;
   }
   return false;
-}
-
-static unsigned getSUBriOpcode(unsigned is64Bit, int64_t Imm) {
-  if (is64Bit) {
-    if (isInt<8>(Imm))
-      return X86::SUB64ri8;
-    return X86::SUB64ri32;
-  } else {
-    if (isInt<8>(Imm))
-      return X86::SUB32ri8;
-    return X86::SUB32ri;
-  }
-}
-
-static unsigned getADDriOpcode(unsigned is64Bit, int64_t Imm) {
-  if (is64Bit) {
-    if (isInt<8>(Imm))
-      return X86::ADD64ri8;
-    return X86::ADD64ri32;
-  } else {
-    if (isInt<8>(Imm))
-      return X86::ADD32ri8;
-    return X86::ADD32ri;
-  }
-}
-
-void X86RegisterInfo::
-eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
-                              MachineBasicBlock::iterator I) const {
-  const TargetFrameLowering *TFI = MF.getTarget().getFrameLowering();
-  bool reseveCallFrame = TFI->hasReservedCallFrame(MF);
-  int Opcode = I->getOpcode();
-  bool isDestroy = Opcode == TII.getCallFrameDestroyOpcode();
-  DebugLoc DL = I->getDebugLoc();
-  uint64_t Amount = !reseveCallFrame ? I->getOperand(0).getImm() : 0;
-  uint64_t CalleeAmt = isDestroy ? I->getOperand(1).getImm() : 0;
-  I = MBB.erase(I);
-
-  if (!reseveCallFrame) {
-    // If the stack pointer can be changed after prologue, turn the
-    // adjcallstackup instruction into a 'sub ESP, <amt>' and the
-    // adjcallstackdown instruction into 'add ESP, <amt>'
-    // TODO: consider using push / pop instead of sub + store / add
-    if (Amount == 0)
-      return;
-
-    // We need to keep the stack aligned properly.  To do this, we round the
-    // amount of space needed for the outgoing arguments up to the next
-    // alignment boundary.
-    unsigned StackAlign = TM.getFrameLowering()->getStackAlignment();
-    Amount = (Amount + StackAlign - 1) / StackAlign * StackAlign;
-
-    MachineInstr *New = 0;
-    if (Opcode == TII.getCallFrameSetupOpcode()) {
-      New = BuildMI(MF, DL, TII.get(getSUBriOpcode(Is64Bit, Amount)),
-                    StackPtr)
-        .addReg(StackPtr)
-        .addImm(Amount);
-    } else {
-      assert(Opcode == TII.getCallFrameDestroyOpcode());
-
-      // Factor out the amount the callee already popped.
-      Amount -= CalleeAmt;
-
-      if (Amount) {
-        unsigned Opc = getADDriOpcode(Is64Bit, Amount);
-        New = BuildMI(MF, DL, TII.get(Opc), StackPtr)
-          .addReg(StackPtr).addImm(Amount);
-      }
-    }
-
-    if (New) {
-      // The EFLAGS implicit def is dead.
-      New->getOperand(3).setIsDead();
-
-      // Replace the pseudo instruction with a new instruction.
-      MBB.insert(I, New);
-    }
-
-    return;
-  }
-
-  if (Opcode == TII.getCallFrameDestroyOpcode() && CalleeAmt) {
-    // If we are performing frame pointer elimination and if the callee pops
-    // something off the stack pointer, add it back.  We do this until we have
-    // more advanced stack pointer tracking ability.
-    unsigned Opc = getSUBriOpcode(Is64Bit, CalleeAmt);
-    MachineInstr *New = BuildMI(MF, DL, TII.get(Opc), StackPtr)
-      .addReg(StackPtr).addImm(CalleeAmt);
-
-    // The EFLAGS implicit def is dead.
-    New->getOperand(3).setIsDead();
-
-    // We are not tracking the stack pointer adjustment by the callee, so make
-    // sure we restore the stack pointer immediately after the call, there may
-    // be spill code inserted between the CALL and ADJCALLSTACKUP instructions.
-    MachineBasicBlock::iterator B = MBB.begin();
-    while (I != B && !llvm::prior(I)->isCall())
-      --I;
-    MBB.insert(I, New);
-  }
 }
 
 void
@@ -614,7 +519,15 @@ unsigned getX86SubSuperRegister(unsigned Reg, MVT::SimpleValueType VT,
   case MVT::i8:
     if (High) {
       switch (Reg) {
-      default: return getX86SubSuperRegister(Reg, MVT::i64, High);
+      default: return getX86SubSuperRegister(Reg, MVT::i64);
+      case X86::SIL: case X86::SI: case X86::ESI: case X86::RSI:
+        return X86::SI;
+      case X86::DIL: case X86::DI: case X86::EDI: case X86::RDI:
+        return X86::DI;
+      case X86::BPL: case X86::BP: case X86::EBP: case X86::RBP:
+        return X86::BP;
+      case X86::SPL: case X86::SP: case X86::ESP: case X86::RSP:
+        return X86::SP;
       case X86::AH: case X86::AL: case X86::AX: case X86::EAX: case X86::RAX:
         return X86::AH;
       case X86::DH: case X86::DL: case X86::DX: case X86::EDX: case X86::RDX:
@@ -734,22 +647,6 @@ unsigned getX86SubSuperRegister(unsigned Reg, MVT::SimpleValueType VT,
       return X86::R15D;
     }
   case MVT::i64:
-    // For 64-bit mode if we've requested a "high" register and the
-    // Q or r constraints we want one of these high registers or
-    // just the register name otherwise.
-    if (High) {
-      switch (Reg) {
-      case X86::SIL: case X86::SI: case X86::ESI: case X86::RSI:
-        return X86::SI;
-      case X86::DIL: case X86::DI: case X86::EDI: case X86::RDI:
-        return X86::DI;
-      case X86::BPL: case X86::BP: case X86::EBP: case X86::RBP:
-        return X86::BP;
-      case X86::SPL: case X86::SP: case X86::ESP: case X86::RSP:
-        return X86::SP;
-      // Fallthrough.
-      }
-    }
     switch (Reg) {
     default: llvm_unreachable("Unexpected register");
     case X86::AH: case X86::AL: case X86::AX: case X86::EAX: case X86::RAX:

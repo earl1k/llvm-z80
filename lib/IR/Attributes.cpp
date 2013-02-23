@@ -171,6 +171,8 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return "nest";
   if (hasAttribute(Attribute::NoAlias))
     return "noalias";
+  if (hasAttribute(Attribute::NoBuiltin))
+    return "nobuiltin";
   if (hasAttribute(Attribute::NoCapture))
     return "nocapture";
   if (hasAttribute(Attribute::NoDuplicate))
@@ -390,6 +392,7 @@ uint64_t AttributeImpl::getAttrMask(Attribute::AttrKind Val) {
   case Attribute::StackProtectStrong: return 1ULL << 35;
   case Attribute::ThreadSafety:    return 1ULL << 36;
   case Attribute::UninitializedChecks: return 1ULL << 37;
+  case Attribute::NoBuiltin:       return 1ULL << 38;
   }
   llvm_unreachable("Unsupported attribute type");
 }
@@ -1095,6 +1098,33 @@ bool AttrBuilder::operator==(const AttrBuilder &B) {
       return false;
 
   return Alignment == B.Alignment && StackAlignment == B.StackAlignment;
+}
+
+void AttrBuilder::removeFunctionOnlyAttrs() {
+  removeAttribute(Attribute::NoReturn)
+    .removeAttribute(Attribute::NoUnwind)
+    .removeAttribute(Attribute::ReadNone)
+    .removeAttribute(Attribute::ReadOnly)
+    .removeAttribute(Attribute::NoInline)
+    .removeAttribute(Attribute::AlwaysInline)
+    .removeAttribute(Attribute::OptimizeForSize)
+    .removeAttribute(Attribute::StackProtect)
+    .removeAttribute(Attribute::StackProtectReq)
+    .removeAttribute(Attribute::StackProtectStrong)
+    .removeAttribute(Attribute::NoRedZone)
+    .removeAttribute(Attribute::NoImplicitFloat)
+    .removeAttribute(Attribute::Naked)
+    .removeAttribute(Attribute::InlineHint)
+    .removeAttribute(Attribute::StackAlignment)
+    .removeAttribute(Attribute::UWTable)
+    .removeAttribute(Attribute::NonLazyBind)
+    .removeAttribute(Attribute::ReturnsTwice)
+    .removeAttribute(Attribute::AddressSafety)
+    .removeAttribute(Attribute::ThreadSafety)
+    .removeAttribute(Attribute::UninitializedChecks)
+    .removeAttribute(Attribute::MinSize)
+    .removeAttribute(Attribute::NoDuplicate)
+    .removeAttribute(Attribute::NoBuiltin);
 }
 
 AttrBuilder &AttrBuilder::addRawValue(uint64_t Val) {

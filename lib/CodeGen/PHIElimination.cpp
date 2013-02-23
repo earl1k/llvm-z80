@@ -116,6 +116,7 @@ INITIALIZE_PASS_END(PHIElimination, "phi-node-elimination",
 
 void PHIElimination::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addPreserved<LiveVariables>();
+  AU.addPreserved<SlotIndexes>();
   AU.addPreserved<LiveIntervals>();
   AU.addPreserved<MachineDominatorTree>();
   AU.addPreserved<MachineLoopInfo>();
@@ -170,9 +171,6 @@ bool PHIElimination::runOnMachineFunction(MachineFunction &MF) {
   LoweredPHIs.clear();
   ImpDefs.clear();
   VRegPHIUseCount.clear();
-
-  if (LIS)
-    MF.verify(this, "After PHI elimination");
 
   return Changed;
 }
@@ -305,10 +303,9 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
   // Update LiveIntervals for the new copy or implicit def.
   if (LIS) {
     MachineInstr *NewInstr = prior(AfterPHIsIt);
-    LIS->InsertMachineInstrInMaps(NewInstr);
+    SlotIndex DestCopyIndex = LIS->InsertMachineInstrInMaps(NewInstr);
 
     SlotIndex MBBStartIndex = LIS->getMBBStartIdx(&MBB);
-    SlotIndex DestCopyIndex = LIS->getInstructionIndex(NewInstr);
     if (IncomingReg) {
       // Add the region from the beginning of MBB to the copy instruction to
       // IncomingReg's live interval.
@@ -322,8 +319,10 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
                                     IncomingVNI));
     }
 
-    LiveInterval &DestLI = LIS->getOrCreateInterval(DestReg);
-    if (NewInstr->getOperand(0).isDead()) {
+    LiveInterval &DestLI = LIS->getInterval(DestReg);
+    assert(DestLI.begin() != DestLI.end() &&
+           "PHIs should have nonempty LiveIntervals.");
+    if (DestLI.endIndex().isDead()) {
       // A dead PHI's live range begins and ends at the start of the MBB, but
       // the lowered copy, which will still be dead, needs to begin and end at
       // the copy instruction.

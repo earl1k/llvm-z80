@@ -25,24 +25,25 @@
 ; RUN: llc -filetype=obj -mtriple mipsel-unknown-linux -mcpu=mips64r2 -relocation-model=static %s -o - | elf-dump --dump-section-data  | FileCheck -check-prefix=CHECK-BE64R2 %s
 ; RUN: llc -filetype=obj -mtriple mipsel-unknown-linux -mcpu=mips64r2 %s -o - | elf-dump --dump-section-data  | FileCheck -check-prefix=CHECK-BE64R2_PIC %s
 
-
+; RUN: llc -filetype=obj -mtriple mipsel-unknown-linux -mcpu=mips32r2 -mattr=+mips16 -relocation-model=pic %s -o - | elf-dump --dump-section-data  | FileCheck -check-prefix=CHECK-LE32R2-MIPS16 %s
+ 
 ; 32(R1) bit with NO_REORDER and static
-; CHECK-BE32: ('e_flags', 0x50000001)
+; CHECK-BE32: ('e_flags', 0x50001001)
 ;
 ; 32(R1) bit with NO_REORDER and PIC
-; CHECK-BE32_PIC: ('e_flags', 0x50000003)
+; CHECK-BE32_PIC: ('e_flags', 0x50001003)
 ;
 ; 32R2 bit with NO_REORDER and static
-; CHECK-BE32R2: ('e_flags', 0x70000001)
+; CHECK-BE32R2: ('e_flags', 0x70001001)
 ;
 ; 32R2 bit with NO_REORDER and PIC
-; CHECK-BE32R2_PIC: ('e_flags', 0x70000003)
+; CHECK-BE32R2_PIC: ('e_flags', 0x70001003)
 ;
 ; 32R2 bit MICROMIPS with NO_REORDER and static
-; CHECK-BE32R2-MICROMIPS: ('e_flags', 0x72000001)
+; CHECK-BE32R2-MICROMIPS: ('e_flags', 0x72001001)
 ;
 ; 32R2 bit MICROMIPS with NO_REORDER and PIC
-;CHECK-BE32R2-MICROMIPS_PIC:  ('e_flags', 0x72000003)
+;CHECK-BE32R2-MICROMIPS_PIC:  ('e_flags', 0x72001003)
 ;
 ; 64(R1) bit with NO_REORDER and static
 ; CHECK-BE64: ('e_flags', 0x60000001)
@@ -56,7 +57,9 @@
 ; 64R2 bit with NO_REORDER and PIC
 ; CHECK-BE64R2_PIC: ('e_flags', 0x80000003)
 ;
-
+; 32R2 bit MIPS16 with PIC
+; CHECK-LE32R2-MIPS16: ('e_flags', 0x74001002)
+ 
 define i32 @main() nounwind {
 entry:
   ret i32 0

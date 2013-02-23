@@ -56,10 +56,6 @@ struct HexagonRegisterInfo : public HexagonGenRegisterInfo {
 
   BitVector getReservedRegs(const MachineFunction &MF) const;
 
-  void eliminateCallFramePseudoInstr(MachineFunction &MF,
-                                     MachineBasicBlock &MBB,
-                                     MachineBasicBlock::iterator I) const;
-
   void eliminateFrameIndex(MachineBasicBlock::iterator II,
                            int SPAdj, unsigned FIOperandNum,
                            RegScavenger *RS = NULL) const;
@@ -88,11 +84,6 @@ struct HexagonRegisterInfo : public HexagonGenRegisterInfo {
   // Exception handling queries.
   unsigned getEHExceptionRegister() const;
   unsigned getEHHandlerRegister() const;
-  const RegClassWeight &getRegClassWeight(const TargetRegisterClass *RC) const;
-  unsigned getNumRegPressureSets() const;
-  const char *getRegPressureSetName(unsigned Idx) const;
-  unsigned getRegPressureSetLimit(unsigned Idx) const;
-  const int* getRegClassPressureSets(const TargetRegisterClass *RC) const;
 };
 
 } // end namespace llvm

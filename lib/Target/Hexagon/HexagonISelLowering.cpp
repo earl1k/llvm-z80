@@ -1052,8 +1052,8 @@ HexagonTargetLowering::HexagonTargetLowering(HexagonTargetMachine
     setPrefLoopAlignment(4);
 
     // Limits for inline expansion of memcpy/memmove
-    maxStoresPerMemcpy = 6;
-    maxStoresPerMemmove = 6;
+    MaxStoresPerMemcpy = 6;
+    MaxStoresPerMemmove = 6;
 
     //
     // Library calls for unsupported operations
@@ -1366,10 +1366,15 @@ HexagonTargetLowering::HexagonTargetLowering(HexagonTargetMachine
     setOperationAction(ISD::FSINCOS, MVT::f64, Expand);
     setOperationAction(ISD::FSINCOS, MVT::f32, Expand);
     setOperationAction(ISD::CTPOP, MVT::i32, Expand);
+    setOperationAction(ISD::CTPOP, MVT::i64, Expand);
     setOperationAction(ISD::CTTZ , MVT::i32, Expand);
+    setOperationAction(ISD::CTTZ , MVT::i64, Expand);
     setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i32, Expand);
+    setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i64, Expand);
     setOperationAction(ISD::CTLZ , MVT::i32, Expand);
+    setOperationAction(ISD::CTLZ , MVT::i64, Expand);
     setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i32, Expand);
+    setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i64, Expand);
     setOperationAction(ISD::ROTL , MVT::i32, Expand);
     setOperationAction(ISD::ROTR , MVT::i32, Expand);
     setOperationAction(ISD::BSWAP, MVT::i32, Expand);

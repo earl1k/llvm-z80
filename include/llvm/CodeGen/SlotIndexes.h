@@ -112,7 +112,7 @@ namespace llvm {
       return lie.getPointer();
     }
 
-    int getIndex() const {
+    unsigned getIndex() const {
       return listEntry()->getIndex() | getSlot();
     }
 
@@ -359,6 +359,11 @@ namespace llvm {
 
     /// Renumber the index list, providing space for new instructions.
     void renumberIndexes();
+
+    /// Repair indexes after adding and removing instructions.
+    void repairIndexesInRange(MachineBasicBlock *MBB,
+                              MachineBasicBlock::iterator Begin,
+                              MachineBasicBlock::iterator End);
 
     /// Returns the zero index for this analysis.
     SlotIndex getZeroIndex() {

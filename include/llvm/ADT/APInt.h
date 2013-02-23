@@ -505,6 +505,17 @@ public:
     return getAllOnesValue(numBits).lshr(numBits - loBitsSet);
   }
 
+  /// \brief Return a value containing V broadcasted over NewLen bits.
+  static APInt getSplat(unsigned NewLen, const APInt &V) {
+    assert(NewLen >= V.getBitWidth() && "Can't splat to smaller bit width!");
+
+    APInt Val = V.zextOrSelf(NewLen);
+    for (unsigned I = V.getBitWidth(); I < NewLen; I <<= 1)
+      Val |= Val << I;
+
+    return Val;
+  }
+
   /// \brief Determine if two APInts have the same value, after zero-extending
   /// one of them (if needed!) to ensure that the bit-widths match.
   static bool isSameValue(const APInt &I1, const APInt &I2) {
@@ -799,16 +810,7 @@ public:
 
   /// Signed divide this APInt by APInt RHS.
   /// @brief Signed division function for APInt.
-  APInt sdiv(const APInt &RHS) const {
-    if (isNegative())
-      if (RHS.isNegative())
-        return (-(*this)).udiv(-RHS);
-      else
-        return -((-(*this)).udiv(RHS));
-    else if (RHS.isNegative())
-      return -(this->udiv(-RHS));
-    return this->udiv(RHS);
-  }
+  APInt sdiv(const APInt &RHS) const;
 
   /// Perform an unsigned remainder operation on this APInt with RHS being the
   /// divisor. Both this and RHS are treated as unsigned quantities for purposes
@@ -821,16 +823,7 @@ public:
 
   /// Signed remainder operation on APInt.
   /// @brief Function for signed remainder operation.
-  APInt srem(const APInt &RHS) const {
-    if (isNegative())
-      if (RHS.isNegative())
-        return -((-(*this)).urem(-RHS));
-      else
-        return -((-(*this)).urem(RHS));
-    else if (RHS.isNegative())
-      return this->urem(-RHS);
-    return this->urem(RHS);
-  }
+  APInt srem(const APInt &RHS) const;
 
   /// Sometimes it is convenient to divide two APInt values and obtain both the
   /// quotient and remainder. This function does both operations in the same
@@ -842,24 +835,9 @@ public:
                       APInt &Quotient, APInt &Remainder);
 
   static void sdivrem(const APInt &LHS, const APInt &RHS,
-                      APInt &Quotient, APInt &Remainder) {
-    if (LHS.isNegative()) {
-      if (RHS.isNegative())
-        APInt::udivrem(-LHS, -RHS, Quotient, Remainder);
-      else {
-        APInt::udivrem(-LHS, RHS, Quotient, Remainder);
-        Quotient = -Quotient;
-      }
-      Remainder = -Remainder;
-    } else if (RHS.isNegative()) {
-      APInt::udivrem(LHS, -RHS, Quotient, Remainder);
-      Quotient = -Quotient;
-    } else {
-      APInt::udivrem(LHS, RHS, Quotient, Remainder);
-    }
-  }
-  
-  
+                      APInt &Quotient, APInt &Remainder);
+
+
   // Operations that return overflow indicators.
   APInt sadd_ov(const APInt &RHS, bool &Overflow) const;
   APInt uadd_ov(const APInt &RHS, bool &Overflow) const;

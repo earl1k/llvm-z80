@@ -500,15 +500,15 @@ PPCTargetLowering::PPCTargetLowering(PPCTargetMachine &TM)
   // friends. Gcc uses same threshold of 128 bytes (= 32 word stores).
   if (Subtarget->getDarwinDirective() == PPC::DIR_E500mc ||
       Subtarget->getDarwinDirective() == PPC::DIR_E5500) {
-    maxStoresPerMemset = 32;
-    maxStoresPerMemsetOptSize = 16;
-    maxStoresPerMemcpy = 32;
-    maxStoresPerMemcpyOptSize = 8;
-    maxStoresPerMemmove = 32;
-    maxStoresPerMemmoveOptSize = 8;
+    MaxStoresPerMemset = 32;
+    MaxStoresPerMemsetOptSize = 16;
+    MaxStoresPerMemcpy = 32;
+    MaxStoresPerMemcpyOptSize = 8;
+    MaxStoresPerMemmove = 32;
+    MaxStoresPerMemmoveOptSize = 8;
 
     setPrefFunctionAlignment(4);
-    benefitFromCodePlacementOpt = true;
+    BenefitFromCodePlacementOpt = true;
   }
 }
 
@@ -594,6 +594,7 @@ const char *PPCTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case PPCISD::GET_TLSLD_ADDR:  return "PPCISD::GET_TLSLD_ADDR";
   case PPCISD::ADDIS_DTPREL_HA: return "PPCISD::ADDIS_DTPREL_HA";
   case PPCISD::ADDI_DTPREL_L:   return "PPCISD::ADDI_DTPREL_L";
+  case PPCISD::VADD_SPLAT:      return "PPCISD::VADD_SPLAT";
   }
 }
 
@@ -2162,13 +2163,16 @@ PPCTargetLowering::LowerFormalArguments_64SVR4(
   SmallVector<SDValue, 8> MemOps;
   unsigned nAltivecParamsAtEnd = 0;
   Function::const_arg_iterator FuncArg = MF.getFunction()->arg_begin();
-  for (unsigned ArgNo = 0, e = Ins.size(); ArgNo != e; ++ArgNo, ++FuncArg) {
+  unsigned CurArgIdx = 0;
+  for (unsigned ArgNo = 0, e = Ins.size(); ArgNo != e; ++ArgNo) {
     SDValue ArgVal;
     bool needsLoad = false;
     EVT ObjectVT = Ins[ArgNo].VT;
     unsigned ObjSize = ObjectVT.getSizeInBits()/8;
     unsigned ArgSize = ObjSize;
     ISD::ArgFlagsTy Flags = Ins[ArgNo].Flags;
+    std::advance(FuncArg, Ins[ArgNo].OrigArgIndex - CurArgIdx);
+    CurArgIdx = Ins[ArgNo].OrigArgIndex;
 
     unsigned CurArgOffset = ArgOffset;
 
@@ -2503,6 +2507,9 @@ PPCTargetLowering::LowerFormalArguments_Darwin(
 
   SmallVector<SDValue, 8> MemOps;
   unsigned nAltivecParamsAtEnd = 0;
+  // FIXME: FuncArg and Ins[ArgNo] must reference the same argument.
+  // When passing anonymous aggregates, this is currently not true.
+  // See LowerFormalArguments_64SVR4 for a fix.
   Function::const_arg_iterator FuncArg = MF.getFunction()->arg_begin();
   for (unsigned ArgNo = 0, e = Ins.size(); ArgNo != e; ++ArgNo, ++FuncArg) {
     SDValue ArgVal;
@@ -3325,7 +3332,7 @@ PPCTargetLowering::FinishCall(CallingConv::ID CallConv, DebugLoc dl,
 
   // When performing tail call optimization the callee pops its arguments off
   // the stack. Account for this here so these bytes can be pushed back on in
-  // PPCRegisterInfo::eliminateCallFramePseudoInstr.
+  // PPCFrameLowering::eliminateCallFramePseudoInstr.
   int BytesCalleePops =
     (CallConv == CallingConv::Fast &&
      getTargetMachine().Options.GuaranteedTailCallOpt) ? NumBytes : 0;
@@ -5018,16 +5025,21 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
   // Two instruction sequences.
 
   // If this value is in the range [-32,30] and is even, use:
-  //    tmp = VSPLTI[bhw], result = add tmp, tmp
-  if (SextVal >= -32 && SextVal <= 30 && (SextVal & 1) == 0) {
-    // FIXME: This is currently disabled because the ADD will be folded back
-    // into an invalid BUILD_VECTOR immediately.
-    return SDValue();
-#if 0
-    SDValue Res = BuildSplatI(SextVal >> 1, SplatSize, MVT::Other, DAG, dl);
-    Res = DAG.getNode(ISD::ADD, dl, Res.getValueType(), Res, Res);
-    return DAG.getNode(ISD::BITCAST, dl, Op.getValueType(), Res);
-#endif
+  //     VSPLTI[bhw](val/2) + VSPLTI[bhw](val/2)
+  // If this value is in the range [17,31] and is odd, use:
+  //     VSPLTI[bhw](val-16) - VSPLTI[bhw](-16)
+  // If this value is in the range [-31,-17] and is odd, use:
+  //     VSPLTI[bhw](val+16) + VSPLTI[bhw](-16)
+  // Note the last two are three-instruction sequences.
+  if (SextVal >= -32 && SextVal <= 31) {
+    // To avoid having these optimizations undone by constant folding,
+    // we convert to a pseudo that will be expanded later into one of
+    // the above forms.
+    SDValue Elt = DAG.getConstant(SextVal, MVT::i32);
+    EVT VT = Op.getValueType();
+    int Size = VT == MVT::v16i8 ? 1 : (VT == MVT::v8i16 ? 2 : 4);
+    SDValue EltSize = DAG.getConstant(Size, MVT::i32);
+    return DAG.getNode(PPCISD::VADD_SPLAT, dl, VT, Elt, EltSize);
   }
 
   // If this is 0x8000_0000 x 4, turn into vspltisw + vslw.  If it is
@@ -5121,25 +5133,6 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
       SDValue T = BuildSplatI(i, SplatSize, MVT::v16i8, DAG, dl);
       return BuildVSLDOI(T, T, 3, Op.getValueType(), DAG, dl);
     }
-  }
-
-  // Three instruction sequences.
-
-  // Odd, in range [17,31]:  (vsplti C)-(vsplti -16).
-  // FIXME: Disabled because the add gets constant folded.
-  if (0 && SextVal >= 0 && SextVal <= 31) {
-    SDValue LHS = BuildSplatI(SextVal-16, SplatSize, MVT::Other, DAG, dl);
-    SDValue RHS = BuildSplatI(-16, SplatSize, MVT::Other, DAG, dl);
-    LHS = DAG.getNode(ISD::SUB, dl, LHS.getValueType(), LHS, RHS);
-    return DAG.getNode(ISD::BITCAST, dl, Op.getValueType(), LHS);
-  }
-  // Odd, in range [-31,-17]:  (vsplti C)+(vsplti -16).
-  // FIXME: Disabled because the add gets constant folded.
-  if (0 && SextVal >= -31 && SextVal <= 0) {
-    SDValue LHS = BuildSplatI(SextVal+16, SplatSize, MVT::Other, DAG, dl);
-    SDValue RHS = BuildSplatI(-16, SplatSize, MVT::Other, DAG, dl);
-    LHS = DAG.getNode(ISD::ADD, dl, LHS.getValueType(), LHS, RHS);
-    return DAG.getNode(ISD::BITCAST, dl, Op.getValueType(), LHS);
   }
 
   return SDValue();

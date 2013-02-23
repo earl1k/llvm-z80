@@ -66,22 +66,21 @@ static const Module *getModuleFromVal(const Value *V) {
   return 0;
 }
 
-static void PrintCallingConv(unsigned cc, raw_ostream &Out)
-{
+static void PrintCallingConv(unsigned cc, raw_ostream &Out) {
   switch (cc) {
-    case CallingConv::Fast:         Out << "fastcc"; break;
-    case CallingConv::Cold:         Out << "coldcc"; break;
-    case CallingConv::X86_StdCall:  Out << "x86_stdcallcc"; break;
-    case CallingConv::X86_FastCall: Out << "x86_fastcallcc"; break;
-    case CallingConv::X86_ThisCall: Out << "x86_thiscallcc"; break;
-    case CallingConv::Intel_OCL_BI: Out << "intel_ocl_bicc"; break;
-    case CallingConv::ARM_APCS:     Out << "arm_apcscc"; break;
-    case CallingConv::ARM_AAPCS:    Out << "arm_aapcscc"; break;
-    case CallingConv::ARM_AAPCS_VFP:Out << "arm_aapcs_vfpcc"; break;
-    case CallingConv::MSP430_INTR:  Out << "msp430_intrcc"; break;
-    case CallingConv::PTX_Kernel:   Out << "ptx_kernel"; break;
-    case CallingConv::PTX_Device:   Out << "ptx_device"; break;
-    default:                        Out << "cc" << cc; break;
+  default:                         Out << "cc" << cc; break;
+  case CallingConv::Fast:          Out << "fastcc"; break;
+  case CallingConv::Cold:          Out << "coldcc"; break;
+  case CallingConv::X86_StdCall:   Out << "x86_stdcallcc"; break;
+  case CallingConv::X86_FastCall:  Out << "x86_fastcallcc"; break;
+  case CallingConv::X86_ThisCall:  Out << "x86_thiscallcc"; break;
+  case CallingConv::Intel_OCL_BI:  Out << "intel_ocl_bicc"; break;
+  case CallingConv::ARM_APCS:      Out << "arm_apcscc"; break;
+  case CallingConv::ARM_AAPCS:     Out << "arm_aapcscc"; break;
+  case CallingConv::ARM_AAPCS_VFP: Out << "arm_aapcs_vfpcc"; break;
+  case CallingConv::MSP430_INTR:   Out << "msp430_intrcc"; break;
+  case CallingConv::PTX_Kernel:    Out << "ptx_kernel"; break;
+  case CallingConv::PTX_Device:    Out << "ptx_device"; break;
   }
 }
 
@@ -510,6 +509,7 @@ void SlotTracker::processModule() {
       CreateModuleSlot(I);
 
     // Add all the function attributes to the table.
+    // FIXME: Add attributes of other objects?
     AttributeSet FnAttrs = I->getAttributes().getFnAttributes();
     if (FnAttrs.hasAttributes(AttributeSet::FunctionIndex))
       CreateAttributeSetSlot(FnAttrs);
@@ -553,6 +553,16 @@ void SlotTracker::processFunction() {
             for (unsigned i = 0, e = I->getNumOperands(); i != e; ++i)
               if (MDNode *N = dyn_cast_or_null<MDNode>(I->getOperand(i)))
                 CreateMetadataSlot(N);
+
+        // Add all the call attributes to the table.
+        AttributeSet Attrs = CI->getAttributes().getFnAttributes();
+        if (Attrs.hasAttributes(AttributeSet::FunctionIndex))
+          CreateAttributeSetSlot(Attrs);
+      } else if (const InvokeInst *II = dyn_cast<InvokeInst>(I)) {
+        // Add all the call attributes to the table.
+        AttributeSet Attrs = II->getAttributes().getFnAttributes();
+        if (Attrs.hasAttributes(AttributeSet::FunctionIndex))
+          CreateAttributeSetSlot(Attrs);
       }
 
       // Process metadata attached with this instruction.
@@ -1654,7 +1664,7 @@ void AssemblyWriter::printFunction(const Function *F) {
   if (F->hasUnnamedAddr())
     Out << " unnamed_addr";
   if (Attrs.hasAttributes(AttributeSet::FunctionIndex))
-    Out << ' ' << Attrs.getAsString(AttributeSet::FunctionIndex);
+    Out << " #" << Machine.getAttributeGroupSlot(Attrs.getFnAttributes());
   if (F->hasSection()) {
     Out << " section \"";
     PrintEscapedString(F->getSection(), Out);
@@ -1927,7 +1937,7 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
     }
     Out << ')';
     if (PAL.hasAttributes(AttributeSet::FunctionIndex))
-      Out << ' ' << PAL.getAsString(AttributeSet::FunctionIndex);
+      Out << " #" << Machine.getAttributeGroupSlot(PAL.getFnAttributes());
   } else if (const InvokeInst *II = dyn_cast<InvokeInst>(&I)) {
     Operand = II->getCalledValue();
     PointerType *PTy = cast<PointerType>(Operand->getType());
@@ -1967,7 +1977,7 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
 
     Out << ')';
     if (PAL.hasAttributes(AttributeSet::FunctionIndex))
-      Out << ' ' << PAL.getAsString(AttributeSet::FunctionIndex);
+      Out << " #" << Machine.getAttributeGroupSlot(PAL.getFnAttributes());
 
     Out << "\n          to ";
     writeOperand(II->getNormalDest(), true);
