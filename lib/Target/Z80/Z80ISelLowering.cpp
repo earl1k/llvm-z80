@@ -79,6 +79,7 @@ SDValue Z80TargetLowering::LowerFormalArguments(SDValue Chain,
   SmallVectorImpl<SDValue> &InVals) const
 {
   MachineFunction &MF = DAG.getMachineFunction();
+  MachineFrameInfo *MFI = MF.getFrameInfo();
   MachineRegisterInfo &MRI = MF.getRegInfo();
 
   // CCValAssign - represent the assignment of
@@ -127,7 +128,30 @@ SDValue Z80TargetLowering::LowerFormalArguments(SDValue Chain,
         break;
       }
     }
-    else assert(0 && "Not implemented yet!");
+    else
+    {
+      assert(VA.isMemLoc());
+
+      SDValue InVal;
+
+      // Load the argument to a virtual register
+      unsigned Size = VA.getLocVT().getStoreSize();
+      if (Size > 2)
+        errs() << "LowerFormalArguments unhandled argument type: "
+        << EVT(VA.getLocVT()).getEVTString() << "\n";
+      
+      // Create the frame index object for this incoming parameter...
+      int FI = MFI->CreateFixedObject(Size, VA.getLocMemOffset(), true);
+
+      // Create the SelectionDAG nodes corresponding to a load
+      // from this parameter
+      SDValue FIN = DAG.getFrameIndex(FI, MVT::i16);
+      InVal = DAG.getLoad(VA.getLocVT(), dl, Chain, FIN,
+        MachinePointerInfo::getFixedStack(FI),
+        false, false, false, 0);
+
+      InVals.push_back(InVal);
+    }
   }
   return Chain;
 }
