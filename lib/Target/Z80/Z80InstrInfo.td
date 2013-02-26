@@ -118,6 +118,11 @@ let Defs = [FLAGS] in {
   def CCF : I<0x3F, (outs), (ins), "ccf", [(Z80ccf)]>;
 }
 
+let Defs = [A, FLAGS], Uses = [A] in {
+  def CPL : I<0x2F, (outs), (ins), "cpl", [(set A, (not A))]>;
+  def NEG : I<0x44, (outs), (ins), "neg", [(set A, (sub 0, A))]>, ED;
+}
+
 let Uses = [SP] in 
   def ADD16rSP : I<0x39, (outs GR16:$dst), (ins), "add\t{$dst, sp}", []>;
 let Defs = [SP] in
@@ -327,6 +332,9 @@ def : Pat<(subc A, imm:$src), (SUB8r imm:$src)>;
 // calls
 def : Pat<(Z80call (i16 tglobaladdr:$dst)), (CALL tglobaladdr:$dst)>;
 def : Pat<(Z80call (i16 texternalsym:$dst)), (CALL texternalsym:$dst)>;
+
+// neg
+def : Pat<(add (not A), 1), (NEG)>;
 
 // GlobalAddress
 def : Pat<(Z80wrapper tglobaladdr:$dst), (LD16ri tglobaladdr:$dst)>;
