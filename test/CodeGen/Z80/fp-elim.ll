@@ -1,5 +1,13 @@
 ; RUN: llc < %s -march=z80 | FileCheck %s
 
+define void @no_fp()
+{
+; CHECK: no_fp:
+; CHECK-NOT: ld sp, {{[ix|iy]}}
+; CHECK: ret
+	ret void
+}
+
 define i8 @add3(i8 %a, i8 %b, i8 %c)
 {
 ; CHECK: add3:
@@ -11,11 +19,11 @@ define i8 @add3(i8 %a, i8 %b, i8 %c)
 	ret i8 %v2
 }
 
-define i8 @formal_arg(i8 %a, i16 %b, i8 %c)
+define i16 @formal_arg(i16 %a, i16 %b)
 {
 ; CHECK: formal_arg:
 ; CHECK: ld sp, {{[ix|iy]}}
-	ret i8 %c
+	ret i16 %b
 }
 
 define void @alloc()
