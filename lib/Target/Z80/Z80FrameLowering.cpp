@@ -28,7 +28,7 @@ Z80FrameLowering::Z80FrameLowering(const Z80TargetMachine &tm)
 bool Z80FrameLowering::hasFP(const MachineFunction &MF) const
 {
   const MachineFrameInfo *MFI = MF.getFrameInfo();
-  return (MFI->hasCalls() || (MFI->getNumFixedObjects() > 0));
+  return (MFI->hasCalls() || (MFI->getNumObjects() > 0));
 }
 
 void Z80FrameLowering::emitPrologue(MachineFunction &MF) const
@@ -51,7 +51,7 @@ void Z80FrameLowering::emitPrologue(MachineFunction &MF) const
   while (MBBI != MBB.end() && (MBBI->getOpcode() == Z80::PUSH16r))
     MBBI++;
 
-  if (NumBytes || hasFP(MF))
+  if (NumBytes || MFI->getNumFixedObjects())
   {
     unsigned FP = TII.getRegisterInfo().getFrameRegister(MF);
 
@@ -95,7 +95,7 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
     MBBI--;
   }
 
-  if (NumBytes || hasFP(MF))
+  if (NumBytes || MFI->getNumFixedObjects())
   {
     unsigned FP = TII.getRegisterInfo().getFrameRegister(MF);
 

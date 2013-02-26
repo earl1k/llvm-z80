@@ -1,4 +1,4 @@
-; RUN llc -march=z80 < %s | FileCheck %s
+; RUN: llc < %s -march=z80 | FileCheck %s
 
 define i8 @add3(i8 %a, i8 %b, i8 %c)
 {
@@ -16,4 +16,12 @@ define i8 @formal_arg(i8 %a, i16 %b, i8 %c)
 ; CHECK: formal_arg:
 ; CHECK: ld sp, {{[ix|iy]}}
 	ret i8 %c
+}
+
+define void @alloc()
+{
+; CHECK: alloc:
+; CHECK: ld sp, {{[ix|iy]}}
+	%ptr = alloca i8
+	ret void
 }
