@@ -340,7 +340,6 @@ void Z80InstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
   int FrameIndex, const TargetRegisterClass *RC,
   const TargetRegisterInfo *TRI) const
 {
-  MachineFunction &MF = *MBB.getParent();
   DebugLoc dl;
   if (MI != MBB.end()) dl = MI->getDebugLoc();
 
@@ -362,7 +361,6 @@ void Z80InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
   int FrameIndex, const TargetRegisterClass *RC,
   const TargetRegisterInfo *TRI) const
 {
-  MachineFunction &MF = *MBB.getParent();
   DebugLoc dl;
   if (MI != MBB.end()) dl = MI->getDebugLoc();
 
