@@ -28,6 +28,7 @@ namespace llvm {
       WRAPPER,
       SCF, CCF,
       RLC, RRC, RL, RR, SLA, SRA, SLL, SRL,
+      SHL, LSHR, ASHR,
       CP,
       SELECT_CC,
       BR_CC,
@@ -63,6 +64,8 @@ namespace llvm {
     MachineBasicBlock* EmitInstrWithCustomInserter(MachineInstr *MI,
       MachineBasicBlock *MBB) const;
     MachineBasicBlock* EmitSelectInstr(MachineInstr *MI,
+      MachineBasicBlock *MBB) const;
+    MachineBasicBlock* EmitShiftInstr(MachineInstr *MI,
       MachineBasicBlock *MBB) const;
   private:
     SDValue

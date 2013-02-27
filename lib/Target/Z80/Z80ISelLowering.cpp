@@ -413,6 +413,9 @@ const char *Z80TargetLowering::getTargetNodeName(unsigned Opcode) const
   case Z80ISD::SRA:       return "Z80ISD::SRA";
   case Z80ISD::SLL:       return "Z80ISD::SLL";
   case Z80ISD::SRL:       return "Z80ISD::SRL";
+  case Z80ISD::SHL:       return "Z80ISD::SHL";
+  case Z80ISD::LSHR:      return "Z80ISD::LSHR";
+  case Z80ISD::ASHR:      return "Z80ISD::ASHR";
   case Z80ISD::CP:        return "Z80ISD::CP";
   case Z80ISD::SELECT_CC: return "Z80ISD::SELECT_CC";
   case Z80ISD::BR_CC:     return "Z80ISD::BR_CC";
@@ -482,7 +485,23 @@ SDValue Z80TargetLowering::LowerShifts(SDValue Op, SelectionDAG &DAG) const
   DebugLoc dl  = Op.getDebugLoc();
   EVT VT       = Op.getValueType();
 
-  assert(isa<ConstantSDNode>(N->getOperand(1)) && "Not implemented yet!");
+  if(!isa<ConstantSDNode>(N->getOperand(1)))
+  {
+    switch (N->getOpcode())
+    {
+    default: llvm_unreachable("Invalid shift opcode!");
+    case ISD::SHL:
+      Opc = Z80ISD::SHL;
+      break;
+    case ISD::SRL:
+      Opc = Z80ISD::LSHR;
+      break;
+    case ISD::SRA:
+      Opc = Z80ISD::ASHR;
+      break;
+    }
+    return DAG.getNode(Opc, dl, VT, N->getOperand(0), N->getOperand(1));
+  }
 
   uint64_t ShiftAmount = cast<ConstantSDNode>(N->getOperand(1))->getZExtValue();
   SDValue Victim = N->getOperand(0);
@@ -737,6 +756,12 @@ MachineBasicBlock* Z80TargetLowering::EmitInstrWithCustomInserter(MachineInstr *
   {
   case Z80::SELECT8:
   case Z80::SELECT16: return EmitSelectInstr(MI, MBB);
+  case Z80::SHL8:
+  case Z80::LSHR8:
+  case Z80::ASHR8:
+  case Z80::SHL16:
+  case Z80::LSHR16:
+  case Z80::ASHR16:   return EmitShiftInstr(MI, MBB);
   default: llvm_unreachable("Invalid Custom Inserter Instruction");
   }
 }
@@ -760,6 +785,7 @@ MachineBasicBlock* Z80TargetLowering::EmitSelectInstr(MachineInstr *MI,
 
   copy1MBB->splice(copy1MBB->begin(), MBB,
     llvm::next(MachineBasicBlock::iterator(MI)), MBB->end());
+  copy1MBB->transferSuccessorsAndUpdatePHIs(MBB);
   MBB->addSuccessor(copy0MBB);
   MBB->addSuccessor(copy1MBB);
 
@@ -778,4 +804,146 @@ MachineBasicBlock* Z80TargetLowering::EmitSelectInstr(MachineInstr *MI,
 
   MI->eraseFromParent();
   return MBB;
+}
+
+MachineBasicBlock* Z80TargetLowering::EmitShiftInstr(MachineInstr *MI,
+  MachineBasicBlock *MBB) const
+{
+  MachineFunction *MF = MBB->getParent();
+  MachineRegisterInfo &MRI = MF->getRegInfo();
+  DebugLoc dl = MI->getDebugLoc();
+  const TargetInstrInfo &TII = *getTargetMachine().getInstrInfo();
+
+  unsigned Opc, Opc2 = 0;
+  const TargetRegisterClass *RC;
+
+  switch (MI->getOpcode())
+  {
+  default: llvm_unreachable("Invalid shift opcode!");
+  case Z80::SHL8:
+    Opc = Z80::SLA8r;
+    RC = &Z80::GR8RegClass;
+    break;
+  case Z80::LSHR8:
+    Opc = Z80::SRL8r;
+    RC = &Z80::GR8RegClass;
+    break;
+  case Z80::ASHR8:
+    Opc = Z80::SRA8r;
+    RC = &Z80::GR8RegClass;
+    break;
+  case Z80::SHL16:
+    Opc = Z80::SLA8r;
+    Opc2 = Z80::RL8r;
+    RC = &Z80::GR16RegClass;
+    break;
+  case Z80::LSHR16:
+    Opc = Z80::SRL8r;
+    Opc2 = Z80::RR8r;
+    RC = &Z80::GR16RegClass;
+    break;
+  case Z80::ASHR16:
+    Opc = Z80::SRA8r;
+    Opc2 = Z80::RR8r;
+    RC = &Z80::GR16RegClass;
+    break;
+  }
+
+  const BasicBlock *LLVM_BB = MBB->getBasicBlock();
+  MachineFunction::iterator I = MBB;
+  I++;
+
+  MachineBasicBlock *LoopMBB = MF->CreateMachineBasicBlock(LLVM_BB);
+  MachineBasicBlock *RemMBB  = MF->CreateMachineBasicBlock(LLVM_BB);
+  MF->insert(I, LoopMBB);
+  MF->insert(I, RemMBB);
+
+  RemMBB->splice(RemMBB->begin(), MBB,
+    llvm::next<MachineBasicBlock::iterator>(MI), MBB->end());
+  RemMBB->transferSuccessorsAndUpdatePHIs(MBB);
+
+  // Add edges MBB => LoopMBB => RemMBB, MBB => RemMBB, LoopMBB => LoopMBB
+  MBB->addSuccessor(LoopMBB);
+  MBB->addSuccessor(RemMBB);
+  LoopMBB->addSuccessor(RemMBB);
+  LoopMBB->addSuccessor(LoopMBB);
+
+  unsigned ShiftReg  = MRI.createVirtualRegister(RC);
+  unsigned ShiftReg2 = MRI.createVirtualRegister(RC);
+  unsigned ShiftAmt  = MRI.createVirtualRegister(&Z80::GR8RegClass);
+  unsigned ShiftAmt2 = MRI.createVirtualRegister(&Z80::GR8RegClass);
+  unsigned DstReg = MI->getOperand(0).getReg();
+  unsigned SrcReg = MI->getOperand(1).getReg();
+  unsigned AmtReg = MI->getOperand(2).getReg();
+
+  // MBB:
+  // LD A,AmtReg
+  // CP 0
+  // JP Z,RemMBB
+  BuildMI(MBB, dl, TII.get(Z80::COPY), Z80::A).addReg(AmtReg);
+  BuildMI(MBB, dl, TII.get(Z80::CP8i)).addImm(0);
+  BuildMI(MBB, dl, TII.get(Z80::JPCC)).addImm(Z80::COND_Z).addMBB(RemMBB);
+
+  // LoopMBB:
+  // ShiftReg = phi [ %SrcReg, MBB ], [ %ShiftReg2, LoopMBB ]
+  // ShiftAmt = phi [ %AmtReg, MBB ], [ %ShiftAmt2, LoopMBB ]
+  // ShiftReg2 = Opc ShiftReg
+  // ShiftAmt2 = DEC ShiftAmt
+  // JP NZ, LoopMBB
+  BuildMI(LoopMBB, dl, TII.get(Z80::PHI), ShiftReg)
+    .addReg(SrcReg).addMBB(MBB)
+    .addReg(ShiftReg2).addMBB(LoopMBB);
+  BuildMI(LoopMBB, dl, TII.get(Z80::PHI), ShiftAmt)
+    .addReg(AmtReg).addMBB(MBB)
+    .addReg(ShiftAmt2).addMBB(LoopMBB);
+  if (Opc2)
+  {
+    unsigned RegLo = MRI.createVirtualRegister(&Z80::GR8RegClass);
+    unsigned RegHi = MRI.createVirtualRegister(&Z80::GR8RegClass);
+    unsigned RegLo2 = MRI.createVirtualRegister(&Z80::GR8RegClass);
+    unsigned RegHi2 = MRI.createVirtualRegister(&Z80::GR8RegClass);
+    unsigned SupReg = MRI.createVirtualRegister(&Z80::GR16RegClass);
+    unsigned Idx1 = Z80::subreg_lo;
+    unsigned Idx2 = Z80::subreg_hi;
+
+    // If the shift to the right, then swap subindices
+    if (Opc2 == Z80::RR8r)
+      std::swap(Idx1, Idx2);
+
+    // Load subindices into GR8 registers.
+    BuildMI(LoopMBB, dl, TII.get(Z80::COPY), RegLo)
+      .addReg(ShiftReg, 0, Idx1);
+    BuildMI(LoopMBB, dl, TII.get(Z80::COPY), RegHi)
+      .addReg(ShiftReg, 0, Idx2);
+
+    // Shift registers.
+    BuildMI(LoopMBB, dl, TII.get(Opc), RegLo2).addReg(RegLo);
+    BuildMI(LoopMBB, dl, TII.get(Opc2), RegHi2).addReg(RegHi);
+
+    // Insert registers into super register.
+    BuildMI(LoopMBB, dl, TII.get(Z80::INSERT_SUBREG), SupReg)
+      .addReg(ShiftReg)
+      .addReg(RegLo2)
+      .addImm(Idx1);
+    BuildMI(LoopMBB, dl, TII.get(Z80::INSERT_SUBREG), ShiftReg2)
+      .addReg(SupReg)
+      .addReg(RegHi2)
+      .addImm(Idx2);
+  }
+  else // Shift 8 bit register
+    BuildMI(LoopMBB, dl, TII.get(Opc), ShiftReg2)
+      .addReg(ShiftReg);
+  BuildMI(LoopMBB, dl, TII.get(Z80::DEC8r), ShiftAmt2)
+    .addReg(ShiftAmt);
+  BuildMI(LoopMBB, dl, TII.get(Z80::JPCC))
+    .addImm(Z80::COND_NZ).addMBB(LoopMBB);
+
+  // RemMBB:
+  // DstReg = phi [ %SrcReg, MBB ], [ %ShiftReg2, LoopMBB ]
+  BuildMI(*RemMBB, RemMBB->begin(), dl, TII.get(Z80::PHI), DstReg)
+    .addReg(SrcReg).addMBB(MBB)
+    .addReg(ShiftReg2).addMBB(LoopMBB);
+
+  MI->eraseFromParent();
+  return RemMBB;
 }

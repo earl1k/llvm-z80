@@ -30,7 +30,9 @@ def SDT_Z80SelectCC     : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
                                                SDTCisSameAs<1, 2>,
                                                SDTCisVT<3, i8>]>;
 def SDT_Z80BrCC         : SDTypeProfile<0, 2, [SDTCisVT<0, i8>,
-                                           SDTCisVT<1, OtherVT>]>;
+                                               SDTCisVT<1, OtherVT>]>;
+def SDT_Z80Shift        : SDTypeProfile<1, 2, [SDTCisSameAs<0, 1>,
+                                               SDTCisVT<2, i8>]>;
 //===----------------------------------------------------------------------===//
 // Z80 Specific Node Definitions.
 //===----------------------------------------------------------------------===//
@@ -53,6 +55,9 @@ def Z80sla           : SDNode<"Z80ISD::SLA", SDTIntUnaryOp, [SDNPOutGlue]>;
 def Z80sra           : SDNode<"Z80ISD::SRA", SDTIntUnaryOp, [SDNPOutGlue]>;
 def Z80sll           : SDNode<"Z80ISD::SLL", SDTIntUnaryOp, [SDNPOutGlue]>;
 def Z80srl           : SDNode<"Z80ISD::SRL", SDTIntUnaryOp, [SDNPOutGlue]>;
+def Z80shl           : SDNode<"Z80ISD::SHL", SDT_Z80Shift, []>;
+def Z80lshr          : SDNode<"Z80ISD::LSHR", SDT_Z80Shift, []>;
+def Z80ashr          : SDNode<"Z80ISD::ASHR", SDT_Z80Shift, []>;
 def Z80cp            : SDNode<"Z80ISD::CP", SDT_Z80Cp, [SDNPOutGlue]>;
 def Z80selectcc      : SDNode<"Z80ISD::SELECT_CC", SDT_Z80SelectCC,
                      [SDNPInGlue]>;
@@ -108,6 +113,18 @@ let usesCustomInserter = 1 in {
     [(set GR8:$dst,  (Z80selectcc GR8:$src,  GR8:$src2,  imm:$cc))]>;
   def SELECT16 : PseudoI<(outs GR16:$dst), (ins GR16:$src, GR16:$src2, cc:$cc),
     [(set GR16:$dst, (Z80selectcc GR16:$src, GR16:$src2, imm:$cc))]>;
+  def SHL8   : PseudoI<(outs GR8:$dst), (ins GR8:$src, GR8:$cnt),
+    [(set GR8:$dst, (Z80shl GR8:$src, GR8:$cnt))]>;
+  def LSHR8  : PseudoI<(outs GR8:$dst), (ins GR8:$src, GR8:$cnt),
+    [(set GR8:$dst, (Z80lshr GR8:$src, GR8:$cnt))]>;
+  def ASHR8  : PseudoI<(outs GR8:$dst), (ins GR8:$src, GR8:$cnt),
+    [(set GR8:$dst, (Z80ashr GR8:$src, GR8:$cnt))]>;
+  def SHL16  : PseudoI<(outs GR16:$dst), (ins GR16:$src, GR8:$cnt),
+    [(set GR16:$dst, (Z80shl GR16:$src, GR8:$cnt))]>;
+  def LSHR16 : PseudoI<(outs GR16:$dst), (ins GR16:$src, GR8:$cnt),
+    [(set GR16:$dst, (Z80lshr GR16:$src, GR8:$cnt))]>;
+  def ASHR16 : PseudoI<(outs GR16:$dst), (ins GR16:$src, GR8:$cnt),
+    [(set GR16:$dst, (Z80ashr GR16:$src, GR8:$cnt))]>;
 }
 //===----------------------------------------------------------------------===//
 //  Miscellaneous Instructions.
