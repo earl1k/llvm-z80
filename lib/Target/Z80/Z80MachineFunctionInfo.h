@@ -22,15 +22,20 @@ namespace llvm {
 
     // CalleeSavedFrameSize - Size of the callee-saved register portion of the
     // stack frame in bytes.
+
+    // needFP - Flag which indicate to use FP
+    bool needFP;
     unsigned CalleeSavedFrameSize;
   public:
     explicit Z80MachineFunctionInfo(MachineFunction &MF)
-      : CalleeSavedFrameSize(0) {}
+      : needFP(false), CalleeSavedFrameSize(0) {}
 
     unsigned getCalleeSavedFrameSize() { return CalleeSavedFrameSize; }
     void setCalleeSavedFrameSize(unsigned bytes) {
       CalleeSavedFrameSize = bytes;
     }
+    bool isNeedFP() const { return needFP; }
+    void setNeedFP() { needFP = true; }
   }; // end class Z80MachineFunctionInfo
 } // end namespace llvm
 

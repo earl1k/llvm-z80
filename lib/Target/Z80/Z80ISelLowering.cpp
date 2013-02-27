@@ -15,6 +15,7 @@
 #include "Z80ISelLowering.h"
 #include "Z80.h"
 #include "Z80TargetMachine.h"
+#include "Z80MachineFunctionInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -81,6 +82,7 @@ SDValue Z80TargetLowering::LowerFormalArguments(SDValue Chain,
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo *MFI = MF.getFrameInfo();
   MachineRegisterInfo &MRI = MF.getRegInfo();
+  Z80MachineFunctionInfo *Z80FI = MF.getInfo<Z80MachineFunctionInfo>();
 
   // CCValAssign - represent the assignment of
   // the arguments to a location
@@ -131,6 +133,7 @@ SDValue Z80TargetLowering::LowerFormalArguments(SDValue Chain,
     else
     {
       assert(VA.isMemLoc());
+      Z80FI->setNeedFP();
 
       SDValue InVal;
 
