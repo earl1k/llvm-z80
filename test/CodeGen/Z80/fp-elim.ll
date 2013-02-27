@@ -8,9 +8,9 @@ define void @no_fp()
 	ret void
 }
 
-define i8 @add3(i8 %a, i8 %b, i8 %c)
+define i8 @callee_saved(i8 %a, i8 %b, i8 %c)
 {
-; CHECK: add3:
+; CHECK: callee_saved:
 ; CHECK: push [[REG:[a-z]+]]
 ; CHECK-NOT: ld sp, {{[ix|iy]}}
 ; CHECK: pop [[REG]]
@@ -22,14 +22,16 @@ define i8 @add3(i8 %a, i8 %b, i8 %c)
 define i16 @formal_arg(i16 %a, i16 %b)
 {
 ; CHECK: formal_arg:
-; CHECK: ld sp, {{[ix|iy]}}
+; CHECK: push [[FP:[ix|iy]]]
+; CHECK: ld sp, [[FP]]
 	ret i16 %b
 }
 
 define void @alloc()
 {
 ; CHECK: alloc:
-; CHECK: ld sp, {{[ix|iy]}}
+; CHECK: push [[FP:[ix|iy]]]
+; CHECK: ld sp, [[FP]]
 	%ptr = alloca i8
 	ret void
 }
@@ -45,7 +47,8 @@ define void @call_nofp()
 define void @call_fp()
 {
 ; CHECK: call_fp:
-; CHECK: ld sp, {{[ix|iy]}}
+; CHECK: push [[FP:[ix|iy]]]
+; CHECK: ld sp, [[FP]]
 	call void @fp(i16 0, i16 0)
 	ret void
 }
