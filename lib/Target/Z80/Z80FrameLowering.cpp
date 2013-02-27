@@ -28,7 +28,7 @@ Z80FrameLowering::Z80FrameLowering(const Z80TargetMachine &tm)
 bool Z80FrameLowering::hasFP(const MachineFunction &MF) const
 {
   const MachineFrameInfo *MFI = MF.getFrameInfo();
-  return (MFI->hasCalls() || (MFI->getNumObjects() > 0));
+  return (MFI->getMaxCallFrameSize() > 0 || (MFI->getNumObjects() > 0));
 }
 
 void Z80FrameLowering::emitPrologue(MachineFunction &MF) const

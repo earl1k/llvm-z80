@@ -33,3 +33,22 @@ define void @alloc()
 	%ptr = alloca i8
 	ret void
 }
+
+define void @call_nofp()
+{
+; CHECK: call_nofp:
+; CHECK-NOT: ld sp, {{[ix|iy]}}
+	call void @nofp()
+	ret void
+}
+
+define void @call_fp()
+{
+; CHECK: call_fp:
+; CHECK: ld sp, {{[ix|iy]}}
+	call void @fp(i16 0, i16 0)
+	ret void
+}
+
+declare void @nofp()
+declare void @fp(i16, i16)
