@@ -30,6 +30,9 @@ namespace llvm {
     void processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
       RegScavenger *RS = NULL) const;
 
+    void eliminateCallFramePseudoInstr(MachineFunction &MF,
+      MachineBasicBlock &MBB, MachineBasicBlock::iterator I) const;
+
     bool spillCalleeSavedRegisters(MachineBasicBlock &MBB,
       MachineBasicBlock::iterator MI,
       const std::vector<CalleeSavedInfo> &CSI,

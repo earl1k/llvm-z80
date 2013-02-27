@@ -33,9 +33,6 @@ namespace llvm {
 
     BitVector getReservedRegs(const MachineFunction &MF) const;
 
-    void eliminateCallFramePseudoInstr(MachineFunction &MF,
-      MachineBasicBlock &MBB, MachineBasicBlock::iterator I) const;
-
     void eliminateFrameIndex(MachineBasicBlock::iterator I,
       int SPAdj, unsigned FIOperandNum, RegScavenger *RS = NULL) const;
 

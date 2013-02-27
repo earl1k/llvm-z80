@@ -68,21 +68,6 @@ BitVector Z80RegisterInfo::getReservedRegs(const MachineFunction &MF) const
   return Reserved;
 }
 
-void Z80RegisterInfo::eliminateCallFramePseudoInstr(MachineFunction &MF,
-  MachineBasicBlock &MBB, MachineBasicBlock::iterator I) const
-{
-  MachineInstr &MI = *I;
-
-  switch (MI.getOpcode())
-  {
-  default: llvm_unreachable("Cannot handle this call frame pseudo instruction");
-  case Z80::ADJCALLSTACKDOWN:
-  case Z80::ADJCALLSTACKUP:
-    break;
-  }
-  MBB.erase(I);
-}
-
 void Z80RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator I,
   int SPAdj, unsigned FIOperandNum, RegScavenger *RS) const
 {
