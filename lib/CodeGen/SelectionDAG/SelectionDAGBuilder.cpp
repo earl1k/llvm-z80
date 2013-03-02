@@ -1872,6 +1872,13 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
     visitInlineAsm(&I);
   else if (Fn && Fn->isIntrinsic()) {
     assert(Fn->getIntrinsicID() == Intrinsic::donothing);
+    // If donothing has a landingpad, we should clear CurrentCallSite.
+    if (LandingPad) {
+      MachineModuleInfo &MMI = DAG.getMachineFunction().getMMI();
+      unsigned CallSiteIndex = MMI.getCurrentCallSite();
+      if (CallSiteIndex)
+        MMI.setCurrentCallSite(0);
+    }
     // Ignore invokes to @llvm.donothing: jump directly to the next BB.
   } else
     LowerCallTo(&I, getValue(Callee), false, LandingPad);
@@ -2654,7 +2661,7 @@ void SelectionDAGBuilder::visitShift(const User &I, unsigned Opcode) {
   SDValue Op1 = getValue(I.getOperand(0));
   SDValue Op2 = getValue(I.getOperand(1));
 
-  MVT ShiftTy = TLI.getShiftAmountTy(Op2.getValueType());
+  EVT ShiftTy = TLI.getShiftAmountTy(Op2.getValueType());
 
   // Coerce the shift amount to the right type if we can.
   if (!I.getType()->isVectorTy() && Op2.getValueType() != ShiftTy) {
@@ -3663,7 +3670,7 @@ void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
 ///
 ///   Op = (Op & 0x007fffff) | 0x3f800000;
 ///
-/// where Op is the hexidecimal representation of floating point value.
+/// where Op is the hexadecimal representation of floating point value.
 static SDValue
 GetSignificand(SelectionDAG &DAG, SDValue Op, DebugLoc dl) {
   SDValue t1 = DAG.getNode(ISD::AND, dl, MVT::i32, Op,
@@ -3677,7 +3684,7 @@ GetSignificand(SelectionDAG &DAG, SDValue Op, DebugLoc dl) {
 ///
 ///   (float)(int)(((Op & 0x7f800000) >> 23) - 127);
 ///
-/// where Op is the hexidecimal representation of floating point value.
+/// where Op is the hexadecimal representation of floating point value.
 static SDValue
 GetExponent(SelectionDAG &DAG, SDValue Op, const TargetLowering &TLI,
             DebugLoc dl) {
@@ -4467,6 +4474,8 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     SDValue Op2 = getValue(I.getArgOperand(1));
     SDValue Op3 = getValue(I.getArgOperand(2));
     unsigned Align = cast<ConstantInt>(I.getArgOperand(3))->getZExtValue();
+    if (!Align)
+      Align = 1; // @llvm.memcpy defines 0 and 1 to both mean no alignment.
     bool isVol = cast<ConstantInt>(I.getArgOperand(4))->getZExtValue();
     DAG.setRoot(DAG.getMemcpy(getRoot(), dl, Op1, Op2, Op3, Align, isVol, false,
                               MachinePointerInfo(I.getArgOperand(0)),
@@ -4483,6 +4492,8 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     SDValue Op2 = getValue(I.getArgOperand(1));
     SDValue Op3 = getValue(I.getArgOperand(2));
     unsigned Align = cast<ConstantInt>(I.getArgOperand(3))->getZExtValue();
+    if (!Align)
+      Align = 1; // @llvm.memset defines 0 and 1 to both mean no alignment.
     bool isVol = cast<ConstantInt>(I.getArgOperand(4))->getZExtValue();
     DAG.setRoot(DAG.getMemset(getRoot(), dl, Op1, Op2, Op3, Align, isVol,
                               MachinePointerInfo(I.getArgOperand(0))));
@@ -4500,6 +4511,8 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     SDValue Op2 = getValue(I.getArgOperand(1));
     SDValue Op3 = getValue(I.getArgOperand(2));
     unsigned Align = cast<ConstantInt>(I.getArgOperand(3))->getZExtValue();
+    if (!Align)
+      Align = 1; // @llvm.memmove defines 0 and 1 to both mean no alignment.
     bool isVol = cast<ConstantInt>(I.getArgOperand(4))->getZExtValue();
     DAG.setRoot(DAG.getMemmove(getRoot(), dl, Op1, Op2, Op3, Align, isVol,
                                MachinePointerInfo(I.getArgOperand(0)),
@@ -6155,6 +6168,7 @@ void SelectionDAGBuilder::visitInlineAsm(ImmutableCallSite CS) {
             Ctx.emitError(CS.getInstruction(),  "inline asm not supported yet:"
                           " don't know how to handle tied "
                           "indirect register inputs");
+            report_fatal_error("Cannot handle indirect register inputs!");
           }
 
           RegsForValue MatchedRegs;
@@ -6583,9 +6597,7 @@ static bool isOnlyUsedInEntryBlock(const Argument *A, bool FastISel) {
   return true;
 }
 
-void SelectionDAGISel::LowerArguments(const BasicBlock *LLVMBB) {
-  // If this is the entry block, emit arguments.
-  const Function &F = *LLVMBB->getParent();
+void SelectionDAGISel::LowerArguments(const Function &F) {
   SelectionDAG &DAG = SDB->DAG;
   DebugLoc dl = SDB->getCurDebugLoc();
   const DataLayout *TD = TLI.getDataLayout();

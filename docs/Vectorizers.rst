@@ -206,6 +206,25 @@ vectorization is profitable.
       A[i] += 4 * B[i];
   }
 
+Global Structures Alias Analysis
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Access to global structures can also be vectorized, with alias analysis being
+used to make sure accesses don't alias. Run-time checks can also be added on
+pointer access to structure members.
+
+Many variations are supported, but some that rely on undefined behaviour being
+ignored (as other compilers do) are still being left un-vectorized.
+
+.. code-block:: c++
+
+  struct { int A[100], K, B[100]; } Foo;
+
+  int foo() {
+    for (int i = 0; i < 100; ++i)
+      Foo.A[i] = Foo.B[i] + 100;
+  }
+
 Vectorization of function calls
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -226,6 +245,17 @@ See the table below for a list of these functions.
 |     |     | fmuladd |
 +-----+-----+---------+
 
+The loop vectorizer knows about special instructions on the target and will
+vectorize a loop containing a function call that maps to the instructions. For
+example, the loop below will be vectorized on Intel x86 if the SSE4.1 roundps
+instruction is available.
+
+.. code-block:: c++
+
+  void foo(float *f) {
+    for (int i = 0; i != 1024; ++i)
+      f[i] = floorf(f[i]);
+  }
 
 Partial unrolling during vectorization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

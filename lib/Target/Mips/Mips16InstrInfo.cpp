@@ -135,66 +135,8 @@ bool Mips16InstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
   switch(MI->getDesc().getOpcode()) {
   default:
     return false;
-  case Mips::BteqzT8CmpX16:
-    ExpandFEXT_T8I816_ins(MBB, MI, Mips::BteqzX16, Mips::CmpRxRy16);
-    break;
-  case Mips::BteqzT8CmpiX16:
-    ExpandFEXT_T8I8I16_ins(MBB, MI, Mips::BteqzX16,
-                           Mips::CmpiRxImm16, Mips::CmpiRxImmX16);
-    break;
-  case Mips::BteqzT8SltX16:
-    ExpandFEXT_T8I816_ins(MBB, MI, Mips::BteqzX16, Mips::SltRxRy16);
-    break;
-  case Mips::BteqzT8SltiX16:
-    ExpandFEXT_T8I8I16_ins(MBB, MI, Mips::BteqzX16,
-                           Mips::SltiRxImm16, Mips::SltiRxImmX16);
-    break;
-  case Mips::BteqzT8SltuX16:
-    // TBD: figure out a way to get this or remove the instruction
-    // altogether.
-    ExpandFEXT_T8I816_ins(MBB, MI, Mips::BteqzX16, Mips::SltuRxRy16);
-    break;
-  case Mips::BteqzT8SltiuX16:
-    ExpandFEXT_T8I8I16_ins(MBB, MI, Mips::BteqzX16,
-                           Mips::SltiuRxImm16, Mips::SltiuRxImmX16);
-    break;
-  case Mips::BtnezT8CmpX16:
-    ExpandFEXT_T8I816_ins(MBB, MI, Mips::BtnezX16, Mips::CmpRxRy16);
-    break;
-  case Mips::BtnezT8CmpiX16:
-    ExpandFEXT_T8I8I16_ins(MBB, MI, Mips::BtnezX16,
-                           Mips::CmpiRxImm16, Mips::CmpiRxImmX16);
-    break;
-  case Mips::BtnezT8SltX16:
-    ExpandFEXT_T8I816_ins(MBB, MI, Mips::BtnezX16, Mips::SltRxRy16);
-    break;
-  case Mips::BtnezT8SltiX16:
-    ExpandFEXT_T8I8I16_ins(MBB, MI, Mips::BtnezX16,
-                           Mips::SltiRxImm16, Mips::SltiRxImmX16);
-    break;
-  case Mips::BtnezT8SltuX16:
-    // TBD: figure out a way to get this or remove the instruction
-    // altogether.
-    ExpandFEXT_T8I816_ins(MBB, MI, Mips::BtnezX16, Mips::SltuRxRy16);
-    break;
-  case Mips::BtnezT8SltiuX16:
-    ExpandFEXT_T8I8I16_ins(MBB, MI, Mips::BtnezX16,
-                           Mips::SltiuRxImm16, Mips::SltiuRxImmX16);
-    break;
   case Mips::RetRA16:
     ExpandRetRA16(MBB, MI, Mips::JrcRa16);
-    break;
-  case Mips::SltCCRxRy16:
-    ExpandFEXT_CCRX16_ins(MBB, MI, Mips::SltRxRy16);
-    break;
-  case Mips::SltiCCRxImmX16:
-    ExpandFEXT_CCRXI16_ins(MBB, MI, Mips::SltiRxImm16, Mips::SltiRxImmX16);
-    break;
-  case Mips::SltiuCCRxImmX16:
-    ExpandFEXT_CCRXI16_ins(MBB, MI, Mips::SltiuRxImm16, Mips::SltiuRxImmX16);
-    break;
-  case Mips::SltuCCRxRy16:
-    ExpandFEXT_CCRX16_ins(MBB, MI, Mips::SltuRxRy16);
     break;
   }
 
@@ -458,58 +400,6 @@ void Mips16InstrInfo::ExpandRetRA16(MachineBasicBlock &MBB,
 }
 
 
-void Mips16InstrInfo::ExpandFEXT_T8I816_ins(
-  MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
-  unsigned BtOpc, unsigned CmpOpc) const {
-  unsigned regX = I->getOperand(0).getReg();
-  unsigned regY = I->getOperand(1).getReg();
-  MachineBasicBlock *target = I->getOperand(2).getMBB();
-  BuildMI(MBB, I, I->getDebugLoc(), get(CmpOpc)).addReg(regX).addReg(regY);
-  BuildMI(MBB, I, I->getDebugLoc(), get(BtOpc)).addMBB(target);
-
-}
-
-void Mips16InstrInfo::ExpandFEXT_T8I8I16_ins(
-  MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
-  unsigned BtOpc, unsigned CmpiOpc, unsigned CmpiXOpc) const {
-  unsigned regX = I->getOperand(0).getReg();
-  int64_t imm = I->getOperand(1).getImm();
-  MachineBasicBlock *target = I->getOperand(2).getMBB();
-  unsigned CmpOpc;
-  if (isUInt<8>(imm))
-    CmpOpc = CmpiOpc;
-  else if (isUInt<16>(imm))
-    CmpOpc = CmpiXOpc;
-  else
-    llvm_unreachable("immediate field not usable");
-  BuildMI(MBB, I, I->getDebugLoc(), get(CmpOpc)).addReg(regX).addImm(imm);
-  BuildMI(MBB, I, I->getDebugLoc(), get(BtOpc)).addMBB(target);
-}
-
-void Mips16InstrInfo::ExpandFEXT_CCRX16_ins(
-  MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
-  unsigned SltOpc) const {
-  unsigned CC = I->getOperand(0).getReg();
-  unsigned regX = I->getOperand(1).getReg();
-  unsigned regY = I->getOperand(2).getReg();
-  BuildMI(MBB, I, I->getDebugLoc(), get(SltOpc)).addReg(regX).addReg(regY);
-  BuildMI(MBB, I, I->getDebugLoc(),
-          get(Mips::MoveR3216), CC).addReg(Mips::T8);
-
-}
-void Mips16InstrInfo::ExpandFEXT_CCRXI16_ins(
-  MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
-  unsigned SltiOpc, unsigned SltiXOpc) const {
-  unsigned CC = I->getOperand(0).getReg();
-  unsigned regX = I->getOperand(1).getReg();
-  int64_t Imm = I->getOperand(2).getImm();
-  unsigned SltOpc = whichOp8u_or_16simm(SltiOpc, SltiXOpc, Imm);
-  BuildMI(MBB, I, I->getDebugLoc(), get(SltOpc)).addReg(regX).addImm(Imm);
-  BuildMI(MBB, I, I->getDebugLoc(),
-          get(Mips::MoveR3216), CC).addReg(Mips::T8);
-
-}
-
 const MCInstrDesc &Mips16InstrInfo::AddiuSpImm(int64_t Imm) const {
   if (validSpImm8(Imm))
     return get(Mips::AddiuSpImm16);
@@ -521,26 +411,6 @@ void Mips16InstrInfo::BuildAddiuSpImm
   (MachineBasicBlock &MBB, MachineBasicBlock::iterator I, int64_t Imm) const {
   DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
   BuildMI(MBB, I, DL, AddiuSpImm(Imm)).addImm(Imm);
-}
-
-unsigned Mips16InstrInfo::whichOp8_or_16uimm
-  (unsigned shortOp, unsigned longOp, int64_t Imm) {
-  if (isUInt<8>(Imm))
-    return shortOp;
-  else if (isUInt<16>(Imm))
-    return longOp;
-  else
-    llvm_unreachable("immediate field not usable");
-}
-
-unsigned Mips16InstrInfo::whichOp8u_or_16simm
-  (unsigned shortOp, unsigned longOp, int64_t Imm) {
-  if (isUInt<8>(Imm))
-    return shortOp;
-  else if (isInt<16>(Imm))
-    return longOp;
-  else
-    llvm_unreachable("immediate field not usable");
 }
 
 const MipsInstrInfo *llvm::createMips16InstrInfo(MipsTargetMachine &TM) {

@@ -554,6 +554,12 @@ ARMTargetLowering::ARMTargetLowering(TargetMachine &TM)
     setOperationAction(ISD::CTPOP,      MVT::v4i16, Custom);
     setOperationAction(ISD::CTPOP,      MVT::v8i16, Custom);
 
+    // NEON only has FMA instructions as of VFP4.
+    if (!Subtarget->hasVFP4()) {
+      setOperationAction(ISD::FMA, MVT::v2f32, Expand);
+      setOperationAction(ISD::FMA, MVT::v4f32, Expand);
+    }
+
     setTargetDAGCombine(ISD::INTRINSIC_VOID);
     setTargetDAGCombine(ISD::INTRINSIC_W_CHAIN);
     setTargetDAGCombine(ISD::INTRINSIC_WO_CHAIN);
@@ -1581,7 +1587,7 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       // On ELF targets for PIC code, direct calls should go through the PLT
       unsigned OpFlags = 0;
       if (Subtarget->isTargetELF() &&
-                  getTargetMachine().getRelocationModel() == Reloc::PIC_)
+          getTargetMachine().getRelocationModel() == Reloc::PIC_)
         OpFlags = ARMII::MO_PLT;
       Callee = DAG.getTargetGlobalAddress(GV, dl, getPointerTy(), 0, OpFlags);
     }
@@ -2247,8 +2253,7 @@ SDValue ARMTargetLowering::LowerGlobalAddressELF(SDValue Op,
   EVT PtrVT = getPointerTy();
   DebugLoc dl = Op.getDebugLoc();
   const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
-  Reloc::Model RelocM = getTargetMachine().getRelocationModel();
-  if (RelocM == Reloc::PIC_) {
+  if (getTargetMachine().getRelocationModel() == Reloc::PIC_) {
     bool UseGOTOFF = GV->hasLocalLinkage() || GV->hasHiddenVisibility();
     ARMConstantPoolValue *CPV =
       ARMConstantPoolConstant::Create(GV,
@@ -2292,8 +2297,6 @@ SDValue ARMTargetLowering::LowerGlobalAddressDarwin(SDValue Op,
   DebugLoc dl = Op.getDebugLoc();
   const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
   Reloc::Model RelocM = getTargetMachine().getRelocationModel();
-  MachineFunction &MF = DAG.getMachineFunction();
-  ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
 
   // FIXME: Enable this for static codegen when tool issues are fixed.  Also
   // update ARMFastISel::ARMMaterializeGV.
@@ -2321,6 +2324,7 @@ SDValue ARMTargetLowering::LowerGlobalAddressDarwin(SDValue Op,
   if (RelocM == Reloc::Static) {
     CPAddr = DAG.getTargetConstantPool(GV, PtrVT, 4);
   } else {
+    ARMFunctionInfo *AFI = DAG.getMachineFunction().getInfo<ARMFunctionInfo>();
     ARMPCLabelIndex = AFI->createPICLabelUId();
     unsigned PCAdj = (RelocM != Reloc::PIC_) ? 0 : (Subtarget->isThumb()?4:8);
     ARMConstantPoolValue *CPV =
@@ -2401,7 +2405,6 @@ ARMTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG,
     ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
     unsigned ARMPCLabelIndex = AFI->createPICLabelUId();
     EVT PtrVT = getPointerTy();
-    DebugLoc dl = Op.getDebugLoc();
     Reloc::Model RelocM = getTargetMachine().getRelocationModel();
     SDValue CPAddr;
     unsigned PCAdj = (RelocM != Reloc::PIC_)
@@ -6329,6 +6332,7 @@ EmitSjLjDispatchBlock(MachineInstr *MI, MachineBasicBlock *MBB) const {
     MF->getOrCreateJumpTableInfo(MachineJumpTableInfo::EK_Inline);
   unsigned MJTI = JTI->createJumpTableIndex(LPadList);
   unsigned UId = AFI->createJumpTableUId();
+  Reloc::Model RelocM = getTargetMachine().getRelocationModel();
 
   // Create the MBBs for the dispatch code.
 
@@ -6338,14 +6342,11 @@ EmitSjLjDispatchBlock(MachineInstr *MI, MachineBasicBlock *MBB) const {
 
   MachineBasicBlock *TrapBB = MF->CreateMachineBasicBlock();
   unsigned trap_opcode;
-  if (Subtarget->isThumb()) {
+  if (Subtarget->isThumb())
     trap_opcode = ARM::tTRAP;
-  } else {
-    if (Subtarget->useNaClTrap())
-      trap_opcode = ARM::TRAPNaCl;
-    else
-      trap_opcode = ARM::TRAP;
-  }
+  else
+    trap_opcode = Subtarget->useNaClTrap() ? ARM::TRAPNaCl : ARM::TRAP;
+
   BuildMI(TrapBB, dl, TII->get(trap_opcode));
   DispatchBB->addSuccessor(TrapBB);
 
@@ -6492,11 +6493,14 @@ EmitSjLjDispatchBlock(MachineInstr *MI, MachineBasicBlock *MBB) const {
                    .addImm(0)
                    .addMemOperand(JTMMOLd));
 
-    unsigned NewVReg6 = MRI->createVirtualRegister(TRC);
-    AddDefaultPred(BuildMI(DispContBB, dl, TII->get(ARM::tADDrr), NewVReg6)
-                   .addReg(ARM::CPSR, RegState::Define)
-                   .addReg(NewVReg5, RegState::Kill)
-                   .addReg(NewVReg3));
+    unsigned NewVReg6 = NewVReg5;
+    if (RelocM == Reloc::PIC_) {
+      NewVReg6 = MRI->createVirtualRegister(TRC);
+      AddDefaultPred(BuildMI(DispContBB, dl, TII->get(ARM::tADDrr), NewVReg6)
+                     .addReg(ARM::CPSR, RegState::Define)
+                     .addReg(NewVReg5, RegState::Kill)
+                     .addReg(NewVReg3));
+    }
 
     BuildMI(DispContBB, dl, TII->get(ARM::tBR_JTr))
       .addReg(NewVReg6, RegState::Kill)
@@ -6576,11 +6580,18 @@ EmitSjLjDispatchBlock(MachineInstr *MI, MachineBasicBlock *MBB) const {
       .addImm(0)
       .addMemOperand(JTMMOLd));
 
-    BuildMI(DispContBB, dl, TII->get(ARM::BR_JTadd))
-      .addReg(NewVReg5, RegState::Kill)
-      .addReg(NewVReg4)
-      .addJumpTableIndex(MJTI)
-      .addImm(UId);
+    if (RelocM == Reloc::PIC_) {
+      BuildMI(DispContBB, dl, TII->get(ARM::BR_JTadd))
+        .addReg(NewVReg5, RegState::Kill)
+        .addReg(NewVReg4)
+        .addJumpTableIndex(MJTI)
+        .addImm(UId);
+    } else {
+      BuildMI(DispContBB, dl, TII->get(ARM::BR_JTr))
+        .addReg(NewVReg5, RegState::Kill)
+        .addJumpTableIndex(MJTI)
+        .addImm(UId);
+    }
   }
 
   // Add the jump table entries as successors to the MBB.

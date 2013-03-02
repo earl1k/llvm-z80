@@ -744,8 +744,15 @@ TargetLoweringBase::~TargetLoweringBase() {
   delete &TLOF;
 }
 
-MVT TargetLoweringBase::getShiftAmountTy(EVT LHSTy) const {
+MVT TargetLoweringBase::getScalarShiftAmountTy(EVT LHSTy) const {
   return MVT::getIntegerVT(8*TD->getPointerSize(0));
+}
+
+EVT TargetLoweringBase::getShiftAmountTy(EVT LHSTy) const {
+  assert(LHSTy.isInteger() && "Shift amount is not an integer type!");
+  if (LHSTy.isVector())
+    return LHSTy;
+  return getScalarShiftAmountTy(LHSTy);
 }
 
 /// canOpTrap - Returns true if the operation can trap for the value type.
@@ -903,6 +910,15 @@ void TargetLoweringBase::computeRegisterProperties() {
     RegisterTypeForVT[MVT::ppcf128] = MVT::f64;
     TransformToType[MVT::ppcf128] = MVT::f64;
     ValueTypeActions.setTypeAction(MVT::ppcf128, TypeExpandFloat);
+  }
+
+  // Decide how to handle f128. If the target does not have native f128 support,
+  // expand it to i128 and we will be generating soft float library calls.
+  if (!isTypeLegal(MVT::f128)) {
+    NumRegistersForVT[MVT::f128] = NumRegistersForVT[MVT::i128];
+    RegisterTypeForVT[MVT::f128] = RegisterTypeForVT[MVT::i128];
+    TransformToType[MVT::f128] = MVT::i128;
+    ValueTypeActions.setTypeAction(MVT::f128, TypeSoftenFloat);
   }
 
   // Decide how to handle f64. If the target does not have native f64 support,

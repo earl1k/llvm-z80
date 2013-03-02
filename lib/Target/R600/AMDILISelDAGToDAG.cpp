@@ -16,6 +16,7 @@
 #include "AMDGPURegisterInfo.h"
 #include "AMDILDevices.h"
 #include "R600InstrInfo.h"
+#include "SIISelLowering.h"
 #include "llvm/ADT/ValueMap.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
@@ -43,6 +44,7 @@ public:
 
   SDNode *Select(SDNode *N);
   virtual const char *getPassName() const;
+  virtual void PostprocessISelDAG();
 
 private:
   inline SDValue getSmallIPtrImm(unsigned Imm);
@@ -575,3 +577,21 @@ bool AMDGPUDAGToDAGISel::SelectADDRIndirect(SDValue Addr, SDValue &Base,
 
   return true;
 }
+
+void AMDGPUDAGToDAGISel::PostprocessISelDAG() {
+
+  // Go over all selected nodes and try to fold them a bit more
+  const AMDGPUTargetLowering& Lowering = ((const AMDGPUTargetLowering&)TLI);
+  for (SelectionDAG::allnodes_iterator I = CurDAG->allnodes_begin(),
+       E = CurDAG->allnodes_end(); I != E; ++I) {
+
+    MachineSDNode *Node = dyn_cast<MachineSDNode>(I);
+    if (!Node)
+      continue;
+
+    SDNode *ResNode = Lowering.PostISelFolding(Node, *CurDAG);
+    if (ResNode != Node)
+      ReplaceUses(Node, ResNode);
+  }
+}
+

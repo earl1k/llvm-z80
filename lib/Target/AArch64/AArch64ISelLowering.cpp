@@ -341,8 +341,7 @@ AArch64TargetLowering::emitAtomicBinary(MachineInstr *MI, MachineBasicBlock *BB,
   //   ldxr dest, ptr
   //   <binop> scratch, dest, incr
   //   stxr stxr_status, scratch, ptr
-  //   cmp stxr_status, #0
-  //   b.ne loopMBB
+  //   cbnz stxr_status, loopMBB
   //   fallthrough --> exitMBB
   BB = loopMBB;
   BuildMI(BB, dl, TII->get(ldrOpc), dest).addReg(ptr);
@@ -364,10 +363,8 @@ AArch64TargetLowering::emitAtomicBinary(MachineInstr *MI, MachineBasicBlock *BB,
   MRI.constrainRegClass(stxr_status, &AArch64::GPR32wspRegClass);
 
   BuildMI(BB, dl, TII->get(strOpc), stxr_status).addReg(scratch).addReg(ptr);
-  BuildMI(BB, dl, TII->get(AArch64::SUBwwi_lsl0_cmp))
-    .addReg(stxr_status).addImm(0);
-  BuildMI(BB, dl, TII->get(AArch64::Bcc))
-    .addImm(A64CC::NE).addMBB(loopMBB);
+  BuildMI(BB, dl, TII->get(AArch64::CBNZw))
+    .addReg(stxr_status).addMBB(loopMBB);
 
   BB->addSuccessor(loopMBB);
   BB->addSuccessor(exitMBB);
@@ -437,8 +434,7 @@ AArch64TargetLowering::emitAtomicBinaryMinMax(MachineInstr *MI,
   //   cmp incr, dest (, sign extend if necessary)
   //   csel scratch, dest, incr, cond
   //   stxr stxr_status, scratch, ptr
-  //   cmp stxr_status, #0
-  //   b.ne loopMBB
+  //   cbnz stxr_status, loopMBB
   //   fallthrough --> exitMBB
   BB = loopMBB;
   BuildMI(BB, dl, TII->get(ldrOpc), dest).addReg(ptr);
@@ -457,10 +453,8 @@ AArch64TargetLowering::emitAtomicBinaryMinMax(MachineInstr *MI,
 
   BuildMI(BB, dl, TII->get(strOpc), stxr_status)
     .addReg(scratch).addReg(ptr);
-  BuildMI(BB, dl, TII->get(AArch64::SUBwwi_lsl0_cmp))
-    .addReg(stxr_status).addImm(0);
-  BuildMI(BB, dl, TII->get(AArch64::Bcc))
-    .addImm(A64CC::NE).addMBB(loopMBB);
+  BuildMI(BB, dl, TII->get(AArch64::CBNZw))
+    .addReg(stxr_status).addMBB(loopMBB);
 
   BB->addSuccessor(loopMBB);
   BB->addSuccessor(exitMBB);
@@ -533,17 +527,14 @@ AArch64TargetLowering::emitAtomicCmpSwap(MachineInstr *MI,
 
   // loop2MBB:
   //   strex stxr_status, newval, [ptr]
-  //   cmp stxr_status, #0
-  //   b.ne loop1MBB
+  //   cbnz stxr_status, loop1MBB
   BB = loop2MBB;
   unsigned stxr_status = MRI.createVirtualRegister(&AArch64::GPR32RegClass);
   MRI.constrainRegClass(stxr_status, &AArch64::GPR32wspRegClass);
 
   BuildMI(BB, dl, TII->get(strOpc), stxr_status).addReg(newval).addReg(ptr);
-  BuildMI(BB, dl, TII->get(AArch64::SUBwwi_lsl0_cmp))
-    .addReg(stxr_status).addImm(0);
-  BuildMI(BB, dl, TII->get(AArch64::Bcc))
-    .addImm(A64CC::NE).addMBB(loop1MBB);
+  BuildMI(BB, dl, TII->get(AArch64::CBNZw))
+    .addReg(stxr_status).addMBB(loop1MBB);
   BB->addSuccessor(loop1MBB);
   BB->addSuccessor(exitMBB);
 
@@ -1861,11 +1852,10 @@ AArch64TargetLowering::LowerGlobalAddressELF(SDValue Op,
   const GlobalValue *GV = GN->getGlobal();
   unsigned Alignment = GV->getAlignment();
   Reloc::Model RelocM = getTargetMachine().getRelocationModel();
-
-  if (GV->isWeakForLinker() && RelocM == Reloc::Static) {
-    // Weak symbols can't use ADRP/ADD pair since they should evaluate to
-    // zero when undefined. In PIC mode the GOT can take care of this, but in
-    // absolute mode we use a constant pool load.
+  if (GV->isWeakForLinker() && GV->isDeclaration() && RelocM == Reloc::Static) {
+    // Weak undefined symbols can't use ADRP/ADD pair since they should evaluate
+    // to zero when they remain undefined. In PIC mode the GOT can take care of
+    // this, but in absolute mode we use a constant pool load.
     SDValue PoolAddr;
     PoolAddr = DAG.getNode(AArch64ISD::WrapperSmall, dl, PtrVT,
                            DAG.getTargetConstantPool(GV, PtrVT, 0, 0,
@@ -1873,10 +1863,16 @@ AArch64TargetLowering::LowerGlobalAddressELF(SDValue Op,
                            DAG.getTargetConstantPool(GV, PtrVT, 0, 0,
                                                      AArch64II::MO_LO12),
                            DAG.getConstant(8, MVT::i32));
-    return DAG.getLoad(PtrVT, dl, DAG.getEntryNode(), PoolAddr,
-                       MachinePointerInfo::getConstantPool(),
-                       /*isVolatile=*/ false,  /*isNonTemporal=*/ true,
-                       /*isInvariant=*/ true, 8);
+    SDValue GlobalAddr = DAG.getLoad(PtrVT, dl, DAG.getEntryNode(), PoolAddr,
+                                     MachinePointerInfo::getConstantPool(),
+                                     /*isVolatile=*/ false,
+                                     /*isNonTemporal=*/ true,
+                                     /*isInvariant=*/ true, 8);
+    if (GN->getOffset() != 0)
+      return DAG.getNode(ISD::ADD, dl, PtrVT, GlobalAddr,
+                         DAG.getConstant(GN->getOffset(), PtrVT));
+
+    return GlobalAddr;
   }
 
   if (Alignment == 0) {

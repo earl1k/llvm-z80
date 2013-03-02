@@ -187,12 +187,12 @@ namespace llvm {
     /// isMain - Each input file is encoded as a separate compile unit in LLVM
     /// debugging information output. However, many target specific tool chains
     /// prefer to encode only one compile unit in an object file. In this
-    /// situation, the LLVM code generator will include  debugging information
+    /// situation, the LLVM code generator will include debugging information
     /// entities in the compile unit that is marked as main compile unit. The
     /// code generator accepts maximum one main compile unit per module. If a
     /// module does not contain any main compile unit then the code generator
     /// will emit multiple compile units in the output object file.
-
+    // TODO: This can be removed when we remove the legacy debug information.
     bool isMain() const                { return getUnsignedField(6) != 0; }
     bool isOptimized() const           { return getUnsignedField(7) != 0; }
     StringRef getFlags() const       { return getStringField(8);   }
@@ -202,6 +202,8 @@ namespace llvm {
     DIArray getRetainedTypes() const;
     DIArray getSubprograms() const;
     DIArray getGlobalVariables() const;
+
+    StringRef getSplitDebugFilename() const { return getStringField(14); }
 
     /// Verify - Verify that a compile unit is well formed.
     bool Verify() const;

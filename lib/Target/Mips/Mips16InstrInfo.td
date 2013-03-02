@@ -90,6 +90,7 @@ class FEXT_CCRXI16_ins<string asmstr>:
   MipsPseudo16<(outs CPU16Regs:$cc), (ins CPU16Regs:$rx, simm16:$imm),
                !strconcat(asmstr, "\t$rx, $imm\n\tmove\t$cc, $$t8"), []> {
   let isCodeGenOnly=1;
+  let usesCustomInserter = 1;
 }
 
 // JAL and JALX instruction format
@@ -138,6 +139,7 @@ class FCCRR16_ins<string asmstr> :
   MipsPseudo16<(outs CPU16Regs:$cc), (ins CPU16Regs:$rx, CPU16Regs:$ry),
                !strconcat(asmstr, "\t$rx, $ry\n\tmove\t$cc, $$t8"), []> {
   let isCodeGenOnly=1;
+  let usesCustomInserter = 1;
 }
 
 //
@@ -225,6 +227,7 @@ class FEXT_T8I816_ins<string asmstr, string asmstr2>:
                !strconcat(asmstr2, !strconcat("\t$rx, $ry\n\t",
                !strconcat(asmstr, "\t$imm"))),[]> {
   let isCodeGenOnly=1;
+  let usesCustomInserter = 1;
 }
 
 //
@@ -236,6 +239,7 @@ class FEXT_T8I8I16_ins<string asmstr, string asmstr2>:
                !strconcat(asmstr2, !strconcat("\t$rx, $imm\n\t",
                !strconcat(asmstr, "\t$targ"))), []> {
   let isCodeGenOnly=1;
+  let usesCustomInserter = 1;
 }
 //
 
@@ -280,6 +284,11 @@ class FMULT16_LO_ins<string asmstr, InstrItinClass itin> :
 
 class FRR16_ins<bits<5> f, string asmstr, InstrItinClass itin> :
   FRR16<f, (outs CPU16Regs:$rx), (ins CPU16Regs:$ry),
+        !strconcat(asmstr, "\t$rx, $ry"), [], itin> {
+}
+
+class FRR16R_ins<bits<5> f, string asmstr, InstrItinClass itin> :
+  FRR16<f, (outs), (ins  CPU16Regs:$rx, CPU16Regs:$ry),
         !strconcat(asmstr, "\t$rx, $ry"), [], itin> {
 }
 
@@ -416,6 +425,7 @@ class SelT<string op1, string op2>:
                !strconcat(op1, "\t.+4\n\tmove $rd, $rs"))), []> {
   let isCodeGenOnly=1;
   let Constraints = "$rd = $rd_";
+  let usesCustomInserter = 1;
 }
 
 //
@@ -609,7 +619,7 @@ def BtnezT8SltiuX16: FEXT_T8I8I16_ins<"btnez", "sltiu">,
 // Purpose: Compare
 // To compare the contents of two GPRs.
 //
-def CmpRxRy16: FRR16_ins<0b01010, "cmp", IIAlu> {
+def CmpRxRy16: FRR16R_ins<0b01010, "cmp", IIAlu> {
   let Defs = [T8];
 }
 
@@ -618,7 +628,7 @@ def CmpRxRy16: FRR16_ins<0b01010, "cmp", IIAlu> {
 // Purpose: Compare Immediate
 // To compare a constant with the contents of a GPR.
 //
-def CmpiRxImm16: FRI16_ins<0b01110, "cmpi", IIAlu> {
+def CmpiRxImm16: FRI16R_ins<0b01110, "cmpi", IIAlu> {
   let Defs = [T8];
 }
 
@@ -627,7 +637,7 @@ def CmpiRxImm16: FRI16_ins<0b01110, "cmpi", IIAlu> {
 // Purpose: Compare Immediate (Extended)
 // To compare a constant with the contents of a GPR.
 //
-def CmpiRxImmX16: FEXT_RI16_ins<0b01110, "cmpi", IIAlu> {
+def CmpiRxImmX16: FEXT_RI16R_ins<0b01110, "cmpi", IIAlu> {
   let Defs = [T8];
 }
 
@@ -1109,7 +1119,7 @@ def SltiuCCRxImmX16: FEXT_CCRXI16_ins<"sltiu">;
 // Purpose: Set on Less Than
 // To record the result of a less-than comparison.
 //
-def SltRxRy16: FRR16_ins<0b00010, "slt", IIAlu>{
+def SltRxRy16: FRR16R_ins<0b00010, "slt", IIAlu>{
   let Defs = [T8];
 }
 
@@ -1119,7 +1129,7 @@ def SltCCRxRy16: FCCRR16_ins<"slt">;
 // Purpose: Set on Less Than Unsigned
 // To record the result of an unsigned less-than comparison.
 //
-def SltuRxRy16: FRR16_ins<0b00011, "sltu", IIAlu>{
+def SltuRxRy16: FRR16R_ins<0b00011, "sltu", IIAlu>{
   let Defs = [T8];
 }
 

@@ -207,13 +207,14 @@ void PPCFrameLowering::determineFrameLayout(MachineFunction &MF) const {
   // to adjust the stack pointer (we fit in the Red Zone).  For 64-bit
   // SVR4, we also require a stack frame if we need to spill the CR,
   // since this spill area is addressed relative to the stack pointer.
+  // The 32-bit SVR4 ABI has no Red Zone. However, it can still generate
+  // stackless code if all local vars are reg-allocated.
   bool DisableRedZone = MF.getFunction()->getAttributes().
     hasAttribute(AttributeSet::FunctionIndex, Attribute::NoRedZone);
-  // FIXME SVR4 The 32-bit SVR4 ABI has no red zone.  However, it can
-  // still generate stackless code if all local vars are reg-allocated.
-  // Try: (FrameSize <= 224
-  //       || (FrameSize == 0 && Subtarget.isPPC32 && Subtarget.isSVR4ABI()))
   if (!DisableRedZone &&
+      (Subtarget.isPPC64() ||                      // 32-bit SVR4, no stack-
+       !Subtarget.isSVR4ABI() ||                   //   allocated locals.
+	FrameSize == 0) &&
       FrameSize <= 224 &&                          // Fits in red zone.
       !MFI->hasVarSizedObjects() &&                // No dynamic alloca.
       !MFI->adjustsStack() &&                      // No calls.
@@ -786,7 +787,8 @@ PPCFrameLowering::processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
   PPCFunctionInfo *FI = MF.getInfo<PPCFunctionInfo>();
   unsigned LR = RegInfo->getRARegister();
   FI->setMustSaveLR(MustSaveLR(MF, LR));
-  MF.getRegInfo().setPhysRegUnused(LR);
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  MRI.setPhysRegUnused(LR);
 
   //  Save R31 if necessary
   int FPSI = FI->getFramePointerSaveIndex();
@@ -809,6 +811,16 @@ PPCFrameLowering::processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
   if (MF.getTarget().Options.GuaranteedTailCallOpt &&
       (TCSPDelta = FI->getTailCallSPDelta()) < 0) {
     MFI->CreateFixedObject(-1 * TCSPDelta, TCSPDelta, true);
+  }
+
+  // For 32-bit SVR4, allocate the nonvolatile CR spill slot iff the 
+  // function uses CR 2, 3, or 4.
+  if (!isPPC64 && !isDarwinABI && 
+      (MRI.isPhysRegUsed(PPC::CR2) ||
+       MRI.isPhysRegUsed(PPC::CR3) ||
+       MRI.isPhysRegUsed(PPC::CR4))) {
+    int FrameIdx = MFI->CreateFixedObject((uint64_t)4, (int64_t)-4, true);
+    FI->setCRSpillFrameIndex(FrameIdx);
   }
 
   // Reserve a slot closest to SP or frame pointer if we have a dynalloc or

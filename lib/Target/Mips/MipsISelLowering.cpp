@@ -1298,6 +1298,72 @@ MachineBasicBlock *MipsTargetLowering::EmitSel16(unsigned Opc, MachineInstr *MI,
   return BB;
 }
 
+MachineBasicBlock *MipsTargetLowering::EmitSelT16
+  (unsigned Opc1, unsigned Opc2,
+   MachineInstr *MI, MachineBasicBlock *BB) const {
+  if (DontExpandCondPseudos16)
+    return BB;
+  const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
+  DebugLoc dl = MI->getDebugLoc();
+  // To "insert" a SELECT_CC instruction, we actually have to insert the
+  // diamond control-flow pattern.  The incoming instruction knows the
+  // destination vreg to set, the condition code register to branch on, the
+  // true/false values to select between, and a branch opcode to use.
+  const BasicBlock *LLVM_BB = BB->getBasicBlock();
+  MachineFunction::iterator It = BB;
+  ++It;
+
+  //  thisMBB:
+  //  ...
+  //   TrueVal = ...
+  //   setcc r1, r2, r3
+  //   bNE   r1, r0, copy1MBB
+  //   fallthrough --> copy0MBB
+  MachineBasicBlock *thisMBB  = BB;
+  MachineFunction *F = BB->getParent();
+  MachineBasicBlock *copy0MBB = F->CreateMachineBasicBlock(LLVM_BB);
+  MachineBasicBlock *sinkMBB  = F->CreateMachineBasicBlock(LLVM_BB);
+  F->insert(It, copy0MBB);
+  F->insert(It, sinkMBB);
+
+  // Transfer the remainder of BB and its successor edges to sinkMBB.
+  sinkMBB->splice(sinkMBB->begin(), BB,
+                  llvm::next(MachineBasicBlock::iterator(MI)),
+                  BB->end());
+  sinkMBB->transferSuccessorsAndUpdatePHIs(BB);
+
+  // Next, add the true and fallthrough blocks as its successors.
+  BB->addSuccessor(copy0MBB);
+  BB->addSuccessor(sinkMBB);
+
+  BuildMI(BB, dl, TII->get(Opc2)).addReg(MI->getOperand(3).getReg())
+    .addReg(MI->getOperand(4).getReg());
+  BuildMI(BB, dl, TII->get(Opc1)).addMBB(sinkMBB);
+
+  //  copy0MBB:
+  //   %FalseValue = ...
+  //   # fallthrough to sinkMBB
+  BB = copy0MBB;
+
+  // Update machine-CFG edges
+  BB->addSuccessor(sinkMBB);
+
+  //  sinkMBB:
+  //   %Result = phi [ %TrueValue, thisMBB ], [ %FalseValue, copy0MBB ]
+  //  ...
+  BB = sinkMBB;
+
+  BuildMI(*BB, BB->begin(), dl,
+          TII->get(Mips::PHI), MI->getOperand(0).getReg())
+    .addReg(MI->getOperand(1).getReg()).addMBB(thisMBB)
+    .addReg(MI->getOperand(2).getReg()).addMBB(copy0MBB);
+
+  MI->eraseFromParent();   // The pseudo instruction is gone now.
+  return BB;
+
+}
+
+
 MachineBasicBlock *MipsTargetLowering::EmitSeliT16
   (unsigned Opc1, unsigned Opc2,
    MachineInstr *MI, MachineBasicBlock *BB) const {
@@ -1363,6 +1429,91 @@ MachineBasicBlock *MipsTargetLowering::EmitSeliT16
 
 }
 
+
+MachineBasicBlock
+  *MipsTargetLowering::EmitFEXT_T8I816_ins(unsigned BtOpc, unsigned CmpOpc,
+                           MachineInstr *MI,
+                           MachineBasicBlock *BB) const {
+  if (DontExpandCondPseudos16)
+    return BB;
+  const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
+  unsigned regX = MI->getOperand(0).getReg();
+  unsigned regY = MI->getOperand(1).getReg();
+  MachineBasicBlock *target = MI->getOperand(2).getMBB();
+  BuildMI(*BB, MI, MI->getDebugLoc(), TII->get(CmpOpc)).addReg(regX).addReg(regY);
+  BuildMI(*BB, MI, MI->getDebugLoc(), TII->get(BtOpc)).addMBB(target);
+  MI->eraseFromParent();   // The pseudo instruction is gone now.
+  return BB;
+}
+
+
+MachineBasicBlock *MipsTargetLowering::EmitFEXT_T8I8I16_ins(
+  unsigned BtOpc, unsigned CmpiOpc, unsigned CmpiXOpc,
+  MachineInstr *MI,  MachineBasicBlock *BB) const {
+  if (DontExpandCondPseudos16)
+    return BB;
+  const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
+  unsigned regX = MI->getOperand(0).getReg();
+  int64_t imm = MI->getOperand(1).getImm();
+  MachineBasicBlock *target = MI->getOperand(2).getMBB();
+  unsigned CmpOpc;
+  if (isUInt<8>(imm))
+    CmpOpc = CmpiOpc;
+  else if (isUInt<16>(imm))
+    CmpOpc = CmpiXOpc;
+  else
+    llvm_unreachable("immediate field not usable");
+  BuildMI(*BB, MI, MI->getDebugLoc(), TII->get(CmpOpc)).addReg(regX).addImm(imm);
+  BuildMI(*BB, MI, MI->getDebugLoc(), TII->get(BtOpc)).addMBB(target);
+  MI->eraseFromParent();   // The pseudo instruction is gone now.
+  return BB;
+}
+
+
+static unsigned Mips16WhichOp8uOr16simm
+  (unsigned shortOp, unsigned longOp, int64_t Imm) {
+  if (isUInt<8>(Imm))
+    return shortOp;
+  else if (isInt<16>(Imm))
+    return longOp;
+  else
+    llvm_unreachable("immediate field not usable");
+}
+
+MachineBasicBlock *MipsTargetLowering::EmitFEXT_CCRX16_ins(
+  unsigned SltOpc,
+  MachineInstr *MI,  MachineBasicBlock *BB) const {
+  if (DontExpandCondPseudos16)
+    return BB;
+  const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
+  unsigned CC = MI->getOperand(0).getReg();
+  unsigned regX = MI->getOperand(1).getReg();
+  unsigned regY = MI->getOperand(2).getReg();
+  BuildMI(*BB, MI, MI->getDebugLoc(),
+		  TII->get(SltOpc)).addReg(regX).addReg(regY);
+  BuildMI(*BB, MI, MI->getDebugLoc(),
+          TII->get(Mips::MoveR3216), CC).addReg(Mips::T8);
+  MI->eraseFromParent();   // The pseudo instruction is gone now.
+  return BB;
+}
+MachineBasicBlock *MipsTargetLowering::EmitFEXT_CCRXI16_ins(
+  unsigned SltiOpc, unsigned SltiXOpc,
+  MachineInstr *MI,  MachineBasicBlock *BB )const {
+  if (DontExpandCondPseudos16)
+    return BB;
+  const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
+  unsigned CC = MI->getOperand(0).getReg();
+  unsigned regX = MI->getOperand(1).getReg();
+  int64_t Imm = MI->getOperand(2).getImm();
+  unsigned SltOpc = Mips16WhichOp8uOr16simm(SltiOpc, SltiXOpc, Imm);
+  BuildMI(*BB, MI, MI->getDebugLoc(),
+          TII->get(SltOpc)).addReg(regX).addImm(Imm);
+  BuildMI(*BB, MI, MI->getDebugLoc(),
+          TII->get(Mips::MoveR3216), CC).addReg(Mips::T8);
+  MI->eraseFromParent();   // The pseudo instruction is gone now.
+  return BB;
+
+}
 MachineBasicBlock *
 MipsTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
                                                 MachineBasicBlock *BB) const {
@@ -1490,6 +1641,59 @@ MipsTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
     return EmitSeliT16(Mips::BtnezX16, Mips::SltiRxImmX16, MI, BB);
   case Mips::SelTBtneZSltiu:
     return EmitSeliT16(Mips::BtnezX16, Mips::SltiuRxImmX16, MI, BB);
+  case Mips::SelTBteqZCmp:
+    return EmitSelT16(Mips::BteqzX16, Mips::CmpRxRy16, MI, BB);
+  case Mips::SelTBteqZSlt:
+    return EmitSelT16(Mips::BteqzX16, Mips::SltRxRy16, MI, BB);
+  case Mips::SelTBteqZSltu:
+    return EmitSelT16(Mips::BteqzX16, Mips::SltuRxRy16, MI, BB);
+  case Mips::SelTBtneZCmp:
+    return EmitSelT16(Mips::BtnezX16, Mips::CmpRxRy16, MI, BB);
+  case Mips::SelTBtneZSlt:
+    return EmitSelT16(Mips::BtnezX16, Mips::SltRxRy16, MI, BB);
+  case Mips::SelTBtneZSltu:
+    return EmitSelT16(Mips::BtnezX16, Mips::SltuRxRy16, MI, BB);
+  case Mips::BteqzT8CmpX16:
+    return EmitFEXT_T8I816_ins(Mips::BteqzX16, Mips::CmpRxRy16, MI, BB);
+  case Mips::BteqzT8SltX16:
+    return EmitFEXT_T8I816_ins(Mips::BteqzX16, Mips::SltRxRy16, MI, BB);
+  case Mips::BteqzT8SltuX16:
+    // TBD: figure out a way to get this or remove the instruction
+    // altogether.
+    return EmitFEXT_T8I816_ins(Mips::BteqzX16, Mips::SltuRxRy16, MI, BB);
+  case Mips::BtnezT8CmpX16:
+    return EmitFEXT_T8I816_ins(Mips::BtnezX16, Mips::CmpRxRy16, MI, BB);
+  case Mips::BtnezT8SltX16:
+    return EmitFEXT_T8I816_ins(Mips::BtnezX16, Mips::SltRxRy16, MI, BB);
+  case Mips::BtnezT8SltuX16:
+    // TBD: figure out a way to get this or remove the instruction
+    // altogether.
+    return EmitFEXT_T8I816_ins(Mips::BtnezX16, Mips::SltuRxRy16, MI, BB);
+  case Mips::BteqzT8CmpiX16: return EmitFEXT_T8I8I16_ins(
+    Mips::BteqzX16, Mips::CmpiRxImm16, Mips::CmpiRxImmX16, MI, BB);
+  case Mips::BteqzT8SltiX16: return EmitFEXT_T8I8I16_ins(
+    Mips::BteqzX16, Mips::SltiRxImm16, Mips::SltiRxImmX16, MI, BB);
+  case Mips::BteqzT8SltiuX16: return EmitFEXT_T8I8I16_ins(
+    Mips::BteqzX16, Mips::SltiuRxImm16, Mips::SltiuRxImmX16, MI, BB);
+  case Mips::BtnezT8CmpiX16: return EmitFEXT_T8I8I16_ins(
+    Mips::BtnezX16, Mips::CmpiRxImm16, Mips::CmpiRxImmX16, MI, BB);
+  case Mips::BtnezT8SltiX16: return EmitFEXT_T8I8I16_ins(
+    Mips::BtnezX16, Mips::SltiRxImm16, Mips::SltiRxImmX16, MI, BB);
+  case Mips::BtnezT8SltiuX16: return EmitFEXT_T8I8I16_ins(
+    Mips::BtnezX16, Mips::SltiuRxImm16, Mips::SltiuRxImmX16, MI, BB);
+    break;
+  case Mips::SltCCRxRy16:
+    return EmitFEXT_CCRX16_ins(Mips::SltRxRy16, MI, BB);
+    break;
+  case Mips::SltiCCRxImmX16:
+    return EmitFEXT_CCRXI16_ins
+      (Mips::SltiRxImm16, Mips::SltiRxImmX16, MI, BB);
+  case Mips::SltiuCCRxImmX16:
+    return EmitFEXT_CCRXI16_ins
+      (Mips::SltiuRxImm16, Mips::SltiuRxImmX16, MI, BB);
+  case Mips::SltuCCRxRy16:
+    return EmitFEXT_CCRX16_ins
+      (Mips::SltuRxRy16, MI, BB);
   }
 }
 
@@ -3298,9 +3502,7 @@ MipsTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     else if (LargeGOT)
       Callee = getAddrGlobalLargeGOT(Callee, DAG, MipsII::MO_CALL_HI16,
                                      MipsII::MO_CALL_LO16);
-    else if (HasMips64)
-      Callee = getAddrGlobal(Callee, DAG, MipsII::MO_GOT_DISP);
-    else // O32 & PIC
+    else // N64 || PIC
       Callee = getAddrGlobal(Callee, DAG, MipsII::MO_GOT_CALL);
 
     GlobalOrExternal = true;

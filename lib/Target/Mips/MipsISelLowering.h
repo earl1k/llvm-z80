@@ -151,7 +151,7 @@ namespace llvm {
   public:
     explicit MipsTargetLowering(MipsTargetMachine &TM);
 
-    virtual MVT getShiftAmountTy(EVT LHSTy) const { return MVT::i32; }
+    virtual MVT getScalarShiftAmountTy(EVT LHSTy) const { return MVT::i32; }
 
     virtual bool allowsUnalignedMemoryAccesses (EVT VT, bool *Fast) const;
 
@@ -409,6 +409,22 @@ namespace llvm {
     MachineBasicBlock *EmitSeliT16(unsigned Opc1, unsigned Opc2,
                                   MachineInstr *MI,
                                   MachineBasicBlock *BB) const;
+
+    MachineBasicBlock *EmitSelT16(unsigned Opc1, unsigned Opc2,
+                                  MachineInstr *MI,
+                                  MachineBasicBlock *BB) const;
+    MachineBasicBlock *EmitFEXT_T8I816_ins(unsigned BtOpc, unsigned CmpOpc,
+                               MachineInstr *MI,
+                               MachineBasicBlock *BB) const;
+    MachineBasicBlock *EmitFEXT_T8I8I16_ins(
+      unsigned BtOpc, unsigned CmpiOpc, unsigned CmpiXOpc,
+      MachineInstr *MI,  MachineBasicBlock *BB) const;
+    MachineBasicBlock *EmitFEXT_CCRX16_ins(
+      unsigned SltOpc,
+      MachineInstr *MI,  MachineBasicBlock *BB) const;
+    MachineBasicBlock *EmitFEXT_CCRXI16_ins(
+      unsigned SltiOpc, unsigned SltiXOpc,
+      MachineInstr *MI,  MachineBasicBlock *BB )const;
 
   };
 }

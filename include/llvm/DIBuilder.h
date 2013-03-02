@@ -91,9 +91,12 @@ namespace llvm {
     ///                 by a tool analyzing generated debugging information.
     /// @param RV       This indicates runtime version for languages like 
     ///                 Objective-C.
+    /// @param SplitName The name of the file that we'll split debug info out
+    ///                  into.
     void createCompileUnit(unsigned Lang, StringRef File, StringRef Dir, 
-                           StringRef Producer,
-                           bool isOptimized, StringRef Flags, unsigned RV);
+                           StringRef Producer, bool isOptimized,
+                           StringRef Flags, unsigned RV,
+                           StringRef SplitName = StringRef());
 
     /// createFile - Create a file descriptor to hold debugging information
     /// for a file.
@@ -279,10 +282,12 @@ namespace llvm {
     /// @param Flags        Flags to encode member attribute, e.g. private
     /// @param Elements     Struct elements.
     /// @param RunTimeLang  Optional parameter, Objective-C runtime version.
-    DIType createStructType(DIDescriptor Scope, StringRef Name, DIFile File,
-                            unsigned LineNumber, uint64_t SizeInBits,
-                            uint64_t AlignInBits, unsigned Flags,
-                            DIArray Elements, unsigned RunTimeLang = 0);
+    DICompositeType createStructType(DIDescriptor Scope, StringRef Name,
+                                     DIFile File, unsigned LineNumber,
+                                     uint64_t SizeInBits, uint64_t AlignInBits,
+                                     unsigned Flags, DIType DerivedFrom,
+                                     DIArray Elements, unsigned RunTimeLang = 0,
+                                     MDNode *VTableHolder = 0);
 
     /// createUnionType - Create debugging information entry for an union.
     /// @param Scope        Scope in which this union is defined.
