@@ -284,7 +284,7 @@ let Uses = [A], Defs = [A, FLAGS] in {
   let Uses = [A, FLAGS] in
   defm SBC8 : ALUI<ALU_SBC, "sbc\t{a, $src}">;
   let Defs = [FLAGS] in
-  defm CP8  : ALUICP<ALU_CP, "cp\t{a, $src}">;
+  defm CP8  : ALUICP<ALU_CP, "cp\t{$src}">;
 }
 
 let Defs = [FLAGS] in {
