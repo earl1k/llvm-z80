@@ -194,7 +194,8 @@ let canFoldAsLoad = 1, isReMaterializable = 1 in {
     "load\t{$dst, ($src)}", [(set GR8:$dst, (load GR16:$src))]>;
   def LOAD16 : I<0x00, (outs GR16:$dst), (ins GR16:$src),
     "load\t{$dst, ($src)}", [(set GR16:$dst, (load GR16:$src))]>;
-  def LOAD16xm : PseudoI<(outs GR16:$dst), (ins xmem:$src), []>;
+  def LD16rxm : PseudoI<(outs BR16:$dst), (ins xmem:$src),
+    [(set BR16:$dst, (load xaddr:$src))]>;
   def LD8rxm : IRyI8<0x46, (outs BR8:$dst), (ins xmem:$src),
     "ld\t{$dst, ($src)}", [(set BR8:$dst, (load xaddr:$src))]>;
 }
@@ -202,7 +203,10 @@ def STORE8  : I<0x00, (outs), (ins GR16:$dst, GR8:$src),
   "store\t{($dst), $src}", [(store GR8:$src, GR16:$dst)]>;
 def STORE16 : I<0x00, (outs), (ins GR16:$dst, GR16:$src),
   "store\t{($dst), $src}", [(store GR16:$src, GR16:$dst)]>;
-def STORE16xm : PseudoI<(outs), (ins xmem:$dst, GR16:$src), []>;
+def LD16xmr : PseudoI<(outs), (ins xmem:$dst, BR16:$src),
+  [(store BR16:$src, xaddr:$dst)]>;
+def LD16xmi : PseudoI<(outs), (ins xmem:$dst, i16imm:$src),
+  [(store (i16 imm:$src), xaddr:$dst)]>;
 def LD8xmr : II8Rz<0x70, (outs), (ins xmem:$dst, BR8:$Rz),
   "ld\t{($dst), $Rz}", [(store BR8:$Rz, xaddr:$dst)]>;
 def LD8xmi : II8I8<0x36, (outs), (ins xmem:$dst, i8imm:$imm2),

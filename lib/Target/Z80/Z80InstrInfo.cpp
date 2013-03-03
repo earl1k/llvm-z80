@@ -348,7 +348,7 @@ void Z80InstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
       .addFrameIndex(FrameIndex).addImm(0)
       .addReg(SrcReg, getKillRegState(isKill));
   else if (RC == &Z80::BR16RegClass) {
-    BuildMI(MBB, MI, dl, get(Z80::STORE16xm))
+    BuildMI(MBB, MI, dl, get(Z80::LD16xmr))
       .addFrameIndex(FrameIndex).addImm(0)
       .addReg(SrcReg, getKillRegState(isKill));
   }
@@ -369,7 +369,7 @@ void Z80InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
     BuildMI(MBB, MI, dl, get(Z80::LD8rxm), DestReg)
       .addFrameIndex(FrameIndex).addImm(0);
   else if (RC == &Z80::BR16RegClass) {
-    BuildMI(MBB, MI, dl, get(Z80::LOAD16xm), DestReg)
+    BuildMI(MBB, MI, dl, get(Z80::LD16rxm), DestReg)
       .addFrameIndex(FrameIndex).addImm(0);
   }
   else
@@ -382,42 +382,68 @@ bool Z80InstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const
   MachineFunction &MF = *MBB.getParent();
   const TargetRegisterInfo &RI = *MF.getTarget().getRegisterInfo();
   DebugLoc dl = MI->getDebugLoc();
-  unsigned Opc, Reg, FPReg, Idx;
+  unsigned Opc, Reg, Imm, FPReg, Idx;
 
   switch (MI->getOpcode())
   {
   default:
     return false;
-  case Z80::STORE16xm:
+  case Z80::LD16xmr:
     Opc   = Z80::LD8xmr;
     Reg   = MI->getOperand(2).getReg();
     FPReg = MI->getOperand(0).getReg();
     Idx   = MI->getOperand(1).getImm();
     break;
-  case Z80::LOAD16xm:
+    case Z80::LD16xmi:
+    Opc   = Z80::LD8xmi;
+    Imm   = MI->getOperand(2).getImm();
+    FPReg = MI->getOperand(0).getReg();
+    Idx   = MI->getOperand(1).getImm();
+    break;
+  case Z80::LD16rxm:
     Opc   = Z80::LD8rxm;
     Reg   = MI->getOperand(0).getReg();
     FPReg = MI->getOperand(1).getReg();
     Idx   = MI->getOperand(2).getImm();
     break;
   }
-  unsigned RegLo = RI.getSubReg(Reg, Z80::subreg_lo);
-  unsigned RegHi = RI.getSubReg(Reg, Z80::subreg_hi);
+  unsigned Lo, Hi;
 
-  if (Opc == Z80::LD8xmr) {
+  if (Opc == Z80::LD8xmi) {
+    Lo = Imm & 0xFF;
+    Hi = (Imm>>8) & 0xFF;
+  }
+  else {
+    Lo = RI.getSubReg(Reg, Z80::subreg_lo);
+    Hi = RI.getSubReg(Reg, Z80::subreg_hi);
+  }
+
+  switch (Opc)
+  {
+  case Z80::LD8xmr:
     BuildMI(MBB, MI, dl, get(Opc))
       .addReg(FPReg).addImm(Idx)
-      .addReg(RegLo);
+      .addReg(Lo);
     BuildMI(MBB, MI, dl, get(Opc))
       .addReg(FPReg).addImm(Idx+1)
-      .addReg(RegHi);
-  }
-  else if (Opc == Z80::LD8rxm) {
-    BuildMI(MBB, MI, dl, get(Opc), RegLo)
+      .addReg(Hi);
+    break;
+  case Z80::LD8xmi:
+    BuildMI(MBB, MI, dl, get(Opc))
+      .addReg(FPReg).addImm(Idx)
+      .addImm(Lo);
+    BuildMI(MBB, MI, dl, get(Opc))
+      .addReg(FPReg).addImm(Idx+1)
+      .addImm(Hi);
+    break;
+  case Z80::LD8rxm:
+    BuildMI(MBB, MI, dl, get(Opc), Lo)
       .addReg(FPReg).addImm(Idx);
-    BuildMI(MBB, MI, dl, get(Opc), RegHi)
+    BuildMI(MBB, MI, dl, get(Opc), Hi)
       .addReg(FPReg).addImm(Idx+1);
+    break;
   }
+
   MI->eraseFromParent();
   return true;
 }
