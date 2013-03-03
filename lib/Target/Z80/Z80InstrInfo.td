@@ -29,8 +29,8 @@ def SDT_Z80Cp           : SDTypeProfile<0, 2, [SDTCisSameAs<0, 1>]>;
 def SDT_Z80SelectCC     : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
                                                SDTCisSameAs<1, 2>,
                                                SDTCisVT<3, i8>]>;
-def SDT_Z80BrCC         : SDTypeProfile<0, 2, [SDTCisVT<0, i8>,
-                                               SDTCisVT<1, OtherVT>]>;
+def SDT_Z80BrCC         : SDTypeProfile<0, 2, [SDTCisVT<0, OtherVT>,
+                                               SDTCisVT<1, i8>]>;
 def SDT_Z80Shift        : SDTypeProfile<1, 2, [SDTCisSameAs<0, 1>,
                                                SDTCisVT<2, i8>]>;
 //===----------------------------------------------------------------------===//
@@ -171,8 +171,8 @@ let isBranch = 1, isTerminator = 1 in {
   def JP : II16<0xC3, (outs), (ins brtarget:$dst),
     "jp\t{$dst}", [(br bb:$dst)]>;
   let Uses = [FLAGS] in
-  def JPCC : IRyI16<0xC2, (outs), (ins cc:$cc, brtarget:$dst),
-    "jp\t{$cc, $dst}", [(Z80brcc imm:$cc, bb:$dst)]>;
+  def JPCC : IRyI16<0xC2, (outs), (ins brtarget:$dst, cc:$cc),
+    "jp\t{$cc, $dst}", [(Z80brcc bb:$dst, imm:$cc)]>;
 }
 
 //===----------------------------------------------------------------------===//

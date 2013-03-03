@@ -655,7 +655,7 @@ SDValue Z80TargetLowering::LowerBrCC(SDValue Op, SelectionDAG &DAG) const
   SDValue Z80CC;
   SDValue Flag = EmitCMP(LHS, RHS, Z80CC, CC, dl, DAG);
 
-  return DAG.getNode(Z80ISD::BR_CC, dl, VT, Chain, Z80CC, Dest, Flag);
+  return DAG.getNode(Z80ISD::BR_CC, dl, VT, Chain, Dest, Z80CC, Flag);
 }
 
 SDValue Z80TargetLowering::LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const
@@ -793,8 +793,8 @@ MachineBasicBlock* Z80TargetLowering::EmitSelectInstr(MachineInstr *MI,
   MBB->addSuccessor(copy1MBB);
 
   BuildMI(MBB, dl, TII.get(Z80::JPCC))
-    .addImm(MI->getOperand(3).getImm())
-    .addMBB(copy1MBB);
+    .addMBB(copy1MBB)
+    .addImm(MI->getOperand(3).getImm());
 
   MBB = copy0MBB;
   MBB->addSuccessor(copy1MBB);
@@ -885,7 +885,7 @@ MachineBasicBlock* Z80TargetLowering::EmitShiftInstr(MachineInstr *MI,
   // JP Z,RemMBB
   BuildMI(MBB, dl, TII.get(Z80::COPY), Z80::A).addReg(AmtReg);
   BuildMI(MBB, dl, TII.get(Z80::CP8i)).addImm(0);
-  BuildMI(MBB, dl, TII.get(Z80::JPCC)).addImm(Z80::COND_Z).addMBB(RemMBB);
+  BuildMI(MBB, dl, TII.get(Z80::JPCC)).addMBB(RemMBB).addImm(Z80::COND_Z);
 
   // LoopMBB:
   // ShiftReg = phi [ %SrcReg, MBB ], [ %ShiftReg2, LoopMBB ]
@@ -939,7 +939,7 @@ MachineBasicBlock* Z80TargetLowering::EmitShiftInstr(MachineInstr *MI,
   BuildMI(LoopMBB, dl, TII.get(Z80::DEC8r), ShiftAmt2)
     .addReg(ShiftAmt);
   BuildMI(LoopMBB, dl, TII.get(Z80::JPCC))
-    .addImm(Z80::COND_NZ).addMBB(LoopMBB);
+    .addMBB(LoopMBB).addImm(Z80::COND_NZ);
 
   // RemMBB:
   // DstReg = phi [ %SrcReg, MBB ], [ %ShiftReg2, LoopMBB ]

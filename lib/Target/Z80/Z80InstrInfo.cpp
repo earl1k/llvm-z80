@@ -261,7 +261,7 @@ bool Z80InstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
 
     // Handle conditional branches.
     assert(I->getOpcode() == Z80::JPCC && "Invalid conditional branch");
-    Z80::CondCode Z80CC = static_cast<Z80::CondCode>(I->getOperand(0).getImm());
+    Z80::CondCode Z80CC = static_cast<Z80::CondCode>(I->getOperand(1).getImm());
     if (Z80CC == Z80::COND_INVALID)
       return true;
 
@@ -269,7 +269,7 @@ bool Z80InstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
     if (Cond.empty())
     {
       FBB = TBB;
-      TBB = I->getOperand(1).getMBB();
+      TBB = I->getOperand(0).getMBB();
       Cond.push_back(MachineOperand::CreateImm(Z80CC));
       continue;
     }
@@ -322,8 +322,8 @@ unsigned Z80InstrInfo::InsertBranch(MachineBasicBlock &MBB,
   // Conditional branch.
   unsigned Count = 0;
   BuildMI(&MBB, DL, get(Z80::JPCC))
-    .addImm(Cond[0].getImm())
-    .addMBB(TBB);
+    .addMBB(TBB)
+    .addImm(Cond[0].getImm());
   Count++;
 
   if (FBB)
