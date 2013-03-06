@@ -146,6 +146,11 @@ MachineInstr *Z80InstrInfo::commuteInstruction(MachineInstr *MI,
   case Z80::AND8i:
   case Z80::XOR8i:
   case Z80::OR8i:
+  case Z80::ADD8xm:
+  case Z80::ADC8xm:
+  case Z80::AND8xm:
+  case Z80::XOR8xm:
+  case Z80::OR8xm:
     return NULL;
   }
   assert(!NewMI && "Not implemented yet!");

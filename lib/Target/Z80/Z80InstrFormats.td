@@ -93,8 +93,8 @@ class IRy<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern,
 
 class IRyI8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   : IRy<opc, outs, ins, asmstr, pattern, 2> {
-  bits<8> imm;
-  let Inst{15-8} = imm;
+  bits<8> Imm;
+  let Inst{15-8} = Imm;
 }
 
 //===----------------------------------------------------------------------===//
@@ -103,8 +103,8 @@ class IRyI8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
 
 class IRyI16<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   : IRy<opc, outs, ins, asmstr, pattern, 3> {
-  bits<16> imm;
-  let Inst{23-8} = imm;
+  bits<16> Imm;
+  let Inst{23-8} = Imm;
 }
 
 //===----------------------------------------------------------------------===//
@@ -133,8 +133,8 @@ class IRz<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern,
 
 class IRzI8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   : IRz<opc, outs, ins, asmstr, pattern, 2> {
-  bits<8> imm;
-  let Inst{15-8} = imm;
+  bits<8> Imm;
+  let Inst{15-8} = Imm;
 }
 
 //===----------------------------------------------------------------------===//
@@ -153,8 +153,8 @@ class IRp<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern,
 
 class IRpI16<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   : IRp<opc, outs, ins, asmstr, pattern, 3> {
-  bits<16> imm;
-  let Inst{23-8} = imm;
+  bits<16> Imm;
+  let Inst{23-8} = Imm;
 }
 
 //===----------------------------------------------------------------------===//
@@ -163,8 +163,8 @@ class IRpI16<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
 
 class II8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern,
   int size = 2> : I<opc, outs, ins, asmstr, pattern, size> {
-  bits<8> imm;
-  let Inst{15-8} = imm;
+  bits<8> Imm;
+  let Inst{15-8} = Imm;
 }
 
 //===----------------------------------------------------------------------===//
@@ -183,8 +183,8 @@ class II8Rz<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
 
 class II8I8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   : II8<opc, outs, ins, asmstr, pattern, 3> {
-  bits<8> imm2;
-  let Inst{23-16} = imm2;
+  bits<8> Imm2;
+  let Inst{23-16} = Imm2;
 }
 
 //===----------------------------------------------------------------------===//
@@ -193,8 +193,8 @@ class II8I8<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
 
 class II16<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   : I<opc, outs, ins, asmstr, pattern, 3> {
-  bits<16> imm;
-  let Inst{23-8} = imm;
+  bits<16> Imm;
+  let Inst{23-8} = Imm;
 }
 
 //===----------------------------------------------------------------------===//
@@ -203,6 +203,6 @@ class II16<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
 
 class Irst<bits<8> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   : I<opc, outs, ins, asmstr, pattern> {
-  bits<16> imm;
-  let Inst{5-3} = imm{5-3};
+  bits<16> Imm;
+  let Inst{5-3} = Imm{5-3};
 }

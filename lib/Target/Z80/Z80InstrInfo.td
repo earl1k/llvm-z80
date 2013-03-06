@@ -209,45 +209,53 @@ def LD16xmi : PseudoI<(outs), (ins xmem:$dst, i16imm:$src),
   [(store (i16 imm:$src), xaddr:$dst)]>;
 def LD8xmr : II8Rz<0x70, (outs), (ins xmem:$dst, BR8:$Rz),
   "ld\t{($dst), $Rz}", [(store BR8:$Rz, xaddr:$dst)]>;
-def LD8xmi : II8I8<0x36, (outs), (ins xmem:$dst, i8imm:$imm2),
-  "ld\t{($dst), $imm2}", [(store (i8 imm:$imm2), xaddr:$dst)]>;
+def LD8xmi : II8I8<0x36, (outs), (ins xmem:$dst, i8imm:$Imm2),
+  "ld\t{($dst), $Imm2}", [(store (i8 imm:$Imm2), xaddr:$dst)]>;
 //===----------------------------------------------------------------------===//
 // Arithmetic Instructions
 //===----------------------------------------------------------------------===//
 
-class ALUOpType<bits<3> val, SDNode ops> {
+class ALUOpType<bits<3> val, SDNode ops, string asm> {
   field bits<3> Value = val;
   SDNode Node = ops;
+  string Asm = asm;
 }
 
-def ALU_ADD : ALUOpType<0, add>;
-def ALU_ADC : ALUOpType<1, adde>;
-def ALU_SUB : ALUOpType<2, sub>;
-def ALU_SBC : ALUOpType<3, sube>;
-def ALU_AND : ALUOpType<4, and>;
-def ALU_XOR : ALUOpType<5, xor>;
-def ALU_OR  : ALUOpType<6, or>;
-def ALU_CP  : ALUOpType<7, Z80cp>;
+def ALU_ADD : ALUOpType<0, add,   "add\ta, ">;
+def ALU_ADC : ALUOpType<1, adde,  "adc\ta, ">;
+def ALU_SUB : ALUOpType<2, sub,   "sub\t">;
+def ALU_SBC : ALUOpType<3, sube,  "sbc\ta, ">;
+def ALU_AND : ALUOpType<4, and,   "and\t">;
+def ALU_XOR : ALUOpType<5, xor,   "xor\t">;
+def ALU_OR  : ALUOpType<6, or,    "or\t">;
+def ALU_CP  : ALUOpType<7, Z80cp, "cp\t">;
 
-class ALUIr<ALUOpType alu, string asmstr, list<dag> pattern>
-  : IRz<0x80, (outs), (ins GR8:$src), asmstr, pattern> {
+class ALUIr<ALUOpType alu, list<dag> pattern>
+  : IRz<0x80, (outs), (ins GR8:$Rz), alu.Asm#"$Rz", pattern> {
   ALUOpType aluType = alu;
   let Inst{5-3} = aluType.Value;
 }
-class ALUIi<ALUOpType alu, string asmstr, list<dag> pattern>
-  : II8<0xC6, (outs), (ins i8imm:$src), asmstr, pattern> {
+class ALUIi<ALUOpType alu, list<dag> pattern>
+  : II8<0xC6, (outs), (ins i8imm:$Imm), alu.Asm#"$Imm", pattern> {
+  ALUOpType aluType = alu;
+  let Inst{5-3} = aluType.Value;
+}
+class ALUIxm<ALUOpType alu, list<dag> pattern>
+  : II8<0x86, (outs), (ins xmem:$Imm), alu.Asm#"($Imm)", pattern> {
   ALUOpType aluType = alu;
   let Inst{5-3} = aluType.Value;
 }
 
-multiclass ALUI<ALUOpType alu, string asmstr> {
-  def r : ALUIr<alu, asmstr, [(set A, (alu.Node A, GR8:$src))]>;
-  def i : ALUIi<alu, asmstr, [(set A, (alu.Node A, imm:$src))]>;
+multiclass ALUI<ALUOpType alu> {
+  def r  : ALUIr<alu, [(set A, (alu.Node A, GR8:$Rz))]>;
+  def i  : ALUIi<alu, [(set A, (alu.Node A, imm:$Imm))]>;
+  def xm : ALUIxm<alu, [(set A, (alu.Node A, (load xaddr:$Imm)))]>;
 }
 
-multiclass ALUICP<ALUOpType alu, string asmstr> {
-  def r : ALUIr<alu, asmstr, [(Z80cp A, GR8:$src)]>;
-  def i : ALUIi<alu, asmstr, [(Z80cp A, imm:$src)]>;
+multiclass ALUICP<ALUOpType alu> {
+  def r  : ALUIr<alu, [(Z80cp A, GR8:$Rz)]>;
+  def i  : ALUIi<alu, [(Z80cp A, imm:$Imm)]>;
+  def xm : ALUIxm<alu, [(Z80cp A, (load xaddr:$Imm))]>;
 }
 
 class RSOpType<bits<3> val, SDNode ops> {
@@ -277,18 +285,18 @@ multiclass RSI<RSOpType rs, string asmstr> {
 
 let Uses = [A], Defs = [A, FLAGS] in {
   let isCommutable = 1 in {
-    defm ADD8 : ALUI<ALU_ADD, "add\t{a, $src}">;
+    defm ADD8 : ALUI<ALU_ADD>;
     let Uses = [A, FLAGS] in
-    defm ADC8 : ALUI<ALU_ADC, "adc\t{a, $src}">;
-    defm AND8 : ALUI<ALU_AND, "and\t{$src}">;
-    defm XOR8 : ALUI<ALU_XOR, "xor\t{$src}">;
-    defm OR8  : ALUI<ALU_OR,  "or\t{$src}">;
+    defm ADC8 : ALUI<ALU_ADC>;
+    defm AND8 : ALUI<ALU_AND>;
+    defm XOR8 : ALUI<ALU_XOR>;
+    defm OR8  : ALUI<ALU_OR>;
   }
-  defm SUB8 : ALUI<ALU_SUB, "sub\t{$src}">;
+  defm SUB8 : ALUI<ALU_SUB>;
   let Uses = [A, FLAGS] in
-  defm SBC8 : ALUI<ALU_SBC, "sbc\t{a, $src}">;
+  defm SBC8 : ALUI<ALU_SBC>;
   let Defs = [FLAGS] in
-  defm CP8  : ALUICP<ALU_CP, "cp\t{$src}">;
+  defm CP8  : ALUICP<ALU_CP>;
 }
 
 let Defs = [FLAGS] in {
