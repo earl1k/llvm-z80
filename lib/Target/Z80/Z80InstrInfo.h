@@ -71,6 +71,8 @@ namespace llvm {
       MachineBasicBlock *TBB, MachineBasicBlock *FBB,
       const SmallVectorImpl<MachineOperand> &Cond,
       DebugLoc DL) const;
+    virtual bool ReverseBranchCondition(
+      SmallVectorImpl<MachineOperand> &Cond) const;
   }; // end class Z80InstrInfo
 } // end namespace llvm
 

@@ -335,6 +335,34 @@ unsigned Z80InstrInfo::InsertBranch(MachineBasicBlock &MBB,
   return Count;
 }
 
+bool Z80InstrInfo::ReverseBranchCondition(
+  SmallVectorImpl<MachineOperand> &Cond) const
+{
+  assert(Cond.size() == 1 && "Invalid branch condition!");
+
+  Z80::CondCode CC = static_cast<Z80::CondCode>(Cond[0].getImm());
+
+  switch (CC)
+  {
+  default: return true;
+  case Z80::COND_Z:
+    CC = Z80::COND_NZ;
+    break;
+  case Z80::COND_NZ:
+    CC = Z80::COND_Z;
+    break;
+  case Z80::COND_C:
+    CC = Z80::COND_NC;
+    break;
+  case Z80::COND_NC:
+    CC = Z80::COND_C;
+    break;
+  }
+
+  Cond[0].setImm(CC);
+  return false;
+}
+
 void Z80InstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
   MachineBasicBlock::iterator MI, unsigned SrcReg, bool isKill,
   int FrameIndex, const TargetRegisterClass *RC,

@@ -616,6 +616,12 @@ SDValue Z80TargetLowering::EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &Z80CC,
   case ISD::SETUGE:
     TCC = Z80::COND_NC;
     break;
+  case ISD::SETGT:
+    TCC = Z80::COND_P;
+    break;
+  case ISD::SETLT:
+    TCC = Z80::COND_M;
+    break;
   default: llvm_unreachable("Invalid integer condition!");
   }
   Z80CC = DAG.getConstant(TCC, MVT::i8);
