@@ -171,8 +171,8 @@ let isBranch = 1, isTerminator = 1 in {
   def JP : II16<0xC3, (outs), (ins brtarget:$dst),
     "jp\t{$dst}", [(br bb:$dst)]>;
   let Uses = [FLAGS] in
-  def JPCC : IRyI16<0xC2, (outs), (ins brtarget:$dst, cc:$cc),
-    "jp\t{$cc, $dst}", [(Z80brcc bb:$dst, imm:$cc)]>;
+  def JPCC : IRyI16<0xC2, (outs), (ins brtarget:$dst, cc:$Ry),
+    "jp\t{$Ry, $dst}", [(Z80brcc bb:$dst, imm:$Ry)]>;
 }
 
 //===----------------------------------------------------------------------===//
