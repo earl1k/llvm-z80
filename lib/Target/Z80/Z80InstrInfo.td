@@ -258,29 +258,37 @@ multiclass ALUICP<ALUOpType alu> {
   def xm : ALUIxm<alu, [(Z80cp A, (load xaddr:$Imm))]>;
 }
 
-class RSOpType<bits<3> val, SDNode ops> {
+class RSOpType<bits<3> val, SDNode ops, string asm> {
   field bits<3> Value = val;
   SDNode Node = ops;
+  string Asm = asm;
 }
 
-def RS_RLC : RSOpType<0, Z80rlc>;
-def RS_RRC : RSOpType<1, Z80rrc>;
-def RS_RL  : RSOpType<2, Z80rl>;
-def RS_RR  : RSOpType<3, Z80rr>;
-def RS_SLA : RSOpType<4, Z80sla>;
-def RS_SRA : RSOpType<5, Z80sra>;
-def RS_SLL : RSOpType<6, Z80sll>;
-def RS_SRL : RSOpType<7, Z80srl>;
+def RS_RLC : RSOpType<0, Z80rlc, "rlc">;
+def RS_RRC : RSOpType<1, Z80rrc, "rrc">;
+def RS_RL  : RSOpType<2, Z80rl,  "rl">;
+def RS_RR  : RSOpType<3, Z80rr,  "rr">;
+def RS_SLA : RSOpType<4, Z80sla, "sla">;
+def RS_SRA : RSOpType<5, Z80sra, "sra">;
+def RS_SLL : RSOpType<6, Z80sll, "sll">;
+def RS_SRL : RSOpType<7, Z80srl, "srl">;
 
-class RSIr<RSOpType rs, string asmstr>
-  : IRz<0x00, (outs GR8:$dst), (ins GR8:$src), asmstr,
+class RSIr<RSOpType rs>
+  : IRz<0x00, (outs GR8:$dst), (ins GR8:$src), rs.Asm#"\t$src",
   [(set GR8:$dst, (rs.Node GR8:$src))]>, CB {
   let Inst{5-3} = rs.Value;
   let Constraints = "$src = $dst";
 }
 
-multiclass RSI<RSOpType rs, string asmstr> {
-  def r : RSIr<rs, asmstr>;
+class RSIxm<RSOpType rs>
+  : II8<0x06, (outs), (ins xmem:$Imm), rs.Asm#"\t($Imm)",
+  [(store (rs.Node (i8 (load xaddr:$Imm))), xaddr:$Imm)]>, CB {
+  let Inst{5-3} = rs.Value;
+}
+
+multiclass RSI<RSOpType rs> {
+  def r  : RSIr<rs>;
+  def xm : RSIxm<rs>;
 }
 
 let Uses = [A], Defs = [A, FLAGS] in {
@@ -300,16 +308,16 @@ let Uses = [A], Defs = [A, FLAGS] in {
 }
 
 let Defs = [FLAGS] in {
-  defm RLC8 : RSI<RS_RLC, "rlc\t{$src}">;
-  defm RRC8 : RSI<RS_RRC, "rrc\t{$src}">;
+  defm RLC8 : RSI<RS_RLC>;
+  defm RRC8 : RSI<RS_RRC>;
   let Uses = [FLAGS] in {
-    defm RL8  : RSI<RS_RL,  "rl\t{$src}">;
-    defm RR8  : RSI<RS_RR,  "rr\t{$src}">;
+    defm RL8  : RSI<RS_RL>;
+    defm RR8  : RSI<RS_RR>;
   }
-  defm SLA8 : RSI<RS_SLA, "sla\t{$src}">;
-  defm SRA8 : RSI<RS_SRA, "sra\t{$src}">;
-  defm SLL8 : RSI<RS_SLL, "sll\t{$src}">;
-  defm SRL8 : RSI<RS_SRL, "srl\t{$src}">;
+  defm SLA8 : RSI<RS_SLA>;
+  defm SRA8 : RSI<RS_SRA>;
+  defm SLL8 : RSI<RS_SLL>;
+  defm SRL8 : RSI<RS_SRL>;
 }
 
 let Uses = [HL], Defs = [HL, FLAGS] in {
@@ -331,6 +339,12 @@ let Constraints = "$src = $dst" in {
       "inc\t{$src}", [(set GR8:$dst, (add GR8:$src, 1))]>;
     def DEC8r : IRy<0x05, (outs GR8:$dst), (ins GR8:$src),
       "dec\t{$src}", [(set GR8:$dst, (add GR8:$src, -1))]>;
+    let Constraints = "" in {
+      def INC8xm : II8<0x34, (outs), (ins xmem:$Imm),
+        "inc\t{($Imm)}", [(store (add (i8 (load xaddr:$Imm)), 1), xaddr:$Imm)]>;
+      def DEC8xm : II8<0x35, (outs), (ins xmem:$Imm),
+        "dec\t{($Imm)}", [(store (add (i8 (load xaddr:$Imm)), -1), xaddr:$Imm)]>;
+    }
   }
   def INC16r : IRp<0x03, (outs GR16:$dst), (ins GR16:$src),
     "inc\t{$src}", [(set GR16:$dst, (add GR16:$src, 1))]>;

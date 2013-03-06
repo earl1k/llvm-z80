@@ -25,6 +25,7 @@ namespace llvm {
     const MCInstrInfo &MCII;
     const MCSubtargetInfo &STI;
     MCContext &Ctx;
+    mutable uint64_t TSFlags;
   public:
     Z80MCCodeEmitter(const MCInstrInfo &mcii, const MCSubtargetInfo &sti,
       MCContext &ctx)
@@ -43,8 +44,16 @@ namespace llvm {
         Code >>= 8;
       }
     }
-    void EmitPrefix(const MCInst &MI, raw_ostream &OS) const;
-    bool hasRegPrefix(const MCInst &MI) const;
+    void EmitPrefix(raw_ostream &OS) const {
+      unsigned Prefix = Z80II::getPrefix(TSFlags);
+      while (Prefix) {
+        EmitByte(Prefix, OS);
+        Prefix = Prefix>>8;
+      }
+    }
+    bool hasRegPrefix() const {
+      return TSFlags & Z80II::RegPrefixMask;
+    }
     Z80II::Prefixes getRegPrefix(const MCInst &MI) const;
 
     // getBinaryCodeForInstr - tblgen generated function for getting the
@@ -76,16 +85,24 @@ void Z80MCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
   unsigned Opcode = MI.getOpcode();
   const MCInstrDesc &Desc = MCII.get(Opcode);
   unsigned Size = Desc.getSize();
+  TSFlags = Desc.TSFlags;
 
-  EmitPrefix(MI, OS);
+  // Move reg prefix from MCInst to TSFlags
+  Z80II::setRegPrefix(TSFlags, getRegPrefix(MI));
+
+  EmitPrefix(OS);
   uint64_t Bits = getBinaryCodeForInstr(MI, Fixups);
 
-  EmitInstruction(Bits, Size, OS);
-}
+  switch (TSFlags & Z80II::PrefixMask)
+  {
+  default: break;
+  case Z80II::DDCB:
+  case Z80II::FDCB:
+    Bits = ByteSwap_16(Bits);
+    break;
+  }
 
-bool Z80MCCodeEmitter::hasRegPrefix(const MCInst &MI) const
-{
-  return getRegPrefix(MI) != Z80II::NoPrefix;
+  EmitInstruction(Bits, Size, OS);
 }
 
 Z80II::Prefixes Z80MCCodeEmitter::getRegPrefix(const MCInst &MI) const
@@ -112,21 +129,6 @@ Z80II::Prefixes Z80MCCodeEmitter::getRegPrefix(const MCInst &MI) const
   return Z80II::NoPrefix;
 }
 
-void Z80MCCodeEmitter::EmitPrefix(const MCInst &MI, raw_ostream &OS) const
-{
-  const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
-  uint64_t TSFlags = Desc.TSFlags;
-
-  Z80II::setRegPrefix(TSFlags, getRegPrefix(MI));
-  unsigned Prefix = Z80II::getPrefix(TSFlags);
-
-  while (Prefix)
-  {
-    EmitByte(Prefix, OS);
-    Prefix = Prefix>>8;
-  }
-}
-
 unsigned Z80MCCodeEmitter::getMachineOpValue(const MCInst &MI,
   const MCOperand &MO, SmallVectorImpl<MCFixup> &Fixups) const
 {
@@ -142,7 +144,7 @@ unsigned Z80MCCodeEmitter::getMachineOpValue(const MCInst &MI,
   }
   else if (MO.isExpr())
   {
-    if (hasRegPrefix(MI))
+    if (hasRegPrefix())
       Fixups.push_back(MCFixup::Create(2, MO.getExpr(), FK_Data_2));
     else
       Fixups.push_back(MCFixup::Create(1, MO.getExpr(), FK_Data_2));

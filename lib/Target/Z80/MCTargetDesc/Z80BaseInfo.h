@@ -24,6 +24,7 @@ namespace llvm {
       NoPrefix = 0,
       DD = 1,
       FD = 2,
+      RegPrefixMask = 3,
       ED = 3,
       CB = 4,
       DDCB = 5,
