@@ -95,7 +95,7 @@ void Z80FrameLowering::emitEpilogue(MachineFunction &MF,
     MBBI--;
   }
 
-  if (NumBytes || Z80FI->isNeedFP())
+  if (NumBytes)
   {
     unsigned FP = TII.getRegisterInfo().getFrameRegister(MF);
 
