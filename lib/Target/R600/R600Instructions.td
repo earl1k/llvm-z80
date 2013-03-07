@@ -512,8 +512,8 @@ def INTERP_PAIR_ZW :  AMDGPUShaderInst <
   []>;
 
 def CONST_ADDRESS: SDNode<"AMDGPUISD::CONST_ADDRESS",
-  SDTypeProfile<1, 1, [SDTCisInt<0>, SDTCisPtrTy<1>]>,
-  [SDNPMayLoad]
+  SDTypeProfile<1, -1, [SDTCisInt<0>, SDTCisPtrTy<1>]>,
+  [SDNPVariadic]
 >;
 
 //===----------------------------------------------------------------------===//
@@ -1090,12 +1090,12 @@ class COS_Common <bits<11> inst> : R600_1OP <
 multiclass DIV_Common <InstR600 recip_ieee> {
 def : Pat<
   (int_AMDGPU_div R600_Reg32:$src0, R600_Reg32:$src1),
-  (MUL R600_Reg32:$src0, (recip_ieee R600_Reg32:$src1))
+  (MUL_IEEE R600_Reg32:$src0, (recip_ieee R600_Reg32:$src1))
 >;
 
 def : Pat<
   (fdiv R600_Reg32:$src0, R600_Reg32:$src1),
-  (MUL R600_Reg32:$src0, (recip_ieee R600_Reg32:$src1))
+  (MUL_IEEE R600_Reg32:$src0, (recip_ieee R600_Reg32:$src1))
 >;
 }
 
@@ -1169,12 +1169,12 @@ let Predicates = [isR600] in {
 // cards.
 class COS_PAT <InstR600 trig> : Pat<
   (fcos R600_Reg32:$src),
-  (trig (MUL (MOV_IMM_I32 CONST.TWO_PI_INV), R600_Reg32:$src))
+  (trig (MUL_IEEE (MOV_IMM_I32 CONST.TWO_PI_INV), R600_Reg32:$src))
 >;
 
 class SIN_PAT <InstR600 trig> : Pat<
   (fsin R600_Reg32:$src),
-  (trig (MUL (MOV_IMM_I32 CONST.TWO_PI_INV), R600_Reg32:$src))
+  (trig (MUL_IEEE (MOV_IMM_I32 CONST.TWO_PI_INV), R600_Reg32:$src))
 >;
 
 //===----------------------------------------------------------------------===//
@@ -1650,27 +1650,27 @@ let isTerminator = 1, isReturn = 1, isBarrier = 1, hasCtrlDep = 1,
 // Constant Buffer Addressing Support
 //===----------------------------------------------------------------------===//
 
-let isCodeGenOnly = 1, isPseudo = 1, Namespace = "AMDGPU"  in {
+let usesCustomInserter = 1, isCodeGenOnly = 1, isPseudo = 1, Namespace = "AMDGPU"  in {
 def CONST_COPY : Instruction {
   let OutOperandList = (outs R600_Reg32:$dst);
   let InOperandList = (ins i32imm:$src);
-  let Pattern = [(set R600_Reg32:$dst, (CONST_ADDRESS ADDRGA_CONST_OFFSET:$src))];
+  let Pattern =
+      [(set R600_Reg32:$dst, (CONST_ADDRESS ADDRGA_CONST_OFFSET:$src))];
   let AsmString = "CONST_COPY";
   let neverHasSideEffects = 1;
   let isAsCheapAsAMove = 1;
   let Itinerary = NullALU;
 }
-} // end isCodeGenOnly = 1, isPseudo = 1, Namespace = "AMDGPU"
+} // end usesCustomInserter = 1, isCodeGenOnly = 1, isPseudo = 1, Namespace = "AMDGPU"
 
 def TEX_VTX_CONSTBUF :
-  InstR600ISA <(outs R600_Reg128:$dst), (ins MEMxi:$ptr), "VTX_READ_eg $dst, $ptr",
-      [(set R600_Reg128:$dst, (CONST_ADDRESS ADDRGA_VAR_OFFSET:$ptr))]>,
+  InstR600ISA <(outs R600_Reg128:$dst), (ins MEMxi:$ptr, i32imm:$BUFFER_ID), "VTX_READ_eg $dst, $ptr",
+      [(set R600_Reg128:$dst, (CONST_ADDRESS ADDRGA_VAR_OFFSET:$ptr, (i32 imm:$BUFFER_ID)))]>,
   VTX_WORD1_GPR, VTX_WORD0 {
 
   let VC_INST = 0;
   let FETCH_TYPE = 2;
   let FETCH_WHOLE_QUAD = 0;
-  let BUFFER_ID = 0;
   let SRC_REL = 0;
   let SRC_SEL_X = 0;
   let DST_REL = 0;

@@ -1416,9 +1416,8 @@ static inline Constant *getFoldedCast(
 
   LLVMContextImpl *pImpl = Ty->getContext().pImpl;
 
-  // Look up the constant in the table first to ensure uniqueness
-  std::vector<Constant*> argVec(1, C);
-  ExprMapKeyType Key(opc, argVec);
+  // Look up the constant in the table first to ensure uniqueness.
+  ExprMapKeyType Key(opc, C);
 
   return pImpl->ExprConstants.getOrCreate(Ty, Key);
 }

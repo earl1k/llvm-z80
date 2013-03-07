@@ -14,10 +14,13 @@
 
 #include "SIISelLowering.h"
 #include "AMDIL.h"
+#include "AMDGPU.h"
 #include "AMDILIntrinsicInfo.h"
 #include "SIInstrInfo.h"
 #include "SIMachineFunctionInfo.h"
 #include "SIRegisterInfo.h"
+#include "llvm/IR/Function.h"
+#include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
@@ -28,29 +31,35 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
     AMDGPUTargetLowering(TM),
     TII(static_cast<const SIInstrInfo*>(TM.getInstrInfo())),
     TRI(TM.getRegisterInfo()) {
-  addRegisterClass(MVT::v4f32, &AMDGPU::VReg_128RegClass);
-  addRegisterClass(MVT::f32, &AMDGPU::VReg_32RegClass);
-  addRegisterClass(MVT::i32, &AMDGPU::VReg_32RegClass);
-  addRegisterClass(MVT::i64, &AMDGPU::SReg_64RegClass);
+
   addRegisterClass(MVT::i1, &AMDGPU::SReg_64RegClass);
+  addRegisterClass(MVT::i64, &AMDGPU::SReg_64RegClass);
+
+  addRegisterClass(MVT::v16i8, &AMDGPU::SReg_128RegClass);
+  addRegisterClass(MVT::v32i8, &AMDGPU::SReg_256RegClass);
+  addRegisterClass(MVT::v64i8, &AMDGPU::SReg_512RegClass);
+
+  addRegisterClass(MVT::i32, &AMDGPU::VReg_32RegClass);
+  addRegisterClass(MVT::f32, &AMDGPU::VReg_32RegClass);
 
   addRegisterClass(MVT::v1i32, &AMDGPU::VReg_32RegClass);
+
   addRegisterClass(MVT::v2i32, &AMDGPU::VReg_64RegClass);
+  addRegisterClass(MVT::v2f32, &AMDGPU::VReg_64RegClass);
+
   addRegisterClass(MVT::v4i32, &AMDGPU::VReg_128RegClass);
+  addRegisterClass(MVT::v4f32, &AMDGPU::VReg_128RegClass);
+
   addRegisterClass(MVT::v8i32, &AMDGPU::VReg_256RegClass);
+  addRegisterClass(MVT::v8f32, &AMDGPU::VReg_256RegClass);
+
   addRegisterClass(MVT::v16i32, &AMDGPU::VReg_512RegClass);
+  addRegisterClass(MVT::v16f32, &AMDGPU::VReg_512RegClass);
 
   computeRegisterProperties();
 
   setOperationAction(ISD::ADD, MVT::i64, Legal);
   setOperationAction(ISD::ADD, MVT::i32, Legal);
-
-  setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
-
-  // We need to custom lower loads from the USER_SGPR address space, so we can
-  // add the SGPRs as livein registers.
-  setOperationAction(ISD::LOAD, MVT::i32, Custom);
-  setOperationAction(ISD::LOAD, MVT::i64, Custom);
 
   setOperationAction(ISD::SELECT_CC, MVT::f32, Custom);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
@@ -59,6 +68,135 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
   setTargetDAGCombine(ISD::SELECT_CC);
 
   setTargetDAGCombine(ISD::SETCC);
+}
+
+SDValue SITargetLowering::LowerFormalArguments(
+                                      SDValue Chain,
+                                      CallingConv::ID CallConv,
+                                      bool isVarArg,
+                                      const SmallVectorImpl<ISD::InputArg> &Ins,
+                                      DebugLoc DL, SelectionDAG &DAG,
+                                      SmallVectorImpl<SDValue> &InVals) const {
+
+  const TargetRegisterInfo *TRI = getTargetMachine().getRegisterInfo();
+
+  MachineFunction &MF = DAG.getMachineFunction();
+  FunctionType *FType = MF.getFunction()->getFunctionType();
+  SIMachineFunctionInfo *Info = MF.getInfo<SIMachineFunctionInfo>();
+
+  assert(CallConv == CallingConv::C);
+
+  SmallVector<ISD::InputArg, 16> Splits;
+  uint32_t Skipped = 0;
+
+  for (unsigned i = 0, e = Ins.size(), PSInputNum = 0; i != e; ++i) {
+    const ISD::InputArg &Arg = Ins[i];
+   
+    // First check if it's a PS input addr 
+    if (Info->ShaderType == ShaderType::PIXEL && !Arg.Flags.isInReg()) {
+
+      assert((PSInputNum <= 15) && "Too many PS inputs!");
+
+      if (!Arg.Used) {
+        // We can savely skip PS inputs
+        Skipped |= 1 << i;
+        ++PSInputNum;
+        continue;
+      }
+
+      Info->PSInputAddr |= 1 << PSInputNum++;
+    }
+
+    // Second split vertices into their elements
+    if (Arg.VT.isVector()) {
+      ISD::InputArg NewArg = Arg;
+      NewArg.Flags.setSplit();
+      NewArg.VT = Arg.VT.getVectorElementType();
+
+      // We REALLY want the ORIGINAL number of vertex elements here, e.g. a
+      // three or five element vertex only needs three or five registers,
+      // NOT four or eigth.
+      Type *ParamType = FType->getParamType(Arg.OrigArgIndex);
+      unsigned NumElements = ParamType->getVectorNumElements();
+
+      for (unsigned j = 0; j != NumElements; ++j) {
+        Splits.push_back(NewArg);
+        NewArg.PartOffset += NewArg.VT.getStoreSize();
+      }
+
+    } else {
+      Splits.push_back(Arg);
+    }
+  }
+
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(),
+                 getTargetMachine(), ArgLocs, *DAG.getContext());
+
+  // At least one interpolation mode must be enabled or else the GPU will hang.
+  if (Info->ShaderType == ShaderType::PIXEL && (Info->PSInputAddr & 0x7F) == 0) {
+    Info->PSInputAddr |= 1;
+    CCInfo.AllocateReg(AMDGPU::VGPR0);
+    CCInfo.AllocateReg(AMDGPU::VGPR1);
+  }
+
+  AnalyzeFormalArguments(CCInfo, Splits);
+
+  for (unsigned i = 0, e = Ins.size(), ArgIdx = 0; i != e; ++i) {
+
+    if (Skipped & (1 << i)) {
+      InVals.push_back(SDValue());
+      continue;
+    }
+
+    CCValAssign &VA = ArgLocs[ArgIdx++];
+    assert(VA.isRegLoc() && "Parameter must be in a register!");
+
+    unsigned Reg = VA.getLocReg();
+    MVT VT = VA.getLocVT();
+
+    if (VT == MVT::i64) {
+      // For now assume it is a pointer
+      Reg = TRI->getMatchingSuperReg(Reg, AMDGPU::sub0,
+                                     &AMDGPU::SReg_64RegClass);
+      Reg = MF.addLiveIn(Reg, &AMDGPU::SReg_64RegClass);
+      InVals.push_back(DAG.getCopyFromReg(Chain, DL, Reg, VT));
+      continue;
+    }
+
+    const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(Reg, VT);
+
+    Reg = MF.addLiveIn(Reg, RC);
+    SDValue Val = DAG.getCopyFromReg(Chain, DL, Reg, VT);
+
+    const ISD::InputArg &Arg = Ins[i];
+    if (Arg.VT.isVector()) {
+
+      // Build a vector from the registers
+      Type *ParamType = FType->getParamType(Arg.OrigArgIndex);
+      unsigned NumElements = ParamType->getVectorNumElements();
+
+      SmallVector<SDValue, 4> Regs;
+      Regs.push_back(Val);
+      for (unsigned j = 1; j != NumElements; ++j) {
+        Reg = ArgLocs[ArgIdx++].getLocReg();
+        Reg = MF.addLiveIn(Reg, RC);
+        Regs.push_back(DAG.getCopyFromReg(Chain, DL, Reg, VT));
+      }
+
+      // Fill up the missing vector elements
+      NumElements = Arg.VT.getVectorNumElements() - NumElements;
+      for (unsigned j = 0; j != NumElements; ++j)
+        Regs.push_back(DAG.getUNDEF(VT));
+ 
+      InVals.push_back(DAG.getNode(ISD::BUILD_VECTOR, DL, Arg.VT,
+                                   Regs.data(), Regs.size()));
+      continue;
+    }
+
+    InVals.push_back(Val);
+  }
+  return Chain;
 }
 
 MachineBasicBlock * SITargetLowering::EmitInstrWithCustomInserter(
@@ -70,15 +208,6 @@ MachineBasicBlock * SITargetLowering::EmitInstrWithCustomInserter(
   default:
     return AMDGPUTargetLowering::EmitInstrWithCustomInserter(MI, BB);
   case AMDGPU::BRANCH: return BB;
-  case AMDGPU::SHADER_TYPE:
-    BB->getParent()->getInfo<SIMachineFunctionInfo>()->ShaderType =
-                                        MI->getOperand(0).getImm();
-    MI->eraseFromParent();
-    break;
-
-  case AMDGPU::SI_INTERP:
-    LowerSI_INTERP(MI, *BB, I, MRI);
-    break;
   case AMDGPU::SI_WQM:
     LowerSI_WQM(MI, *BB, I, MRI);
     break;
@@ -90,37 +219,6 @@ void SITargetLowering::LowerSI_WQM(MachineInstr *MI, MachineBasicBlock &BB,
     MachineBasicBlock::iterator I, MachineRegisterInfo & MRI) const {
   BuildMI(BB, I, BB.findDebugLoc(I), TII->get(AMDGPU::S_WQM_B64), AMDGPU::EXEC)
           .addReg(AMDGPU::EXEC);
-
-  MI->eraseFromParent();
-}
-
-void SITargetLowering::LowerSI_INTERP(MachineInstr *MI, MachineBasicBlock &BB,
-    MachineBasicBlock::iterator I, MachineRegisterInfo & MRI) const {
-  unsigned tmp = MRI.createVirtualRegister(&AMDGPU::VReg_32RegClass);
-  unsigned M0 = MRI.createVirtualRegister(&AMDGPU::M0RegRegClass);
-  MachineOperand dst = MI->getOperand(0);
-  MachineOperand iReg = MI->getOperand(1);
-  MachineOperand jReg = MI->getOperand(2);
-  MachineOperand attr_chan = MI->getOperand(3);
-  MachineOperand attr = MI->getOperand(4);
-  MachineOperand params = MI->getOperand(5);
-
-  BuildMI(BB, I, BB.findDebugLoc(I), TII->get(AMDGPU::S_MOV_B32), M0)
-          .addOperand(params);
-
-  BuildMI(BB, I, BB.findDebugLoc(I), TII->get(AMDGPU::V_INTERP_P1_F32), tmp)
-          .addOperand(iReg)
-          .addOperand(attr_chan)
-          .addOperand(attr)
-          .addReg(M0);
-
-  BuildMI(BB, I, BB.findDebugLoc(I), TII->get(AMDGPU::V_INTERP_P2_F32))
-          .addOperand(dst)
-          .addReg(tmp)
-          .addOperand(jReg)
-          .addOperand(attr_chan)
-          .addOperand(attr)
-          .addReg(M0);
 
   MI->eraseFromParent();
 }
@@ -137,20 +235,7 @@ SDValue SITargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   default: return AMDGPUTargetLowering::LowerOperation(Op, DAG);
   case ISD::BRCOND: return LowerBRCOND(Op, DAG);
-  case ISD::LOAD: return LowerLOAD(Op, DAG);
   case ISD::SELECT_CC: return LowerSELECT_CC(Op, DAG);
-  case ISD::INTRINSIC_WO_CHAIN: {
-    unsigned IntrinsicID =
-                         cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
-    EVT VT = Op.getValueType();
-    switch (IntrinsicID) {
-    case AMDGPUIntrinsic::SI_vs_load_buffer_index:
-      return CreateLiveInRegister(DAG, &AMDGPU::VReg_32RegClass,
-                                  AMDGPU::VGPR0, VT);
-    default: return AMDGPUTargetLowering::LowerOperation(Op, DAG);
-    }
-    break;
-  }
   }
   return SDValue();
 }
@@ -247,47 +332,6 @@ SDValue SITargetLowering::LowerBRCOND(SDValue BRCOND,
     Intr->getOperand(0));
 
   return Chain;
-}
-
-SDValue SITargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
-  EVT VT = Op.getValueType();
-  LoadSDNode *Ptr = dyn_cast<LoadSDNode>(Op);
-
-  assert(Ptr);
-
-  unsigned AddrSpace = Ptr->getPointerInfo().getAddrSpace();
-
-  // We only need to lower USER_SGPR address space loads
-  if (AddrSpace != AMDGPUAS::USER_SGPR_ADDRESS) {
-    return SDValue();
-  }
-
-  // Loads from the USER_SGPR address space can only have constant value
-  // pointers.
-  ConstantSDNode *BasePtr = dyn_cast<ConstantSDNode>(Ptr->getBasePtr());
-  assert(BasePtr);
-
-  unsigned TypeDwordWidth = VT.getSizeInBits() / 32;
-  const TargetRegisterClass * dstClass;
-  switch (TypeDwordWidth) {
-    default:
-      assert(!"USER_SGPR value size not implemented");
-      return SDValue();
-    case 1:
-      dstClass = &AMDGPU::SReg_32RegClass;
-      break;
-    case 2:
-      dstClass = &AMDGPU::SReg_64RegClass;
-      break;
-  }
-  uint64_t Index = BasePtr->getZExtValue();
-  assert(Index % TypeDwordWidth == 0 && "USER_SGPR not properly aligned");
-  unsigned SGPRIndex = Index / TypeDwordWidth;
-  unsigned Reg = dstClass->getRegister(SGPRIndex);
-
-  DAG.ReplaceAllUsesOfValueWith(Op, CreateLiveInRegister(DAG, dstClass, Reg,
-                                                         VT));
-  return SDValue();
 }
 
 SDValue SITargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {

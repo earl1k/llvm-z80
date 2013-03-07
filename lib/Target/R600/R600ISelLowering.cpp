@@ -105,7 +105,6 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
 
   switch (MI->getOpcode()) {
   default: return AMDGPUTargetLowering::EmitInstrWithCustomInserter(MI, BB);
-  case AMDGPU::SHADER_TYPE: break;
   case AMDGPU::CLAMP_R600: {
     MachineInstr *NewMI = TII->buildDefaultInstruction(*BB, I,
                                                    AMDGPU::MOV,
@@ -150,7 +149,13 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
     TII->buildMovImm(*BB, I, MI->getOperand(0).getReg(),
                      MI->getOperand(1).getImm());
     break;
-
+  case AMDGPU::CONST_COPY: {
+    MachineInstr *NewMI = TII->buildDefaultInstruction(*BB, MI, AMDGPU::MOV,
+        MI->getOperand(0).getReg(), AMDGPU::ALU_CONST);
+    TII->setImmOperand(NewMI, R600Operands::SRC0_SEL,
+        MI->getOperand(1).getImm());
+    break;
+  }
 
   case AMDGPU::RAT_WRITE_CACHELESS_32_eg:
   case AMDGPU::RAT_WRITE_CACHELESS_128_eg: {
@@ -918,7 +923,8 @@ SDValue R600TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const
   if (ConstantBlock > -1) {
     SDValue Result;
     if (dyn_cast<ConstantExpr>(LoadNode->getSrcValue()) ||
-        dyn_cast<Constant>(LoadNode->getSrcValue())) {
+        dyn_cast<Constant>(LoadNode->getSrcValue()) ||
+        dyn_cast<ConstantSDNode>(Ptr)) {
       SDValue Slots[4];
       for (unsigned i = 0; i < 4; i++) {
         // We want Const position encoded with the following formula :
@@ -934,7 +940,9 @@ SDValue R600TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const
     } else {
       // non constant ptr cant be folded, keeps it as a v4f32 load
       Result = DAG.getNode(AMDGPUISD::CONST_ADDRESS, DL, MVT::v4i32,
-          DAG.getNode(ISD::SRL, DL, MVT::i32, Ptr, DAG.getConstant(4, MVT::i32))
+          DAG.getNode(ISD::SRL, DL, MVT::i32, Ptr, DAG.getConstant(4, MVT::i32)),
+          DAG.getConstant(LoadNode->getAddressSpace() -
+	                  AMDGPUAS::CONSTANT_BUFFER_0, MVT::i32)
           );
     }
 

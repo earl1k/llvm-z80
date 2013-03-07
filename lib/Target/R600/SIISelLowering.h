@@ -24,14 +24,9 @@ class SITargetLowering : public AMDGPUTargetLowering {
   const SIInstrInfo * TII;
   const TargetRegisterInfo * TRI;
 
-  void LowerMOV_IMM(MachineInstr *MI, MachineBasicBlock &BB,
-              MachineBasicBlock::iterator I, unsigned Opocde) const;
-  void LowerSI_INTERP(MachineInstr *MI, MachineBasicBlock &BB,
-              MachineBasicBlock::iterator I, MachineRegisterInfo & MRI) const;
   void LowerSI_WQM(MachineInstr *MI, MachineBasicBlock &BB,
               MachineBasicBlock::iterator I, MachineRegisterInfo & MRI) const;
 
-  SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
 
@@ -43,6 +38,13 @@ class SITargetLowering : public AMDGPUTargetLowering {
 
 public:
   SITargetLowering(TargetMachine &tm);
+
+  SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
+                               bool isVarArg,
+                               const SmallVectorImpl<ISD::InputArg> &Ins,
+                               DebugLoc DL, SelectionDAG &DAG,
+                               SmallVectorImpl<SDValue> &InVals) const;
+
   virtual MachineBasicBlock * EmitInstrWithCustomInserter(MachineInstr * MI,
                                               MachineBasicBlock * BB) const;
   virtual EVT getSetCCResultType(EVT VT) const;
