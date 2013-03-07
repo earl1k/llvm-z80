@@ -20,11 +20,11 @@ namespace llvm {
   class Z80MachineFunctionInfo : public MachineFunctionInfo {
     virtual void anchor();
 
-    // CalleeSavedFrameSize - Size of the callee-saved register portion of the
-    // stack frame in bytes.
-
     // needFP - Flag which indicate to use FP
     bool needFP;
+
+    // CalleeSavedFrameSize - Size of the callee-saved register portion of the
+    // stack frame in bytes.
     unsigned CalleeSavedFrameSize;
   public:
     explicit Z80MachineFunctionInfo(MachineFunction &MF)
