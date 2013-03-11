@@ -46,12 +46,14 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
   setOperationAction(ISD::ZERO_EXTEND, MVT::i16, Custom);
   setOperationAction(ISD::SIGN_EXTEND, MVT::i16, Custom);
 
-  setOperationAction(ISD::SRL, MVT::i8, Custom);
-  setOperationAction(ISD::SHL, MVT::i8, Custom);
-  setOperationAction(ISD::SRA, MVT::i8, Custom);
-  setOperationAction(ISD::SRL, MVT::i16, Custom);
-  setOperationAction(ISD::SHL, MVT::i16, Custom);
-  setOperationAction(ISD::SRA, MVT::i16, Custom);
+  setOperationAction(ISD::SRL,  MVT::i8, Custom);
+  setOperationAction(ISD::SHL,  MVT::i8, Custom);
+  setOperationAction(ISD::SRA,  MVT::i8, Custom);
+  setOperationAction(ISD::ROTL, MVT::i8, Custom);
+  setOperationAction(ISD::ROTR, MVT::i8, Custom);
+  setOperationAction(ISD::SRL,  MVT::i16, Custom);
+  setOperationAction(ISD::SHL,  MVT::i16, Custom);
+  setOperationAction(ISD::SRA,  MVT::i16, Custom);
 
   setOperationAction(ISD::SUB,  MVT::i16, Custom);
   setOperationAction(ISD::SUBC, MVT::i16, Custom);
@@ -386,7 +388,9 @@ SDValue Z80TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const
   case ISD::SUBC:          return LowerSUB(Op, DAG);
   case ISD::SRL:
   case ISD::SHL:
-  case ISD::SRA:           return LowerShifts(Op, DAG);
+  case ISD::SRA:
+  case ISD::ROTL:
+  case ISD::ROTR:          return LowerShifts(Op, DAG);
   case ISD::AND:
   case ISD::OR:
   case ISD::XOR:           return LowerBinaryOp(Op, DAG);
@@ -521,6 +525,12 @@ SDValue Z80TargetLowering::LowerShifts(SDValue Op, SelectionDAG &DAG) const
   case ISD::SRA:
     Opc = Z80ISD::SRA;
     break;
+  case ISD::ROTL:
+    Opc = Z80ISD::RLC;
+    break;
+  case ISD::ROTR:
+    Opc = Z80ISD::RRC;
+    break;
   }
 
   if (VT == MVT::i16)
@@ -536,11 +546,12 @@ SDValue Z80TargetLowering::LowerShifts(SDValue Op, SelectionDAG &DAG) const
         Flag = LO.getValue(1);
         HI = DAG.getNode(Z80ISD::RL, dl, HalfVT, HI, Flag);
       }
-      else {
+      else if (Opc == Z80ISD::SRL || Opc == Z80ISD::SRA) {
         HI = DAG.getNode(Opc, dl, VTs, HI);
         Flag = HI.getValue(1);
         LO = DAG.getNode(Z80ISD::RR, dl, HalfVT, LO, Flag);
       }
+      else llvm_unreachable("Unsupported shift");
     }
     Victim = DAG.getTargetInsertSubreg(Z80::subreg_lo, dl, VT, DAG.getUNDEF(VT), LO);
     Victim = DAG.getTargetInsertSubreg(Z80::subreg_hi, dl, VT, Victim, HI);
