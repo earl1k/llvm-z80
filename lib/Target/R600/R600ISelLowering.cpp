@@ -50,8 +50,8 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::UREM, MVT::v4i32, Expand);
   setOperationAction(ISD::SETCC, MVT::v4i32, Expand);
 
-  setOperationAction(ISD::BR_CC, MVT::i32, Custom);
-  setOperationAction(ISD::BR_CC, MVT::f32, Custom);
+  setOperationAction(ISD::BR_CC, MVT::i32, Expand);
+  setOperationAction(ISD::BR_CC, MVT::f32, Expand);
 
   setOperationAction(ISD::FSUB, MVT::f32, Expand);
 
@@ -65,8 +65,8 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::SELECT_CC, MVT::f32, Custom);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
 
-  setOperationAction(ISD::SETCC, MVT::i32, Custom);
-  setOperationAction(ISD::SETCC, MVT::f32, Custom);
+  setOperationAction(ISD::SETCC, MVT::i32, Expand);
+  setOperationAction(ISD::SETCC, MVT::f32, Expand);
   setOperationAction(ISD::FP_TO_UINT, MVT::i1, Custom);
 
   setOperationAction(ISD::SELECT, MVT::i32, Custom);
@@ -94,6 +94,7 @@ R600TargetLowering::R600TargetLowering(TargetMachine &TM) :
   setTargetDAGCombine(ISD::EXTRACT_VECTOR_ELT);
   setTargetDAGCombine(ISD::SELECT_CC);
 
+  setBooleanContents(ZeroOrNegativeOneBooleanContent);
   setSchedulingPreference(Sched::VLIW);
 }
 
@@ -220,8 +221,7 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
 
   case AMDGPU::BRANCH:
       BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::JUMP))
-              .addOperand(MI->getOperand(0))
-              .addReg(0);
+              .addOperand(MI->getOperand(0));
       break;
 
   case AMDGPU::BRANCH_COND_f32: {
@@ -232,7 +232,7 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
               .addImm(OPCODE_IS_NOT_ZERO)
               .addImm(0); // Flags
     TII->addFlag(NewMI, 0, MO_FLAG_PUSH);
-    BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::JUMP))
+    BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::JUMP_COND))
             .addOperand(MI->getOperand(0))
             .addReg(AMDGPU::PREDICATE_BIT, RegState::Kill);
     break;
@@ -246,7 +246,7 @@ MachineBasicBlock * R600TargetLowering::EmitInstrWithCustomInserter(
             .addImm(OPCODE_IS_NOT_ZERO_INT)
             .addImm(0); // Flags
     TII->addFlag(NewMI, 0, MO_FLAG_PUSH);
-    BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::JUMP))
+    BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::JUMP_COND))
            .addOperand(MI->getOperand(0))
             .addReg(AMDGPU::PREDICATE_BIT, RegState::Kill);
     break;
@@ -311,11 +311,9 @@ using namespace llvm::AMDGPUIntrinsic;
 SDValue R600TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   default: return AMDGPUTargetLowering::LowerOperation(Op, DAG);
-  case ISD::BR_CC: return LowerBR_CC(Op, DAG);
   case ISD::ROTL: return LowerROTL(Op, DAG);
   case ISD::SELECT_CC: return LowerSELECT_CC(Op, DAG);
   case ISD::SELECT: return LowerSELECT(Op, DAG);
-  case ISD::SETCC: return LowerSETCC(Op, DAG);
   case ISD::STORE: return LowerSTORE(Op, DAG);
   case ISD::LOAD: return LowerLOAD(Op, DAG);
   case ISD::FPOW: return LowerFPOW(Op, DAG);
@@ -475,44 +473,6 @@ SDValue R600TargetLowering::LowerFPTOUINT(SDValue Op, SelectionDAG &DAG) const {
       );
 }
 
-SDValue R600TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
-  SDValue Chain = Op.getOperand(0);
-  SDValue CC = Op.getOperand(1);
-  SDValue LHS   = Op.getOperand(2);
-  SDValue RHS   = Op.getOperand(3);
-  SDValue JumpT  = Op.getOperand(4);
-  SDValue CmpValue;
-  SDValue Result;
-
-  if (LHS.getValueType() == MVT::i32) {
-    CmpValue = DAG.getNode(
-        ISD::SELECT_CC,
-        Op.getDebugLoc(),
-        MVT::i32,
-        LHS, RHS,
-        DAG.getConstant(-1, MVT::i32),
-        DAG.getConstant(0, MVT::i32),
-        CC);
-  } else if (LHS.getValueType() == MVT::f32) {
-    CmpValue = DAG.getNode(
-        ISD::SELECT_CC,
-        Op.getDebugLoc(),
-        MVT::f32,
-        LHS, RHS,
-        DAG.getConstantFP(1.0f, MVT::f32),
-        DAG.getConstantFP(0.0f, MVT::f32),
-        CC);
-  } else {
-    assert(0 && "Not valid type for br_cc");
-  }
-  Result = DAG.getNode(
-      AMDGPUISD::BRANCH_COND,
-      CmpValue.getDebugLoc(),
-      MVT::Other, Chain,
-      JumpT, CmpValue);
-  return Result;
-}
-
 SDValue R600TargetLowering::LowerImplicitParameter(SelectionDAG &DAG, EVT VT,
                                                    DebugLoc DL,
                                                    unsigned DwordOffset) const {
@@ -581,12 +541,37 @@ SDValue R600TargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const 
 
   // Check if we can lower this to a native operation.
 
+  // Try to lower to a SET* instruction:
+  //
+  // SET* can match the following patterns:
+  //
+  // select_cc f32, f32, -1,  0, cc_any
+  // select_cc f32, f32, 1.0f, 0.0f, cc_any
+  // select_cc i32, i32, -1,  0, cc_any
+  //
+
+  // Move hardware True/False values to the correct operand.
+  if (isHWTrueValue(False) && isHWFalseValue(True)) {
+    ISD::CondCode CCOpcode = cast<CondCodeSDNode>(CC)->get();
+    std::swap(False, True);
+    CC = DAG.getCondCode(ISD::getSetCCInverse(CCOpcode, CompareVT == MVT::i32));
+  }
+
+  if (isHWTrueValue(True) && isHWFalseValue(False) &&
+      (CompareVT == VT || VT == MVT::i32)) {
+    // This can be matched by a SET* instruction.
+    return DAG.getNode(ISD::SELECT_CC, DL, VT, LHS, RHS, True, False, CC);
+  }
+
   // Try to lower to a CND* instruction:
-  // CND* instructions requires RHS to be zero.  Some SELECT_CC nodes that
-  // can be lowered to CND* instructions can also be lowered to SET*
-  // instructions.  CND* instructions are cheaper, because they dont't
-  // require additional instructions to convert their result to the correct
-  // value type, so this check should be first.
+  //
+  // CND* can match the following patterns:
+  //
+  // select_cc f32, 0.0, f32, f32, cc_any
+  // select_cc f32, 0.0, i32, i32, cc_any
+  // select_cc i32, 0,   f32, f32, cc_any
+  // select_cc i32, 0,   i32, i32, cc_any
+  //
   if (isZero(LHS) || isZero(RHS)) {
     SDValue Cond = (isZero(LHS) ? RHS : LHS);
     SDValue Zero = (isZero(LHS) ? LHS : RHS);
@@ -628,38 +613,6 @@ SDValue R600TargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const 
     return DAG.getNode(ISD::BITCAST, DL, VT, SelectNode);
   }
 
-  // Try to lower to a SET* instruction:
-  //
-  // CompareVT == MVT::f32 and VT == MVT::i32 is supported by the hardware,
-  // but for the other case where CompareVT != VT, all operands of
-  // SELECT_CC need to have the same value type, so we need to change True and
-  // False to be the same type as LHS and RHS, and then convert the result of
-  // the select_cc back to the correct type.
-
-  // Move hardware True/False values to the correct operand.
-  if (isHWTrueValue(False) && isHWFalseValue(True)) {
-    ISD::CondCode CCOpcode = cast<CondCodeSDNode>(CC)->get();
-    std::swap(False, True);
-    CC = DAG.getCondCode(ISD::getSetCCInverse(CCOpcode, CompareVT == MVT::i32));
-  }
-
-  if (isHWTrueValue(True) && isHWFalseValue(False)) {
-    if (CompareVT !=  VT && VT == MVT::f32 && CompareVT == MVT::i32) {
-      SDValue Boolean = DAG.getNode(ISD::SELECT_CC, DL, CompareVT,
-          LHS, RHS,
-          DAG.getConstant(-1, MVT::i32),
-          DAG.getConstant(0, MVT::i32),
-          CC);
-      // Convert integer values of true (-1) and false (0) to fp values of
-      // true (1.0f) and false (0.0f).
-      SDValue LSB = DAG.getNode(ISD::AND, DL, MVT::i32, Boolean,
-                                                DAG.getConstant(1, MVT::i32));
-      return DAG.getNode(ISD::UINT_TO_FP, DL, VT, LSB);
-    } else {
-      // This SELECT_CC is already legal.
-      return DAG.getNode(ISD::SELECT_CC, DL, VT, LHS, RHS, True, False, CC);
-    }
-  }
 
   // Possible Min/Max pattern
   SDValue MinMax = LowerMinMax(Op, DAG);
@@ -701,48 +654,6 @@ SDValue R600TargetLowering::LowerSELECT(SDValue Op, SelectionDAG &DAG) const {
       Op.getOperand(1),
       Op.getOperand(2),
       DAG.getCondCode(ISD::SETNE));
-}
-
-SDValue R600TargetLowering::LowerSETCC(SDValue Op, SelectionDAG &DAG) const {
-  SDValue Cond;
-  SDValue LHS = Op.getOperand(0);
-  SDValue RHS = Op.getOperand(1);
-  SDValue CC  = Op.getOperand(2);
-  DebugLoc DL = Op.getDebugLoc();
-  assert(Op.getValueType() == MVT::i32);
-  if (LHS.getValueType() == MVT::i32) {
-    Cond = DAG.getNode(
-        ISD::SELECT_CC,
-        Op.getDebugLoc(),
-        MVT::i32,
-        LHS, RHS,
-        DAG.getConstant(-1, MVT::i32),
-        DAG.getConstant(0, MVT::i32),
-        CC);
-  } else if (LHS.getValueType() == MVT::f32) {
-    Cond = DAG.getNode(
-        ISD::SELECT_CC,
-        Op.getDebugLoc(),
-        MVT::f32,
-        LHS, RHS,
-        DAG.getConstantFP(1.0f, MVT::f32),
-        DAG.getConstantFP(0.0f, MVT::f32),
-        CC);
-    Cond = DAG.getNode(
-        ISD::FP_TO_SINT,
-        DL,
-        MVT::i32,
-        Cond);
-  } else {
-    assert(0 && "Not valid type for set_cc");
-  }
-  Cond = DAG.getNode(
-      ISD::AND,
-      DL,
-      MVT::i32,
-      DAG.getConstant(1, MVT::i32),
-      Cond);
-  return Cond;
 }
 
 /// LLVM generates byte-addresed pointers.  For indirect addressing, we need to
@@ -1130,6 +1041,9 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
   case ISD::SELECT_CC: {
     // fold selectcc (selectcc x, y, a, b, cc), b, a, b, seteq ->
     //      selectcc x, y, a, b, inv(cc)
+    //
+    // fold selectcc (selectcc x, y, a, b, cc), b, a, b, setne ->
+    //      selectcc x, y, a, b, cc
     SDValue LHS = N->getOperand(0);
     if (LHS.getOpcode() != ISD::SELECT_CC) {
       return SDValue();
@@ -1138,24 +1052,30 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
     SDValue RHS = N->getOperand(1);
     SDValue True = N->getOperand(2);
     SDValue False = N->getOperand(3);
+    ISD::CondCode NCC = cast<CondCodeSDNode>(N->getOperand(4))->get();
 
     if (LHS.getOperand(2).getNode() != True.getNode() ||
         LHS.getOperand(3).getNode() != False.getNode() ||
-        RHS.getNode() != False.getNode() ||
-        cast<CondCodeSDNode>(N->getOperand(4))->get() != ISD::SETEQ) {
+        RHS.getNode() != False.getNode()) {
       return SDValue();
     }
 
-    ISD::CondCode CCOpcode = cast<CondCodeSDNode>(LHS->getOperand(4))->get();
-    CCOpcode = ISD::getSetCCInverse(
-                        CCOpcode, LHS.getOperand(0).getValueType().isInteger());
-    return DAG.getSelectCC(N->getDebugLoc(),
-                           LHS.getOperand(0),
-                           LHS.getOperand(1),
-                           LHS.getOperand(2),
-                           LHS.getOperand(3),
-                           CCOpcode);
+    switch (NCC) {
+    default: return SDValue();
+    case ISD::SETNE: return LHS;
+    case ISD::SETEQ: {
+      ISD::CondCode LHSCC = cast<CondCodeSDNode>(LHS.getOperand(4))->get();
+      LHSCC = ISD::getSetCCInverse(LHSCC,
+                                  LHS.getOperand(0).getValueType().isInteger());
+      return DAG.getSelectCC(N->getDebugLoc(),
+                             LHS.getOperand(0),
+                             LHS.getOperand(1),
+                             LHS.getOperand(2),
+                             LHS.getOperand(3),
+                             LHSCC);
     }
+    }
+  }
   case AMDGPUISD::EXPORT: {
     SDValue Arg = N->getOperand(1);
     if (Arg.getOpcode() != ISD::BUILD_VECTOR)

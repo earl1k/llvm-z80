@@ -101,7 +101,13 @@ NVPTXTargetLowering::NVPTXTargetLowering(NVPTXTargetMachine &TM)
 
   // Operations not directly supported by NVPTX.
   setOperationAction(ISD::SELECT_CC,         MVT::Other, Expand);
-  setOperationAction(ISD::BR_CC,             MVT::Other, Expand);
+  setOperationAction(ISD::BR_CC,             MVT::f32, Expand);
+  setOperationAction(ISD::BR_CC,             MVT::f64, Expand);
+  setOperationAction(ISD::BR_CC,             MVT::i1,  Expand);
+  setOperationAction(ISD::BR_CC,             MVT::i8,  Expand);
+  setOperationAction(ISD::BR_CC,             MVT::i16, Expand);
+  setOperationAction(ISD::BR_CC,             MVT::i32, Expand);
+  setOperationAction(ISD::BR_CC,             MVT::i64, Expand);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i64, Expand);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i32, Expand);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i16, Expand);
@@ -716,16 +722,15 @@ NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       for (unsigned i=0,e=Ins.size(); i!=e; ++i) {
         unsigned sz = Ins[i].VT.getSizeInBits();
         if (Ins[i].VT.isInteger() && (sz < 8)) sz = 8;
-        std::vector<EVT> LoadRetVTs;
-        LoadRetVTs.push_back(Ins[i].VT);
-        LoadRetVTs.push_back(MVT::Other); LoadRetVTs.push_back(MVT::Glue);
-        std::vector<SDValue> LoadRetOps;
-        LoadRetOps.push_back(Chain);
-        LoadRetOps.push_back(DAG.getConstant(1, MVT::i32));
-        LoadRetOps.push_back(DAG.getConstant(resoffset, MVT::i32));
-        LoadRetOps.push_back(InFlag);
+        EVT LoadRetVTs[] = { Ins[i].VT, MVT::Other, MVT::Glue };
+        SDValue LoadRetOps[] = {
+          Chain,
+          DAG.getConstant(1, MVT::i32),
+          DAG.getConstant(resoffset, MVT::i32),
+          InFlag
+        };
         SDValue retval = DAG.getNode(NVPTXISD::LoadParam, dl, LoadRetVTs,
-                                     &LoadRetOps[0], LoadRetOps.size());
+                                     LoadRetOps, array_lengthof(LoadRetOps));
         Chain = retval.getValue(1);
         InFlag = retval.getValue(2);
         InVals.push_back(retval);
@@ -750,16 +755,15 @@ NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
         }
         std::vector<SDValue> tempRetVals;
         for (unsigned j=0; j<numelems; ++j) {
-          std::vector<EVT> MoveRetVTs;
-          MoveRetVTs.push_back(elemtype);
-          MoveRetVTs.push_back(MVT::Other); MoveRetVTs.push_back(MVT::Glue);
-          std::vector<SDValue> MoveRetOps;
-          MoveRetOps.push_back(Chain);
-          MoveRetOps.push_back(DAG.getConstant(0, MVT::i32));
-          MoveRetOps.push_back(DAG.getConstant(paramNum, MVT::i32));
-          MoveRetOps.push_back(InFlag);
+          EVT MoveRetVTs[] = { elemtype, MVT::Other, MVT::Glue };
+          SDValue MoveRetOps[] = {
+            Chain,
+            DAG.getConstant(0, MVT::i32),
+            DAG.getConstant(paramNum, MVT::i32),
+            InFlag
+          };
           SDValue retval = DAG.getNode(NVPTXISD::LoadParam, dl, MoveRetVTs,
-                                       &MoveRetOps[0], MoveRetOps.size());
+                                       MoveRetOps, array_lengthof(MoveRetOps));
           Chain = retval.getValue(1);
           InFlag = retval.getValue(2);
           tempRetVals.push_back(retval);

@@ -940,6 +940,18 @@ def:  Pat <(i64 (zextloadi8 (add (i32 IntRegs:$src1),
                                   s11_0ExtPred:$offset)))>,
       Requires<[HasV4T]>;
 
+// zext i1->i64
+def:  Pat <(i64 (zextloadi1 ADDRriS11_0:$src1)),
+      (i64 (COMBINE_Ir_V4 0, (LDriub ADDRriS11_0:$src1)))>,
+      Requires<[HasV4T]>;
+
+let AddedComplexity = 20 in
+def:  Pat <(i64 (zextloadi1 (add (i32 IntRegs:$src1),
+                                s11_0ExtPred:$offset))),
+      (i64 (COMBINE_Ir_V4 0, (LDriub_indexed IntRegs:$src1,
+                                  s11_0ExtPred:$offset)))>,
+      Requires<[HasV4T]>;
+
 // zext i16->i64
 def:  Pat <(i64 (zextloadi16 ADDRriS11_1:$src1)),
       (i64 (COMBINE_Ir_V4 0, (LDriuh ADDRriS11_1:$src1)))>,
@@ -3789,6 +3801,11 @@ def TFRI_V4 : ALU32_ri<(outs IntRegs:$dst), (ins globaladdress:$src1),
            "$dst = ##$src1",
            [(set IntRegs:$dst, (HexagonCONST32 tglobaladdr:$src1))]>,
            Requires<[HasV4T]>;
+
+// Transfer a block address into a register
+def : Pat<(HexagonCONST32_GP tblockaddress:$src1),
+          (TFRI_V4 tblockaddress:$src1)>,
+          Requires<[HasV4T]>;
 
 let AddedComplexity=50, neverHasSideEffects = 1, isPredicated = 1 in
 def TFRI_cPt_V4 : ALU32_ri<(outs IntRegs:$dst),

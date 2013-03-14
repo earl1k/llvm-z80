@@ -103,6 +103,16 @@ CC_Hexagon_VarArg (unsigned ValNo, MVT ValVT,
     State.addLoc(CCValAssign::getMem(ValNo, ValVT, ofst, LocVT, LocInfo));
     return false;
   }
+  if (LocVT == MVT::i1 || LocVT == MVT::i8 || LocVT == MVT::i16) {
+    LocVT = MVT::i32;
+    ValVT = MVT::i32;
+    if (ArgFlags.isSExt())
+      LocInfo = CCValAssign::SExt;
+    else if (ArgFlags.isZExt())
+      LocInfo = CCValAssign::ZExt;
+    else
+      LocInfo = CCValAssign::AExt;
+  }
   if (LocVT == MVT::i32 || LocVT == MVT::f32) {
     ofst = State.AllocateStack(4, 4);
     State.addLoc(CCValAssign::getMem(ValNo, ValVT, ofst, LocVT, LocInfo));
@@ -1024,6 +1034,14 @@ SDValue HexagonTargetLowering::LowerGLOBALADDRESS(SDValue Op,
   return DAG.getNode(HexagonISD::CONST32, dl, getPointerTy(), Result);
 }
 
+SDValue
+HexagonTargetLowering::LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const {
+  const BlockAddress *BA = cast<BlockAddressSDNode>(Op)->getBlockAddress();
+  SDValue BA_SD =  DAG.getTargetBlockAddress(BA, MVT::i32);
+  DebugLoc dl = Op.getDebugLoc();
+  return DAG.getNode(HexagonISD::CONST32_GP, dl, getPointerTy(), BA_SD);
+}
+
 //===----------------------------------------------------------------------===//
 // TargetLowering Implementation
 //===----------------------------------------------------------------------===//
@@ -1297,6 +1315,7 @@ HexagonTargetLowering::HexagonTargetLowering(HexagonTargetMachine
     // Custom legalize GlobalAddress nodes into CONST32.
     setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
     setOperationAction(ISD::GlobalAddress, MVT::i8, Custom);
+    setOperationAction(ISD::BlockAddress, MVT::i32, Custom);
     // Truncate action?
     setOperationAction(ISD::TRUNCATE, MVT::i64, Expand);
 
@@ -1342,7 +1361,6 @@ HexagonTargetLowering::HexagonTargetLowering(HexagonTargetMachine
 
     }
 
-    setOperationAction(ISD::BR_CC, MVT::Other, Expand);
     setOperationAction(ISD::BRIND, MVT::Other, Expand);
     if (EmitJumpTables) {
       setOperationAction(ISD::BR_JT, MVT::Other, Custom);
@@ -1352,6 +1370,9 @@ HexagonTargetLowering::HexagonTargetLowering(HexagonTargetMachine
     // Increase jump tables cutover to 5, was 4.
     setMinimumJumpTableEntries(5);
 
+    setOperationAction(ISD::BR_CC, MVT::f32, Expand);
+    setOperationAction(ISD::BR_CC, MVT::f64, Expand);
+    setOperationAction(ISD::BR_CC, MVT::i1,  Expand);
     setOperationAction(ISD::BR_CC, MVT::i32, Expand);
 
     setOperationAction(ISD::MEMBARRIER, MVT::Other, Custom);
@@ -1459,6 +1480,8 @@ HexagonTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
     default: return 0;
     case HexagonISD::CONST32:     return "HexagonISD::CONST32";
+    case HexagonISD::CONST32_GP: return "HexagonISD::CONST32_GP";
+    case HexagonISD::CONST32_Int_Real: return "HexagonISD::CONST32_Int_Real";
     case HexagonISD::ADJDYNALLOC: return "HexagonISD::ADJDYNALLOC";
     case HexagonISD::CMPICC:      return "HexagonISD::CMPICC";
     case HexagonISD::CMPFCC:      return "HexagonISD::CMPFCC";
@@ -1507,6 +1530,7 @@ HexagonTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
     case ISD::MEMBARRIER:         return LowerMEMBARRIER(Op, DAG);
     case ISD::ATOMIC_FENCE:       return LowerATOMIC_FENCE(Op, DAG);
     case ISD::GlobalAddress:      return LowerGLOBALADDRESS(Op, DAG);
+    case ISD::BlockAddress:       return LowerBlockAddress(Op, DAG);
     case ISD::VASTART:            return LowerVASTART(Op, DAG);
     case ISD::BR_JT:              return LowerBR_JT(Op, DAG);
 

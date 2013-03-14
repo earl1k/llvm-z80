@@ -95,11 +95,8 @@ void DIBuilder::createCompileUnit(unsigned Lang, StringRef Filename,
     GetTagConstant(VMContext, dwarf::DW_TAG_compile_unit),
     Constant::getNullValue(Type::getInt32Ty(VMContext)),
     ConstantInt::get(Type::getInt32Ty(VMContext), Lang),
-    MDString::get(VMContext, Filename),
-    MDString::get(VMContext, Directory),
+    createFile(Filename, Directory),
     MDString::get(VMContext, Producer),
-    // isMain field can be removed when we remove the legacy debug info.
-    ConstantInt::get(Type::getInt1Ty(VMContext), true), // isMain
     ConstantInt::get(Type::getInt1Ty(VMContext), isOptimized),
     MDString::get(VMContext, Flags),
     ConstantInt::get(Type::getInt32Ty(VMContext), RunTimeVer),
@@ -119,13 +116,11 @@ void DIBuilder::createCompileUnit(unsigned Lang, StringRef Filename,
 /// createFile - Create a file descriptor to hold debugging information
 /// for a file.
 DIFile DIBuilder::createFile(StringRef Filename, StringRef Directory) {
-  assert(TheCU && "Unable to create DW_TAG_file_type without CompileUnit");
   assert(!Filename.empty() && "Unable to create file without name");
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_file_type),
     MDString::get(VMContext, Filename),
     MDString::get(VMContext, Directory),
-    NULL // TheCU
   };
   return DIFile(MDNode::get(VMContext, Elts));
 }
@@ -487,7 +482,9 @@ DIType DIBuilder::createClassType(DIDescriptor Context, StringRef Name,
                                   DIType DerivedFrom, DIArray Elements,
                                   MDNode *VTableHolder,
                                   MDNode *TemplateParams) {
- // TAG_class_type is encoded in DICompositeType format.
+  assert((!Context || Context.Verify()) &&
+         "createClassType should be called with a valid Context");
+  // TAG_class_type is encoded in DICompositeType format.
   Value *Elts[] = {
     GetTagConstant(VMContext, dwarf::DW_TAG_class_type),
     getNonCompileUnitScope(Context),
@@ -504,7 +501,9 @@ DIType DIBuilder::createClassType(DIDescriptor Context, StringRef Name,
     VTableHolder,
     TemplateParams
   };
-  return DIType(MDNode::get(VMContext, Elts));
+  DIType R(MDNode::get(VMContext, Elts));
+  assert(R.Verify() && "createClassType should return a verifiable DIType");
+  return R;
 }
 
 /// createStructType - Create debugging information entry for a struct.
@@ -534,7 +533,9 @@ DICompositeType DIBuilder::createStructType(DIDescriptor Context,
     VTableHolder,
     NULL,
   };
-  return DICompositeType(MDNode::get(VMContext, Elts));
+  DICompositeType R(MDNode::get(VMContext, Elts));
+  assert(R.Verify() && "createStructType should return a verifiable DIType");
+  return R;
 }
 
 /// createUnionType - Create debugging information entry for an union.
@@ -766,6 +767,8 @@ DIType DIBuilder::createForwardDecl(unsigned Tag, StringRef Name,
     ConstantInt::get(Type::getInt32Ty(VMContext), RuntimeLang)
   };
   MDNode *Node = MDNode::getTemporary(VMContext, Elts);
+  assert(DIType(Node).Verify() &&
+         "createForwardDecl result should be verifiable");
   return DIType(Node);
 }
 
@@ -846,6 +849,11 @@ DIVariable DIBuilder::createLocalVariable(unsigned Tag, DIDescriptor Scope,
                                           unsigned LineNo, DIType Ty,
                                           bool AlwaysPreserve, unsigned Flags,
                                           unsigned ArgNo) {
+  DIDescriptor Context(getNonCompileUnitScope(Scope));
+  assert((!Context || Context.Verify()) &&
+         "createLocalVariable should be called with a valid Context");
+  assert(Ty.Verify() &&
+         "createLocalVariable should be called with a valid type");
   Value *Elts[] = {
     GetTagConstant(VMContext, Tag),
     getNonCompileUnitScope(Scope),
@@ -865,6 +873,8 @@ DIVariable DIBuilder::createLocalVariable(unsigned Tag, DIDescriptor Scope,
     NamedMDNode *FnLocals = getOrInsertFnSpecificMDNode(M, Fn);
     FnLocals->addOperand(Node);
   }
+  assert(DIVariable(Node).Verify() &&
+         "createLocalVariable should return a verifiable DIVariable");
   return DIVariable(Node);
 }
 
@@ -990,7 +1000,10 @@ DINameSpace DIBuilder::createNameSpace(DIDescriptor Scope, StringRef Name,
     File,
     ConstantInt::get(Type::getInt32Ty(VMContext), LineNo)
   };
-  return DINameSpace(MDNode::get(VMContext, Elts));
+  DINameSpace R(MDNode::get(VMContext, Elts));
+  assert(R.Verify() &&
+         "createNameSpace should return a verifiable DINameSpace");
+  return R;
 }
 
 /// createLexicalBlockFile - This creates a new MDNode that encapsulates
@@ -1002,7 +1015,11 @@ DILexicalBlockFile DIBuilder::createLexicalBlockFile(DIDescriptor Scope,
     Scope,
     File
   };
-  return DILexicalBlockFile(MDNode::get(VMContext, Elts));
+  DILexicalBlockFile R(MDNode::get(VMContext, Elts));
+  assert(
+      R.Verify() &&
+      "createLexicalBlockFile should return a verifiable DILexicalBlockFile");
+  return R;
 }
 
 DILexicalBlock DIBuilder::createLexicalBlock(DIDescriptor Scope, DIFile File,
@@ -1017,7 +1034,10 @@ DILexicalBlock DIBuilder::createLexicalBlock(DIDescriptor Scope, DIFile File,
     File,
     ConstantInt::get(Type::getInt32Ty(VMContext), unique_id++)
   };
-  return DILexicalBlock(MDNode::get(VMContext, Elts));
+  DILexicalBlock R(MDNode::get(VMContext, Elts));
+  assert(R.Verify() &&
+         "createLexicalBlock should return a verifiable DILexicalBlock");
+  return R;
 }
 
 /// insertDeclare - Insert a new llvm.dbg.declare intrinsic call.

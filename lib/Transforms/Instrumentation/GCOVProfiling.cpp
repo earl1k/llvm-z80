@@ -66,8 +66,8 @@ namespace {
   private:
     bool runOnModule(Module &M);
 
-    // Create the GCNO files for the Module based on DebugInfo.
-    void emitGCNO();
+    // Create the .gcno files for the Module based on DebugInfo.
+    void emitProfileNotes();
 
     // Modify the program to track transitions along edges and call into the
     // profiling runtime to emit .gcda files when run.
@@ -88,8 +88,8 @@ namespace {
     // block number.
     GlobalVariable *buildEdgeLookupTable(Function *F,
                                          GlobalVariable *Counter,
-                                         const UniqueVector<BasicBlock *> &Preds,
-                                         const UniqueVector<BasicBlock *> &Succs);
+                                         const UniqueVector<BasicBlock *>&Preds,
+                                         const UniqueVector<BasicBlock*>&Succs);
 
     // Add the function to write out all our counters to the global destructor
     // list.
@@ -101,7 +101,7 @@ namespace {
 
     bool EmitNotes;
     bool EmitData;
-    char Version[4];
+    char Version[4];  // This is stored in reverse order for direct emission.
     bool UseExtraChecksum;
     bool NoRedZone;
     bool NoFunctionNamesInData;
@@ -363,12 +363,12 @@ bool GCOVProfiler::runOnModule(Module &M) {
   this->M = &M;
   Ctx = &M.getContext();
 
-  if (EmitNotes) emitGCNO();
+  if (EmitNotes) emitProfileNotes();
   if (EmitData) return emitProfileArcs();
   return false;
 }
 
-void GCOVProfiler::emitGCNO() {
+void GCOVProfiler::emitProfileNotes() {
   NamedMDNode *CU_Nodes = M->getNamedMetadata("llvm.dbg.cu");
   if (!CU_Nodes) return;
 
@@ -601,9 +601,10 @@ Constant *GCOVProfiler::getIncrementIndirectCounterFunc() {
 }
 
 Constant *GCOVProfiler::getEmitFunctionFunc() {
-  Type *Args[2] = {
+  Type *Args[3] = {
     Type::getInt32Ty(*Ctx),    // uint32_t ident
     Type::getInt8PtrTy(*Ctx),  // const char *function_name
+    Type::getInt8Ty(*Ctx),     // uint8_t use_extra_checksum
   };
   FunctionType *FTy = FunctionType::get(Type::getVoidTy(*Ctx), Args, false);
   return M->getOrInsertFunction("llvm_gcda_emit_function", FTy);
@@ -664,17 +665,16 @@ void GCOVProfiler::insertCounterWriteout(
       Builder.CreateCall2(StartFile,
                           Builder.CreateGlobalStringPtr(FilenameGcda),
                           Builder.CreateGlobalStringPtr(Version));
-      for (ArrayRef<std::pair<GlobalVariable *, MDNode *> >::iterator
-             I = CountersBySP.begin(), E = CountersBySP.end();
-           I != E; ++I) {
-        DISubprogram SP(I->second);
-        Builder.CreateCall2(EmitFunction,
-                            Builder.getInt32(i),
+      for (unsigned j = 0, e = CountersBySP.size(); j != e; ++j) {
+        DISubprogram SP(CountersBySP[j].second);
+        Builder.CreateCall3(EmitFunction,
+                            Builder.getInt32(j),
                             NoFunctionNamesInData ?
                               Constant::getNullValue(Builder.getInt8PtrTy()) :
-                              Builder.CreateGlobalStringPtr(SP.getName()));
-        
-        GlobalVariable *GV = I->first;
+                              Builder.CreateGlobalStringPtr(SP.getName()),
+                            Builder.getInt8(UseExtraChecksum));
+
+        GlobalVariable *GV = CountersBySP[j].first;
         unsigned Arcs =
           cast<ArrayType>(GV->getType()->getElementType())->getNumElements();
         Builder.CreateCall2(EmitArcs,

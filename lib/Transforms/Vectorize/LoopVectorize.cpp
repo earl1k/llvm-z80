@@ -419,7 +419,7 @@ public:
 
   /// Alias(Multi)Map stores the values (GEPs or underlying objects and their
   /// respective Store/Load instruction(s) to calculate aliasing.
-  typedef DenseMap<Value*, Instruction* > AliasMap;
+  typedef MapVector<Value*, Instruction* > AliasMap;
   typedef DenseMap<Value*, std::vector<Instruction*> > AliasMultiMap;
 
   /// Returns true if it is legal to vectorize this loop.
@@ -1643,7 +1643,7 @@ InnerLoopVectorizer::vectorizeLoop(LoopVectorizationLegality *Legal) {
     // To do so, we need to generate the 'identity' vector and overide
     // one of the elements with the incoming scalar reduction. We need
     // to do it in the vector-loop preheader.
-    Builder.SetInsertPoint(LoopBypassBlocks.back()->getTerminator());
+    Builder.SetInsertPoint(LoopBypassBlocks.front()->getTerminator());
 
     // This is the vector-clone of the value that leaves the loop.
     VectorParts &VectorExit = getVectorValue(RdxDesc.LoopExitInstr);
@@ -2088,6 +2088,10 @@ InnerLoopVectorizer::vectorizeBlockInLoop(LoopVectorizationLegality *Legal,
     }
 
     case Instruction::Call: {
+      // Ignore dbg intrinsics.
+      if (isa<DbgInfoIntrinsic>(it))
+        break;
+
       Module *M = BB->getParent()->getParent();
       CallInst *CI = cast<CallInst>(it);
       Intrinsic::ID ID = getIntrinsicIDForCall(CI, TLI);
@@ -2324,9 +2328,10 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
         return false;
       }// end of PHI handling
 
-      // We still don't handle functions.
+      // We still don't handle functions. However, we can ignore dbg intrinsic
+      // calls and we do handle certain intrinsic and libm functions.
       CallInst *CI = dyn_cast<CallInst>(it);
-      if (CI && !getIntrinsicIDForCall(CI, TLI)) {
+      if (CI && !getIntrinsicIDForCall(CI, TLI) && !isa<DbgInfoIntrinsic>(CI)) {
         DEBUG(dbgs() << "LV: Found a call site.\n");
         return false;
       }
@@ -3263,6 +3268,10 @@ unsigned LoopVectorizationCostModel::expectedCost(unsigned VF) {
 
     // For each instruction in the old loop.
     for (BasicBlock::iterator it = BB->begin(), e = BB->end(); it != e; ++it) {
+      // Skip dbg intrinsics.
+      if (isa<DbgInfoIntrinsic>(it))
+        continue;
+
       unsigned C = getInstructionCost(it, VF);
       Cost += C;
       DEBUG(dbgs() << "LV: Found an estimated cost of "<< C <<" for VF " <<

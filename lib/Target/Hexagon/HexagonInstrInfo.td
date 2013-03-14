@@ -2076,6 +2076,10 @@ def CONST32_Int_Real : LDInst2<(outs IntRegs:$dst), (ins i32imm:$global),
                        "$dst = CONST32(#$global)",
                        [(set (i32 IntRegs:$dst), imm:$global) ]>;
 
+// Map BlockAddress lowering to CONST32_Int_Real
+def : Pat<(HexagonCONST32_GP tblockaddress:$addr),
+          (CONST32_Int_Real tblockaddress:$addr)>;
+
 let isReMaterializable = 1, isMoveImm = 1 in
 def CONST32_Label : LDInst2<(outs IntRegs:$dst), (ins bblabel:$label),
                     "$dst = CONST32($label)",
@@ -2871,6 +2875,18 @@ def:  Pat <(i64 (zextloadi8 (add (i32 IntRegs:$src1),
                                   s11_0ExtPred:$offset)))>,
       Requires<[NoV4T]>;
 
+// i1 -> i64
+def:  Pat <(i64 (zextloadi1 ADDRriS11_0:$src1)),
+      (i64 (COMBINE_rr (TFRI 0), (LDriub ADDRriS11_0:$src1)))>,
+      Requires<[NoV4T]>;
+
+let AddedComplexity = 20 in
+def:  Pat <(i64 (zextloadi1 (add (i32 IntRegs:$src1),
+                                s11_0ExtPred:$offset))),
+      (i64 (COMBINE_rr (TFRI 0), (LDriub_indexed IntRegs:$src1,
+                                  s11_0ExtPred:$offset)))>,
+      Requires<[NoV4T]>;
+
 // i16 -> i64
 def:  Pat <(i64 (zextloadi16 ADDRriS11_1:$src1)),
       (i64 (COMBINE_rr (TFRI 0), (LDriuh ADDRriS11_1:$src1)))>,
@@ -3045,6 +3061,11 @@ let isBranch=1, isIndirectBranch=1, isTerminator=1, isBarrier = 1 in
 def BR_JT : JRInst<(outs), (ins IntRegs:$src),
                    "jumpr $src",
                    [(HexagonBR_JT (i32 IntRegs:$src))]>;
+
+let isBranch=1, isIndirectBranch=1, isTerminator=1 in
+def BRIND : JRInst<(outs), (ins IntRegs:$src),
+                   "jumpr $src",
+                   [(brind (i32 IntRegs:$src))]>;
 
 def HexagonWrapperJT: SDNode<"HexagonISD::WrapperJT", SDTIntUnaryOp>;
 

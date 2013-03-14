@@ -7,7 +7,7 @@
 
 !llvm.dbg.cu = !{!0}
 
-!0 = metadata !{i32 786449, i32 0, i32 4, metadata !"foo.cpp", metadata !"/Users/echristo/tmp", metadata !"clang version 3.2 (trunk 157269) (llvm/trunk 157264)", i1 true, i1 false, metadata !"", i32 0, metadata !1, metadata !15, metadata !15, metadata !17} ; [ DW_TAG_compile_unit ]
+!0 = metadata !{i32 786449, i32 0, i32 4, metadata !4, metadata !"clang version 3.2 (trunk 157269) (llvm/trunk 157264)", i1 false, metadata !"", i32 0, metadata !1, metadata !15, metadata !15, metadata !17, metadata !""} ; [ DW_TAG_compile_unit ]
 !1 = metadata !{metadata !3, metadata !8, metadata !12}
 !3 = metadata !{i32 786436, null, metadata !"A", metadata !4, i32 1, i64 32, i64 32, i32 0, i32 0, metadata !5, metadata !6, i32 0, i32 0} ; [ DW_TAG_enumeration_type ]
 !4 = metadata !{i32 786473, metadata !"foo.cpp", metadata !"/Users/echristo/tmp", null} ; [ DW_TAG_file_type ]
@@ -23,9 +23,9 @@
 !14 = metadata !{i32 786472, metadata !"C1", i64 1} ; [ DW_TAG_enumerator ]
 !15 = metadata !{i32 0}
 !17 = metadata !{metadata !19, metadata !20, metadata !21}
-!19 = metadata !{i32 786484, i32 0, null, metadata !"a", metadata !"a", metadata !"", metadata !4, i32 4, metadata !3, i32 0, i32 1, i32* @a} ; [ DW_TAG_variable ]
-!20 = metadata !{i32 786484, i32 0, null, metadata !"b", metadata !"b", metadata !"", metadata !4, i32 5, metadata !8, i32 0, i32 1, i64* @b} ; [ DW_TAG_variable ]
-!21 = metadata !{i32 786484, i32 0, null, metadata !"c", metadata !"c", metadata !"", metadata !4, i32 6, metadata !12, i32 0, i32 1, i32* @c} ; [ DW_TAG_variable ]
+!19 = metadata !{i32 786484, i32 0, null, metadata !"a", metadata !"a", metadata !"", metadata !4, i32 4, metadata !3, i32 0, i32 1, i32* @a, null} ; [ DW_TAG_variable ]
+!20 = metadata !{i32 786484, i32 0, null, metadata !"b", metadata !"b", metadata !"", metadata !4, i32 5, metadata !8, i32 0, i32 1, i64* @b, null} ; [ DW_TAG_variable ]
+!21 = metadata !{i32 786484, i32 0, null, metadata !"c", metadata !"c", metadata !"", metadata !4, i32 6, metadata !12, i32 0, i32 1, i32* @c, null} ; [ DW_TAG_variable ]
 
 ; CHECK: DW_TAG_enumeration_type [3]
 ; CHECK: DW_AT_type [DW_FORM_ref4]      (cu + 0x0026 => {0x00000026})
