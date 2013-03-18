@@ -177,6 +177,23 @@ unsigned ARMTTI::getCastInstrCost(unsigned Opcode, Type *Dst,
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   assert(ISD && "Invalid opcode");
 
+  // Single to/from double precision conversions.
+  static const CostTblEntry<MVT> NEONFltDblTbl[] = {
+    // Vector fptrunc/fpext conversions.
+    { ISD::FP_ROUND,   MVT::v2f64, 2 },
+    { ISD::FP_EXTEND,  MVT::v2f32, 2 },
+    { ISD::FP_EXTEND,  MVT::v4f32, 4 }
+  };
+
+  if (Src->isVectorTy() && ST->hasNEON() && (ISD == ISD::FP_ROUND ||
+                                          ISD == ISD::FP_EXTEND)) {
+    std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Src);
+    int Idx = CostTableLookup<MVT>(NEONFltDblTbl, array_lengthof(NEONFltDblTbl),
+                                ISD, LT.second);
+    if (Idx != -1)
+      return LT.first * NEONFltDblTbl[Idx].Cost;
+  }
+
   EVT SrcTy = TLI->getValueType(Src);
   EVT DstTy = TLI->getValueType(Dst);
 
@@ -255,7 +272,6 @@ unsigned ARMTTI::getCastInstrCost(unsigned Opcode, Type *Dst,
         return NEONFloatConversionTbl[Idx].Cost;
   }
 
-
   // Scalar integer to float conversions.
   static const TypeConversionCostTblEntry<MVT> NEONIntegerConversionTbl[] = {
     { ISD::SINT_TO_FP,  MVT::f32, MVT::i1, 2 },
@@ -311,7 +327,6 @@ unsigned ARMTTI::getCastInstrCost(unsigned Opcode, Type *Dst,
       return ARMIntegerConversionTbl[Idx].Cost;
   }
 
-
   return TargetTransformInfo::getCastInstrCost(Opcode, Dst, Src);
 }
 
@@ -334,6 +349,25 @@ unsigned ARMTTI::getCmpSelInstrCost(unsigned Opcode, Type *ValTy,
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   // On NEON a a vector select gets lowered to vbsl.
   if (ST->hasNEON() && ValTy->isVectorTy() && ISD == ISD::SELECT) {
+    // Lowering of some vector selects is currently far from perfect.
+    static const TypeConversionCostTblEntry<MVT> NEONVectorSelectTbl[] = {
+      { ISD::SELECT, MVT::v16i1, MVT::v16i16, 2*16 + 1 + 3*1 + 4*1 },
+      { ISD::SELECT, MVT::v8i1, MVT::v8i32, 4*8 + 1*3 + 1*4 + 1*2 },
+      { ISD::SELECT, MVT::v16i1, MVT::v16i32, 4*16 + 1*6 + 1*8 + 1*4 },
+      { ISD::SELECT, MVT::v4i1, MVT::v4i64, 4*4 + 1*2 + 1 },
+      { ISD::SELECT, MVT::v8i1, MVT::v8i64, 50 },
+      { ISD::SELECT, MVT::v16i1, MVT::v16i64, 100 }
+    };
+
+    EVT SelCondTy = TLI->getValueType(CondTy);
+    EVT SelValTy = TLI->getValueType(ValTy);
+    int Idx = ConvertCostTableLookup<MVT>(NEONVectorSelectTbl,
+                                          array_lengthof(NEONVectorSelectTbl),
+                                          ISD, SelCondTy.getSimpleVT(),
+                                          SelValTy.getSimpleVT());
+    if (Idx != -1)
+      return NEONVectorSelectTbl[Idx].Cost;
+
     std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(ValTy);
     return LT.first;
   }

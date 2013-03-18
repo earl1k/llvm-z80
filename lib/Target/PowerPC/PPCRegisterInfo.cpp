@@ -71,12 +71,6 @@ PPCRegisterInfo::PPCRegisterInfo(const PPCSubtarget &ST,
   ImmToIdxMap[PPC::ADDI8] = PPC::ADD8; ImmToIdxMap[PPC::STD_32] = PPC::STDX_32;
 }
 
-bool
-PPCRegisterInfo::trackLivenessAfterRegAlloc(const MachineFunction &MF) const {
-  return requiresRegisterScavenging(MF);
-}
-
-
 /// getPointerRegClass - Return the register class to use to hold pointers.
 /// This is used for addressing modes.
 const TargetRegisterClass *
@@ -169,37 +163,9 @@ PPCRegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
   }
 }
 
-bool
-PPCRegisterInfo::avoidWriteAfterWrite(const TargetRegisterClass *RC) const {
-  switch (RC->getID()) {
-  case PPC::G8RCRegClassID:
-  case PPC::GPRCRegClassID:
-  case PPC::F8RCRegClassID:
-  case PPC::F4RCRegClassID:
-  case PPC::VRRCRegClassID:
-    return true;
-  default:
-    return false;
-  }
-}
-
 //===----------------------------------------------------------------------===//
 // Stack Frame Processing methods
 //===----------------------------------------------------------------------===//
-
-/// findScratchRegister - Find a 'free' PPC register. Try for a call-clobbered
-/// register first and then a spilled callee-saved register if that fails.
-static
-unsigned findScratchRegister(MachineBasicBlock::iterator II, RegScavenger *RS,
-                             const TargetRegisterClass *RC, int SPAdj) {
-  assert(RS && "Register scavenging must be on");
-  unsigned Reg = RS->FindUnusedReg(RC);
-  // FIXME: move ARM callee-saved reg scan to target independent code, then 
-  // search for already spilled CS register here.
-  if (Reg == 0)
-    Reg = RS->scavengeRegister(RC, II, SPAdj);
-  return Reg;
-}
 
 /// lowerDynamicAlloc - Generate the code for allocating an object in the
 /// current frame.  The sequence of code with be in the general form
@@ -241,9 +207,7 @@ void PPCRegisterInfo::lowerDynamicAlloc(MachineBasicBlock::iterator II,
   // Fortunately, a frame greater than 32K is rare.
   const TargetRegisterClass *G8RC = &PPC::G8RCRegClass;
   const TargetRegisterClass *GPRC = &PPC::GPRCRegClass;
-  const TargetRegisterClass *RC = LP64 ? G8RC : GPRC;
-
-  unsigned Reg = findScratchRegister(II, RS, RC, SPAdj);
+  unsigned Reg = MF.getRegInfo().createVirtualRegister(LP64 ? G8RC : GPRC);
   
   if (MaxAlign < TargetAlign && isInt<16>(FrameSize)) {
     BuildMI(MBB, II, dl, TII.get(PPC::ADDI), Reg)
@@ -478,7 +442,25 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     isIXAddr = true;
     break;
   }
-  
+
+  bool noImmForm = false;
+  switch (OpC) {
+  case PPC::LVEBX:
+  case PPC::LVEHX:
+  case PPC::LVEWX:
+  case PPC::LVX:
+  case PPC::LVXL:
+  case PPC::LVSL:
+  case PPC::LVSR:
+  case PPC::STVEBX:
+  case PPC::STVEHX:
+  case PPC::STVEWX:
+  case PPC::STVX:
+  case PPC::STVXL:
+    noImmForm = true;
+    break;
+  }
+
   // Now add the frame object offset to the offset from r1.
   int Offset = MFI->getObjectOffset(FrameIndex);
   if (!isIXAddr)
@@ -502,7 +484,8 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   // only "std" to a stack slot that is at least 4-byte aligned, but it can
   // happen in invalid code.
   if (OpC == PPC::DBG_VALUE || // DBG_VALUE is always Reg+Imm
-      (isInt<16>(Offset) && (!isIXAddr || (Offset & 3) == 0))) {
+      (!noImmForm &&
+       isInt<16>(Offset) && (!isIXAddr || (Offset & 3) == 0))) {
     if (isIXAddr)
       Offset >>= 2;    // The actual encoded value has the low two bits zero.
     MI.getOperand(OffsetOperandNo).ChangeToImmediate(Offset);
@@ -514,7 +497,7 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 
   const TargetRegisterClass *G8RC = &PPC::G8RCRegClass;
   const TargetRegisterClass *GPRC = &PPC::GPRCRegClass;
-  unsigned SReg = findScratchRegister(II, RS, is64Bit ? G8RC : GPRC, SPAdj);
+  unsigned SReg = MF.getRegInfo().createVirtualRegister(is64Bit ? G8RC : GPRC);
 
   // Insert a set of rA with the full offset value before the ld, st, or add
   BuildMI(MBB, II, dl, TII.get(is64Bit ? PPC::LIS8 : PPC::LIS), SReg)
@@ -529,7 +512,9 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   //   addi 0:rA 1:rB, 2, imm ==> add 0:rA, 1:rB, 2:r0
   unsigned OperandBase;
 
-  if (OpC != TargetOpcode::INLINEASM) {
+  if (noImmForm)
+    OperandBase = 1;
+  else if (OpC != TargetOpcode::INLINEASM) {
     assert(ImmToIdxMap.count(OpC) &&
            "No indexed form of load or store available!");
     unsigned NewOpcode = ImmToIdxMap.find(OpC)->second;
