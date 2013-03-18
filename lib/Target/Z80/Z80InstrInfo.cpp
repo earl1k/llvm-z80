@@ -31,97 +31,40 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   MachineBasicBlock::iterator I, DebugLoc DL,
   unsigned DestReg, unsigned SrcReg, bool KillSrc) const
 {
-  if (Z80::BR8RegClass.contains(DestReg, SrcReg))
+  if (Z80::GR8RegClass.contains(DestReg, SrcReg))
   {
+    // copy GR8 to GR8
     BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
     return;
   }
-  else if (Z80::GR8RegClass.contains(DestReg, SrcReg))
+  else if (Z80::GR16RegClass.contains(DestReg, SrcReg))
   {
-    if (Z80::BR8RegClass.contains(DestReg))
-    {
-      // DestReg - BR8
-      // SrcReg  - GR8
-      if (DestReg == Z80::H || DestReg == Z80::L)
-      {
-        unsigned Idx = RI.getSubRegIndex(Z80::HL, DestReg);
-
-        BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
-        BuildMI(MBB, I, DL, get(Z80::LD8rr), RI.getSubReg(Z80::DE, Idx))
-          .addReg(SrcReg, getKillRegState(KillSrc));
-        BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
-      }
-      else
-        BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
-          .addReg(SrcReg, getKillRegState(KillSrc));
-      return;
-    }
-    else if (Z80::BR8RegClass.contains(SrcReg))
-    {
-      // DestReg - GR8
-      // SrcReg  - BR8
-      if (SrcReg == Z80::H || SrcReg == Z80::L)
-      {
-        unsigned Idx = RI.getSubRegIndex(Z80::HL, SrcReg);
-
-        BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
-        BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
-          .addReg(RI.getSubReg(Z80::DE, Idx), getKillRegState(KillSrc));
-        BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
-      }
-      else
-        BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
-          .addReg(SrcReg, getKillRegState(KillSrc));
-      return;
-    }
-    else
-    {
-      // DestReg - GR8
-      // SrcReg  - GR8
-      if ((RI.getSubRegIndex(Z80::IX, DestReg) &&
-          RI.getSubRegIndex(Z80::IX, SrcReg)) ||
-          (RI.getSubRegIndex(Z80::IY, DestReg) &&
-          RI.getSubRegIndex(Z80::IY, SrcReg)))
-      {
-        BuildMI(MBB, I, DL, get(Z80::LD8rr), DestReg)
-          .addReg(SrcReg, getKillRegState(KillSrc));
-        return;
-      }
-      // copy from/to different index register
-    }
-  }
-  else if (Z80::BR16RegClass.contains(DestReg, SrcReg))
-  {
-    if ((DestReg == Z80::HL || DestReg == Z80::DE) &&
-        (SrcReg  == Z80::HL || SrcReg  == Z80::DE) &&
-        KillSrc)
+    // copy GR16 to GR16
+    if ((DestReg == Z80::HL && SrcReg == Z80::DE ||
+         DestReg == Z80::DE && SrcReg == Z80::HL) &&
+         KillSrc)
     {
       BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
-      BuildMI(MBB, I, DL, get(Z80::KILL))
-        .addReg(SrcReg, getKillRegState(KillSrc));
     }
     else
     {
       unsigned DestSubReg, SrcSubReg;
 
-      DestSubReg = RI.getSubReg(DestReg, Z80::subreg_lo);
-      SrcSubReg  = RI.getSubReg(SrcReg,  Z80::subreg_lo);
-      BuildMI(MBB, I, DL, get(Z80::LD8rr), DestSubReg)
-        .addReg(SrcSubReg, getKillRegState(KillSrc));
-
       DestSubReg = RI.getSubReg(DestReg, Z80::subreg_hi);
       SrcSubReg  = RI.getSubReg(SrcReg,  Z80::subreg_hi);
       BuildMI(MBB, I, DL, get(Z80::LD8rr), DestSubReg)
-        .addReg(SrcSubReg, getKillRegState(KillSrc));
+        .addReg(SrcSubReg);
+
+      DestSubReg = RI.getSubReg(DestReg, Z80::subreg_lo);
+      SrcSubReg  = RI.getSubReg(SrcReg,  Z80::subreg_lo);
+      BuildMI(MBB, I, DL, get(Z80::LD8rr), DestSubReg)
+        .addReg(SrcSubReg);
     }
-    return;
-  }
-  else if (Z80::GR16RegClass.contains(DestReg, SrcReg))
-  {
-    // use stack for copy registers
-    BuildMI(MBB, I, DL, get(Z80::PUSH16r)).addReg(SrcReg);
-    BuildMI(MBB, I, DL, get(Z80::POP16r), DestReg);
+
+    if (KillSrc)
+      BuildMI(MBB, I, DL, get(Z80::KILL))
+        .addReg(SrcReg);
     return;
   }
   llvm_unreachable("Imposible reg-to-reg copy");
@@ -376,11 +319,11 @@ void Z80InstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
   DebugLoc dl;
   if (MI != MBB.end()) dl = MI->getDebugLoc();
 
-  if (RC == &Z80::BR8RegClass)
+  if (RC == &Z80::GR8RegClass)
     BuildMI(MBB, MI, dl, get(Z80::LD8xmr))
       .addFrameIndex(FrameIndex).addImm(0)
       .addReg(SrcReg, getKillRegState(isKill));
-  else if (RC == &Z80::BR16RegClass) {
+  else if (RC == &Z80::GR16RegClass) {
     BuildMI(MBB, MI, dl, get(Z80::LD16xmr))
       .addFrameIndex(FrameIndex).addImm(0)
       .addReg(SrcReg, getKillRegState(isKill));
@@ -397,11 +340,10 @@ void Z80InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
   DebugLoc dl;
   if (MI != MBB.end()) dl = MI->getDebugLoc();
 
-  if (RC == &Z80::BR8RegClass ||
-      Z80::BR8RegClass.contains(DestReg))
+  if (RC == &Z80::GR8RegClass)
     BuildMI(MBB, MI, dl, get(Z80::LD8rxm), DestReg)
       .addFrameIndex(FrameIndex).addImm(0);
-  else if (RC == &Z80::BR16RegClass) {
+  else if (RC == &Z80::GR16RegClass) {
     BuildMI(MBB, MI, dl, get(Z80::LD16rxm), DestReg)
       .addFrameIndex(FrameIndex).addImm(0);
   }

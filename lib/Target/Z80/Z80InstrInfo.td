@@ -194,21 +194,21 @@ let canFoldAsLoad = 1, isReMaterializable = 1 in {
     "load\t{$dst, ($src)}", [(set GR8:$dst, (load GR16:$src))]>;
   def LOAD16 : I<0x00, (outs GR16:$dst), (ins GR16:$src),
     "load\t{$dst, ($src)}", [(set GR16:$dst, (load GR16:$src))]>;
-  def LD16rxm : PseudoI<(outs BR16:$dst), (ins xmem:$src),
-    [(set BR16:$dst, (load xaddr:$src))]>;
-  def LD8rxm : IRyI8<0x46, (outs BR8:$dst), (ins xmem:$src),
-    "ld\t{$dst, ($src)}", [(set BR8:$dst, (load xaddr:$src))]>;
+  def LD16rxm : PseudoI<(outs GR16:$dst), (ins xmem:$src),
+    [(set GR16:$dst, (load xaddr:$src))]>;
+  def LD8rxm : IRyI8<0x46, (outs GR8:$dst), (ins xmem:$src),
+    "ld\t{$dst, ($src)}", [(set GR8:$dst, (load xaddr:$src))]>;
 }
 def STORE8  : I<0x00, (outs), (ins GR16:$dst, GR8:$src),
   "store\t{($dst), $src}", [(store GR8:$src, GR16:$dst)]>;
 def STORE16 : I<0x00, (outs), (ins GR16:$dst, GR16:$src),
   "store\t{($dst), $src}", [(store GR16:$src, GR16:$dst)]>;
-def LD16xmr : PseudoI<(outs), (ins xmem:$dst, BR16:$src),
-  [(store BR16:$src, xaddr:$dst)]>;
+def LD16xmr : PseudoI<(outs), (ins xmem:$dst, GR16:$src),
+  [(store GR16:$src, xaddr:$dst)]>;
 def LD16xmi : PseudoI<(outs), (ins xmem:$dst, i16imm:$src),
   [(store (i16 imm:$src), xaddr:$dst)]>;
-def LD8xmr : II8Rz<0x70, (outs), (ins xmem:$dst, BR8:$Rz),
-  "ld\t{($dst), $Rz}", [(store BR8:$Rz, xaddr:$dst)]>;
+def LD8xmr : II8Rz<0x70, (outs), (ins xmem:$dst, GR8:$Rz),
+  "ld\t{($dst), $Rz}", [(store GR8:$Rz, xaddr:$dst)]>;
 def LD8xmi : II8I8<0x36, (outs), (ins xmem:$dst, i8imm:$Imm2),
   "ld\t{($dst), $Imm2}", [(store (i8 imm:$Imm2), xaddr:$dst)]>;
 //===----------------------------------------------------------------------===//
@@ -322,15 +322,15 @@ let Defs = [FLAGS] in {
 
 let Uses = [HL], Defs = [HL, FLAGS] in {
   let isCommutable = 1 in {
-    def ADD16r : IRp<0x09, (outs), (ins BR16:$src),
-      "add\t{hl, $src}", [(set HL, (add HL, BR16:$src))]>;
+    def ADD16r : IRp<0x09, (outs), (ins GR16:$src),
+      "add\t{hl, $src}", [(set HL, (add HL, GR16:$src))]>;
     let Uses = [HL, FLAGS] in
-    def ADC16r : IRp<0x4A, (outs), (ins BR16:$src),
-      "adc\t{hl, $src}", [(set HL, (adde HL, BR16:$src))]>, ED;
+    def ADC16r : IRp<0x4A, (outs), (ins GR16:$src),
+      "adc\t{hl, $src}", [(set HL, (adde HL, GR16:$src))]>, ED;
   }
   let Uses = [HL, FLAGS] in
-  def SBC16r : IRp<0x42, (outs), (ins BR16:$src),
-    "sbc\t{hl, $src}", [(set HL, (sube HL, BR16:$src))]>, ED;
+  def SBC16r : IRp<0x42, (outs), (ins GR16:$src),
+    "sbc\t{hl, $src}", [(set HL, (sube HL, GR16:$src))]>, ED;
 }
 
 let Constraints = "$src = $dst" in {
