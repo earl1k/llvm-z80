@@ -29,6 +29,7 @@ namespace {
   private:
     SDNode *Select(SDNode *N);
     bool SelectXAddr(SDValue N, SDValue &Base, SDValue &Disp);
+    bool SelectIAddr(SDValue N, SDValue &Addr);
   }; // end class Z80DAGToDAGISel
 } // end namespace
 
@@ -120,6 +121,24 @@ bool Z80DAGToDAGISel::SelectXAddr(SDValue N, SDValue &Base, SDValue &Disp)
       }
     }
     break;
+  }
+  return false;
+}
+
+bool Z80DAGToDAGISel::SelectIAddr(SDValue N, SDValue &Addr)
+{
+  switch (N->getOpcode())
+  {
+  case ISD::Constant:
+    if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(N))
+    {
+      Addr = CurDAG->getTargetConstant(CN->getZExtValue(), MVT::i16);
+      return true;
+    }
+    break;
+  case Z80ISD::WRAPPER:
+    Addr = N->getOperand(0);
+    return true;
   }
   return false;
 }

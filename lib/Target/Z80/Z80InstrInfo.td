@@ -93,6 +93,7 @@ def xmem : Operand<i16> {
 //===----------------------------------------------------------------------===//
 
 def xaddr : ComplexPattern<iPTR, 2, "SelectXAddr", [], []>;
+def iaddr : ComplexPattern<iPTR, 1, "SelectIAddr", [], []>;
 
 def rst : PatLeaf<(i16 imm:$dst), [{
   return (N->getZExtValue() & 0x38) == N->getZExtValue();
@@ -137,7 +138,7 @@ let Defs = [FLAGS] in {
 
 let Defs = [A, FLAGS], Uses = [A] in {
   def CPL : I<0x2F, (outs), (ins), "cpl", [(set A, (not A))]>;
-  def NEG : I<0x44, (outs), (ins), "neg", [(set A, (sub 0, A))]>, ED;
+  def NEG : I<0x44, (outs), (ins), "neg", [(set A, (ineg A))]>, ED;
 }
 
 let Uses = [SP] in 
@@ -190,19 +191,30 @@ let isReMaterializable = 1, isAsCheapAsAMove = 1 in {
 }
 
 let canFoldAsLoad = 1, isReMaterializable = 1 in {
-  def LOAD8  : I<0x00, (outs GR8:$dst), (ins GR16:$src),
-    "load\t{$dst, ($src)}", [(set GR8:$dst, (load GR16:$src))]>;
-  def LOAD16 : I<0x00, (outs GR16:$dst), (ins GR16:$src),
-    "load\t{$dst, ($src)}", [(set GR16:$dst, (load GR16:$src))]>;
+  let Defs = [A] in
+  def LD8Am : II16<0x3A, (outs), (ins i16imm:$src),
+    "ld\t{a, ($src)}", [(set A, (load iaddr:$src))]>;
+  let Uses = [HL] in
+  def LD8rHL : IRy<0x46, (outs GR8:$dst), (ins),
+    "ld\t{$dst, (hl)}", [(set GR8:$dst, (load HL))]>;
+  def LD16rm : IRpI16<0x4B, (outs GR16:$Rp), (ins i16imm:$Imm),
+    "ld\t{$Rp, ($Imm)}", [(set GR16:$Rp, (load iaddr:$Imm))]>, ED;
   def LD16rxm : PseudoI<(outs GR16:$dst), (ins xmem:$src),
     [(set GR16:$dst, (load xaddr:$src))]>;
   def LD8rxm : IRyI8<0x46, (outs GR8:$dst), (ins xmem:$src),
     "ld\t{$dst, ($src)}", [(set GR8:$dst, (load xaddr:$src))]>;
 }
-def STORE8  : I<0x00, (outs), (ins GR16:$dst, GR8:$src),
-  "store\t{($dst), $src}", [(store GR8:$src, GR16:$dst)]>;
-def STORE16 : I<0x00, (outs), (ins GR16:$dst, GR16:$src),
-  "store\t{($dst), $src}", [(store GR16:$src, GR16:$dst)]>;
+let Uses = [A] in
+def LD8mA : II16<0x32, (outs), (ins i16imm:$dst),
+  "ld\t{($dst), a}", [(store A, iaddr:$dst)]>;
+let Uses = [HL] in {
+  def LD8HLr : IRz<0x70, (outs), (ins GR8:$src),
+    "ld\t{(hl), $src}", [(store GR8:$src, HL)]>;
+  def LD8HLi : II8<0x36, (outs), (ins i8imm:$src),
+    "ld\t{(hl), $src}", [(store (i8 imm:$src), HL)]>;
+}
+def LD16mr : IRpI16<0x43, (outs), (ins i16imm:$Imm, GR16:$Rp),
+  "ld\t{($Imm), $Rp}", [(store GR16:$Rp, iaddr:$Imm)]>, ED;
 def LD16xmr : PseudoI<(outs), (ins xmem:$dst, GR16:$src),
   [(store GR16:$src, xaddr:$dst)]>;
 def LD16xmi : PseudoI<(outs), (ins xmem:$dst, i16imm:$src),

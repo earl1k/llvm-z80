@@ -40,8 +40,8 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
 
   setTruncStoreAction(MVT::i16, MVT::i8, Expand);
 
-  //setOperationAction(ISD::LOAD,  MVT::i16, Custom);
-  //setOperationAction(ISD::STORE, MVT::i16, Custom);
+  setOperationAction(ISD::LOAD,  MVT::i16, Custom);
+  setOperationAction(ISD::STORE, MVT::i16, Custom);
 
   setOperationAction(ISD::ZERO_EXTEND, MVT::i16, Custom);
   setOperationAction(ISD::SIGN_EXTEND, MVT::i16, Custom);
@@ -703,7 +703,6 @@ SDValue Z80TargetLowering::LowerStore(SDValue Op, SelectionDAG &DAG) const
   switch (BasePtr.getOpcode())
   {
   default: llvm_unreachable("Invalid store operand");
-  case ISD::FrameIndex:
   case ISD::CopyFromReg:
     break;
   }
@@ -743,7 +742,6 @@ SDValue Z80TargetLowering::LowerLoad(SDValue Op, SelectionDAG &DAG) const
   {
   default: llvm_unreachable("invalid load operand");
   case ISD::CopyFromReg:
-  case ISD::FrameIndex:
     break;
   }
   SDValue Lo = DAG.getLoad(MVT::i8, dl, Chain, BasePtr,
@@ -754,13 +752,16 @@ SDValue Z80TargetLowering::LowerLoad(SDValue Op, SelectionDAG &DAG) const
   SDValue Hi = DAG.getLoad(MVT::i8, dl, Chain, HighAddr,
     MachinePointerInfo(), LD->isVolatile(), LD->isNonTemporal(),
     LD->isInvariant(), LD->getAlignment());
+  SDValue NewChain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
+    Lo.getValue(1), Hi.getValue(1));
 
   SDValue LoRes = DAG.getTargetInsertSubreg(Z80::subreg_lo, dl,
     MVT::i16, DAG.getUNDEF(MVT::i16), Lo);
   SDValue HiRes = DAG.getTargetInsertSubreg(Z80::subreg_hi, dl,
     MVT::i16, LoRes, Hi);
 
-  return HiRes;
+  SDValue Ops[] = { HiRes, NewChain };
+  return DAG.getMergeValues(Ops, 2, dl);
 }
 
 //===----------------------------------------------------------------------===//
