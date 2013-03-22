@@ -702,9 +702,14 @@ SDValue Z80TargetLowering::LowerStore(SDValue Op, SelectionDAG &DAG) const
   
   switch (BasePtr.getOpcode())
   {
-  default: llvm_unreachable("Invalid store operand");
+  default: break;
   case ISD::CopyFromReg:
-    break;
+      if (RegisterSDNode *RN = dyn_cast<RegisterSDNode>(BasePtr.getOperand(1)))
+        if (RN->getReg() != getTargetMachine().getRegisterInfo()->getFrameRegister(
+          DAG.getMachineFunction()))
+          break;
+  case ISD::FrameIndex:
+    return SDValue();
   }
 
   SDValue Lo, Hi;
@@ -712,11 +717,10 @@ SDValue Z80TargetLowering::LowerStore(SDValue Op, SelectionDAG &DAG) const
     Lo = DAG.getConstant(CN->getZExtValue() & 0xFF, MVT::i8);
     Hi = DAG.getConstant((CN->getZExtValue()>>8) & 0xFF, MVT::i8);
   }
-  else if (Value.getOpcode() == ISD::CopyFromReg) {
+  else {
     Lo = DAG.getTargetExtractSubreg(Z80::subreg_lo, dl, MVT::i8, Value);
     Hi = DAG.getTargetExtractSubreg(Z80::subreg_hi, dl, MVT::i8, Value);
   }
-  else assert(0 && "Not implemented yet!");
   SDValue StoreLow = DAG.getStore(Chain, dl, Lo, BasePtr,
     ST->getPointerInfo(), ST->isVolatile(),
     ST->isNonTemporal(), ST->getAlignment());
@@ -740,9 +744,9 @@ SDValue Z80TargetLowering::LowerLoad(SDValue Op, SelectionDAG &DAG) const
 
   switch (BasePtr.getOpcode())
   {
-  default: llvm_unreachable("invalid load operand");
-  case ISD::CopyFromReg:
-    break;
+  default: break;
+  case ISD::FrameIndex:
+    return SDValue();
   }
   SDValue Lo = DAG.getLoad(MVT::i8, dl, Chain, BasePtr,
     MachinePointerInfo(), LD->isVolatile(), LD->isNonTemporal(),

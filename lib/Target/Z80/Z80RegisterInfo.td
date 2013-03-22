@@ -72,5 +72,6 @@ def SP : Z80Reg<"sp">;
 def PC : Z80Reg<"pc">;
 
 def GR8  : Z80Reg8Class<(add A, B, C, D, E, H, L)>;
-def GR16 : Z80Reg16Class<(add BC, DE, HL)>;
+def GR16 : Z80Reg16Class<(add BC, DE, HL, IX, IY)>;
+def BR16 : Z80Reg16Class<(add BC, DE, HL)>;
 def IR16 : Z80Reg16Class<(add IX, IY)>;

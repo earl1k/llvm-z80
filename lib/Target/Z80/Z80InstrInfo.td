@@ -85,7 +85,7 @@ def cc : Operand<i8> {
 def xmem : Operand<i16> {
   let PrintMethod   = "printXMemOperand";
   let EncoderMethod = "getXMemOpValue";
-  let MIOperandInfo = (ops GR16, i8imm);
+  let MIOperandInfo = (ops IR16, i8imm);
 }
 
 //===----------------------------------------------------------------------===//
@@ -199,8 +199,8 @@ let canFoldAsLoad = 1, isReMaterializable = 1 in {
     "ld\t{$dst, (hl)}", [(set GR8:$dst, (load HL))]>;
   def LD16rm : IRpI16<0x4B, (outs GR16:$Rp), (ins i16imm:$Imm),
     "ld\t{$Rp, ($Imm)}", [(set GR16:$Rp, (load iaddr:$Imm))]>, ED;
-  def LD16rxm : PseudoI<(outs GR16:$dst), (ins xmem:$src),
-    [(set GR16:$dst, (load xaddr:$src))]>;
+  def LD16rxm : PseudoI<(outs BR16:$dst), (ins xmem:$src),
+    [(set BR16:$dst, (load xaddr:$src))]>;
   def LD8rxm : IRyI8<0x46, (outs GR8:$dst), (ins xmem:$src),
     "ld\t{$dst, ($src)}", [(set GR8:$dst, (load xaddr:$src))]>;
 }
@@ -215,8 +215,8 @@ let Uses = [HL] in {
 }
 def LD16mr : IRpI16<0x43, (outs), (ins i16imm:$Imm, GR16:$Rp),
   "ld\t{($Imm), $Rp}", [(store GR16:$Rp, iaddr:$Imm)]>, ED;
-def LD16xmr : PseudoI<(outs), (ins xmem:$dst, GR16:$src),
-  [(store GR16:$src, xaddr:$dst)]>;
+def LD16xmr : PseudoI<(outs), (ins xmem:$dst, BR16:$src),
+  [(store BR16:$src, xaddr:$dst)]>;
 def LD16xmi : PseudoI<(outs), (ins xmem:$dst, i16imm:$src),
   [(store (i16 imm:$src), xaddr:$dst)]>;
 def LD8xmr : II8Rz<0x70, (outs), (ins xmem:$dst, GR8:$Rz),

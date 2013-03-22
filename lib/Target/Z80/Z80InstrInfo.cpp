@@ -38,9 +38,9 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
       .addReg(SrcReg, getKillRegState(KillSrc));
     return;
   }
-  else if (Z80::GR16RegClass.contains(DestReg, SrcReg))
+  else if (Z80::BR16RegClass.contains(DestReg, SrcReg))
   {
-    // copy GR16 to GR16
+    // copy BR16 to BR16
     if ((DestReg == Z80::HL && SrcReg == Z80::DE ||
          DestReg == Z80::DE && SrcReg == Z80::HL) &&
          KillSrc)
@@ -65,6 +65,15 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     if (KillSrc)
       BuildMI(MBB, I, DL, get(Z80::KILL))
         .addReg(SrcReg);
+    return;
+  }
+  else if (Z80::GR16RegClass.contains(DestReg) ||
+           Z80::GR16RegClass.contains(SrcReg))
+  {
+    // copy GR16 to GR16
+    BuildMI(MBB, I, DL, get(Z80::PUSH16r))
+      .addReg(SrcReg, getKillRegState(KillSrc));
+    BuildMI(MBB, I, DL, get(Z80::POP16r), DestReg);
     return;
   }
   llvm_unreachable("Imposible reg-to-reg copy");
