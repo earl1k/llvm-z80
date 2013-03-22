@@ -428,6 +428,11 @@ bool Z80InstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const
     break;
   }
 
+  DEBUG(dbgs() << "Pseudo: " << *MI);
+  DEBUG(dbgs() << "Replaced by:\n" <<
+    "\t" << *MI->getPrevNode()->getPrevNode() <<
+    "\t" << *MI->getPrevNode());
+
   MI->eraseFromParent();
   return true;
 }
