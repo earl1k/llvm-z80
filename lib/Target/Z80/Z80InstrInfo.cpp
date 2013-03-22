@@ -41,9 +41,7 @@ void Z80InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   else if (Z80::BR16RegClass.contains(DestReg, SrcReg))
   {
     // copy BR16 to BR16
-    if ((DestReg == Z80::HL && SrcReg == Z80::DE ||
-         DestReg == Z80::DE && SrcReg == Z80::HL) &&
-         KillSrc)
+    if (Z80::EXR16RegClass.contains(DestReg, SrcReg) && KillSrc)
     {
       BuildMI(MBB, I, DL, get(Z80::EX_DE_HL));
     }
