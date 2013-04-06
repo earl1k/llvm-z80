@@ -48,7 +48,7 @@ ARMBaseTargetMachine::ARMBaseTargetMachine(const Target &T, StringRef TT,
                                            Reloc::Model RM, CodeModel::Model CM,
                                            CodeGenOpt::Level OL)
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS),
+    Subtarget(TT, CPU, FS, Options),
     JITInfo(),
     InstrItins(Subtarget.getInstrItineraryData()) {
   // Default to soft float ABI
@@ -185,8 +185,7 @@ bool ARMPassConfig::addPreSched2() {
       addPass(createARMLoadStoreOptimizationPass());
       printAndVerify("After ARM load / store optimizer");
     }
-    if ((DisableA15SDOptimization || !getARMSubtarget().isCortexA15()) &&
-      getARMSubtarget().hasNEON())
+    if (getARMSubtarget().hasNEON())
       addPass(createExecutionDependencyFixPass(&ARM::DPRRegClass));
   }
 

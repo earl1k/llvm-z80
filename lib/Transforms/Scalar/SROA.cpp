@@ -57,16 +57,171 @@
 using namespace llvm;
 
 STATISTIC(NumAllocasAnalyzed, "Number of allocas analyzed for replacement");
-STATISTIC(NumNewAllocas,      "Number of new, smaller allocas introduced");
-STATISTIC(NumPromoted,        "Number of allocas promoted to SSA values");
+STATISTIC(NumAllocaPartitions, "Number of alloca partitions formed");
+STATISTIC(MaxPartitionsPerAlloca, "Maximum number of partitions");
+STATISTIC(NumAllocaPartitionUses, "Number of alloca partition uses found");
+STATISTIC(MaxPartitionUsesPerAlloca, "Maximum number of partition uses");
+STATISTIC(NumNewAllocas, "Number of new, smaller allocas introduced");
+STATISTIC(NumPromoted, "Number of allocas promoted to SSA values");
 STATISTIC(NumLoadsSpeculated, "Number of loads speculated to allow promotion");
-STATISTIC(NumDeleted,         "Number of instructions deleted");
-STATISTIC(NumVectorized,      "Number of vectorized aggregates");
+STATISTIC(NumDeleted, "Number of instructions deleted");
+STATISTIC(NumVectorized, "Number of vectorized aggregates");
 
 /// Hidden option to force the pass to not use DomTree and mem2reg, instead
 /// forming SSA values through the SSAUpdater infrastructure.
 static cl::opt<bool>
 ForceSSAUpdater("force-ssa-updater", cl::init(false), cl::Hidden);
+
+namespace {
+/// \brief A custom IRBuilder inserter which prefixes all names if they are
+/// preserved.
+template <bool preserveNames = true>
+class IRBuilderPrefixedInserter :
+    public IRBuilderDefaultInserter<preserveNames> {
+  std::string Prefix;
+
+public:
+  void SetNamePrefix(const Twine &P) { Prefix = P.str(); }
+
+protected:
+  void InsertHelper(Instruction *I, const Twine &Name, BasicBlock *BB,
+                    BasicBlock::iterator InsertPt) const {
+    IRBuilderDefaultInserter<preserveNames>::InsertHelper(
+        I, Name.isTriviallyEmpty() ? Name : Prefix + Name, BB, InsertPt);
+  }
+};
+
+// Specialization for not preserving the name is trivial.
+template <>
+class IRBuilderPrefixedInserter<false> :
+    public IRBuilderDefaultInserter<false> {
+public:
+  void SetNamePrefix(const Twine &P) {}
+};
+
+/// \brief Provide a typedef for IRBuilder that drops names in release builds.
+#ifndef NDEBUG
+typedef llvm::IRBuilder<true, ConstantFolder,
+                        IRBuilderPrefixedInserter<true> > IRBuilderTy;
+#else
+typedef llvm::IRBuilder<false, ConstantFolder,
+                        IRBuilderPrefixedInserter<false> > IRBuilderTy;
+#endif
+}
+
+namespace {
+/// \brief A common base class for representing a half-open byte range.
+struct ByteRange {
+  /// \brief The beginning offset of the range.
+  uint64_t BeginOffset;
+
+  /// \brief The ending offset, not included in the range.
+  uint64_t EndOffset;
+
+  ByteRange() : BeginOffset(), EndOffset() {}
+  ByteRange(uint64_t BeginOffset, uint64_t EndOffset)
+      : BeginOffset(BeginOffset), EndOffset(EndOffset) {}
+
+  /// \brief Support for ordering ranges.
+  ///
+  /// This provides an ordering over ranges such that start offsets are
+  /// always increasing, and within equal start offsets, the end offsets are
+  /// decreasing. Thus the spanning range comes first in a cluster with the
+  /// same start position.
+  bool operator<(const ByteRange &RHS) const {
+    if (BeginOffset < RHS.BeginOffset) return true;
+    if (BeginOffset > RHS.BeginOffset) return false;
+    if (EndOffset > RHS.EndOffset) return true;
+    return false;
+  }
+
+  /// \brief Support comparison with a single offset to allow binary searches.
+  friend bool operator<(const ByteRange &LHS, uint64_t RHSOffset) {
+    return LHS.BeginOffset < RHSOffset;
+  }
+
+  friend LLVM_ATTRIBUTE_UNUSED bool operator<(uint64_t LHSOffset,
+                                              const ByteRange &RHS) {
+    return LHSOffset < RHS.BeginOffset;
+  }
+
+  bool operator==(const ByteRange &RHS) const {
+    return BeginOffset == RHS.BeginOffset && EndOffset == RHS.EndOffset;
+  }
+  bool operator!=(const ByteRange &RHS) const { return !operator==(RHS); }
+};
+
+/// \brief A partition of an alloca.
+///
+/// This structure represents a contiguous partition of the alloca. These are
+/// formed by examining the uses of the alloca. During formation, they may
+/// overlap but once an AllocaPartitioning is built, the Partitions within it
+/// are all disjoint.
+struct Partition : public ByteRange {
+  /// \brief Whether this partition is splittable into smaller partitions.
+  ///
+  /// We flag partitions as splittable when they are formed entirely due to
+  /// accesses by trivially splittable operations such as memset and memcpy.
+  bool IsSplittable;
+
+  /// \brief Test whether a partition has been marked as dead.
+  bool isDead() const {
+    if (BeginOffset == UINT64_MAX) {
+      assert(EndOffset == UINT64_MAX);
+      return true;
+    }
+    return false;
+  }
+
+  /// \brief Kill a partition.
+  /// This is accomplished by setting both its beginning and end offset to
+  /// the maximum possible value.
+  void kill() {
+    assert(!isDead() && "He's Dead, Jim!");
+    BeginOffset = EndOffset = UINT64_MAX;
+  }
+
+  Partition() : ByteRange(), IsSplittable() {}
+  Partition(uint64_t BeginOffset, uint64_t EndOffset, bool IsSplittable)
+      : ByteRange(BeginOffset, EndOffset), IsSplittable(IsSplittable) {}
+};
+
+/// \brief A particular use of a partition of the alloca.
+///
+/// This structure is used to associate uses of a partition with it. They
+/// mark the range of bytes which are referenced by a particular instruction,
+/// and includes a handle to the user itself and the pointer value in use.
+/// The bounds of these uses are determined by intersecting the bounds of the
+/// memory use itself with a particular partition. As a consequence there is
+/// intentionally overlap between various uses of the same partition.
+class PartitionUse : public ByteRange {
+  /// \brief Combined storage for both the Use* and split state.
+  PointerIntPair<Use*, 1, bool> UsePtrAndIsSplit;
+
+public:
+  PartitionUse() : ByteRange(), UsePtrAndIsSplit() {}
+  PartitionUse(uint64_t BeginOffset, uint64_t EndOffset, Use *U,
+               bool IsSplit)
+      : ByteRange(BeginOffset, EndOffset), UsePtrAndIsSplit(U, IsSplit) {}
+
+  /// \brief The use in question. Provides access to both user and used value.
+  ///
+  /// Note that this may be null if the partition use is *dead*, that is, it
+  /// should be ignored.
+  Use *getUse() const { return UsePtrAndIsSplit.getPointer(); }
+
+  /// \brief Set the use for this partition use range.
+  void setUse(Use *U) { UsePtrAndIsSplit.setPointer(U); }
+
+  /// \brief Whether this use is split across multiple partitions.
+  bool isSplit() const { return UsePtrAndIsSplit.getInt(); }
+};
+}
+
+namespace llvm {
+template <> struct isPodLike<Partition> : llvm::true_type {};
+template <> struct isPodLike<PartitionUse> : llvm::true_type {};
+}
 
 namespace {
 /// \brief Alloca partitioning representation.
@@ -79,113 +234,6 @@ namespace {
 /// and to enact these transformations.
 class AllocaPartitioning {
 public:
-  /// \brief A common base class for representing a half-open byte range.
-  struct ByteRange {
-    /// \brief The beginning offset of the range.
-    uint64_t BeginOffset;
-
-    /// \brief The ending offset, not included in the range.
-    uint64_t EndOffset;
-
-    ByteRange() : BeginOffset(), EndOffset() {}
-    ByteRange(uint64_t BeginOffset, uint64_t EndOffset)
-        : BeginOffset(BeginOffset), EndOffset(EndOffset) {}
-
-    /// \brief Support for ordering ranges.
-    ///
-    /// This provides an ordering over ranges such that start offsets are
-    /// always increasing, and within equal start offsets, the end offsets are
-    /// decreasing. Thus the spanning range comes first in a cluster with the
-    /// same start position.
-    bool operator<(const ByteRange &RHS) const {
-      if (BeginOffset < RHS.BeginOffset) return true;
-      if (BeginOffset > RHS.BeginOffset) return false;
-      if (EndOffset > RHS.EndOffset) return true;
-      return false;
-    }
-
-    /// \brief Support comparison with a single offset to allow binary searches.
-    friend bool operator<(const ByteRange &LHS, uint64_t RHSOffset) {
-      return LHS.BeginOffset < RHSOffset;
-    }
-
-    friend LLVM_ATTRIBUTE_UNUSED bool operator<(uint64_t LHSOffset,
-                                                const ByteRange &RHS) {
-      return LHSOffset < RHS.BeginOffset;
-    }
-
-    bool operator==(const ByteRange &RHS) const {
-      return BeginOffset == RHS.BeginOffset && EndOffset == RHS.EndOffset;
-    }
-    bool operator!=(const ByteRange &RHS) const { return !operator==(RHS); }
-  };
-
-  /// \brief A partition of an alloca.
-  ///
-  /// This structure represents a contiguous partition of the alloca. These are
-  /// formed by examining the uses of the alloca. During formation, they may
-  /// overlap but once an AllocaPartitioning is built, the Partitions within it
-  /// are all disjoint.
-  struct Partition : public ByteRange {
-    /// \brief Whether this partition is splittable into smaller partitions.
-    ///
-    /// We flag partitions as splittable when they are formed entirely due to
-    /// accesses by trivially splittable operations such as memset and memcpy.
-    bool IsSplittable;
-
-    /// \brief Test whether a partition has been marked as dead.
-    bool isDead() const {
-      if (BeginOffset == UINT64_MAX) {
-        assert(EndOffset == UINT64_MAX);
-        return true;
-      }
-      return false;
-    }
-
-    /// \brief Kill a partition.
-    /// This is accomplished by setting both its beginning and end offset to
-    /// the maximum possible value.
-    void kill() {
-      assert(!isDead() && "He's Dead, Jim!");
-      BeginOffset = EndOffset = UINT64_MAX;
-    }
-
-    Partition() : ByteRange(), IsSplittable() {}
-    Partition(uint64_t BeginOffset, uint64_t EndOffset, bool IsSplittable)
-        : ByteRange(BeginOffset, EndOffset), IsSplittable(IsSplittable) {}
-  };
-
-  /// \brief A particular use of a partition of the alloca.
-  ///
-  /// This structure is used to associate uses of a partition with it. They
-  /// mark the range of bytes which are referenced by a particular instruction,
-  /// and includes a handle to the user itself and the pointer value in use.
-  /// The bounds of these uses are determined by intersecting the bounds of the
-  /// memory use itself with a particular partition. As a consequence there is
-  /// intentionally overlap between various uses of the same partition.
-  class PartitionUse : public ByteRange {
-    /// \brief Combined storage for both the Use* and split state.
-    PointerIntPair<Use*, 1, bool> UsePtrAndIsSplit;
-
-  public:
-    PartitionUse() : ByteRange(), UsePtrAndIsSplit() {}
-    PartitionUse(uint64_t BeginOffset, uint64_t EndOffset, Use *U,
-                 bool IsSplit)
-        : ByteRange(BeginOffset, EndOffset), UsePtrAndIsSplit(U, IsSplit) {}
-
-    /// \brief The use in question. Provides access to both user and used value.
-    ///
-    /// Note that this may be null if the partition use is *dead*, that is, it
-    /// should be ignored.
-    Use *getUse() const { return UsePtrAndIsSplit.getPointer(); }
-
-    /// \brief Set the use for this partition use range.
-    void setUse(Use *U) { UsePtrAndIsSplit.setPointer(U); }
-
-    /// \brief Whether this use is split across multiple partitions.
-    bool isSplit() const { return UsePtrAndIsSplit.getInt(); }
-  };
-
   /// \brief Construct a partitioning of a particular alloca.
   ///
   /// Construction does most of the work for partitioning the alloca. This
@@ -881,7 +929,7 @@ private:
     uint64_t Size = Length ? Length->getLimitedValue()
                            : AllocSize - Offset.getLimitedValue();
 
-    MemTransferOffsets &Offsets = P.MemTransferInstData[&II];
+    const MemTransferOffsets &Offsets = P.MemTransferInstData[&II];
     if (!II.isVolatile() && Offsets.DestEnd && Offsets.SourceEnd &&
         Offsets.DestBegin == Offsets.SourceBegin)
       return markAsDead(II); // Skip identity transfers without side-effects.
@@ -1090,6 +1138,10 @@ AllocaPartitioning::AllocaPartitioning(const DataLayout &TD, AllocaInst &AI)
     splitAndMergePartitions();
   }
 
+  // Record how many partitions we end up with.
+  NumAllocaPartitions += Partitions.size();
+  MaxPartitionsPerAlloca = std::max<unsigned>(Partitions.size(), MaxPartitionsPerAlloca);
+
   // Now build up the user lists for each of these disjoint partitions by
   // re-walking the recursive users of the alloca.
   Uses.resize(Partitions.size());
@@ -1097,6 +1149,14 @@ AllocaPartitioning::AllocaPartitioning(const DataLayout &TD, AllocaInst &AI)
   PtrI = UB.visitPtr(AI);
   assert(!PtrI.isEscaped() && "Previously analyzed pointer now escapes!");
   assert(!PtrI.isAborted() && "Early aborted the visit of the pointer.");
+
+  unsigned NumUses = 0;
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_STATS)
+  for (unsigned Idx = 0, Size = Uses.size(); Idx != Size; ++Idx)
+    NumUses += Uses[Idx].size();
+#endif
+  NumAllocaPartitionUses += NumUses;
+  MaxPartitionUsesPerAlloca = std::max<unsigned>(NumUses, MaxPartitionUsesPerAlloca);
 }
 
 Type *AllocaPartitioning::getCommonType(iterator I) const {
@@ -1258,12 +1318,12 @@ public:
         // may be zapped by an optimization pass in future.
         if (ZExtInst *ZExt = dyn_cast<ZExtInst>(SI->getOperand(0)))
           Arg = dyn_cast<Argument>(ZExt->getOperand(0));
-        if (SExtInst *SExt = dyn_cast<SExtInst>(SI->getOperand(0)))
+        else if (SExtInst *SExt = dyn_cast<SExtInst>(SI->getOperand(0)))
           Arg = dyn_cast<Argument>(SExt->getOperand(0));
         if (!Arg)
-          Arg = SI->getOperand(0);
+          Arg = SI->getValueOperand();
       } else if (LoadInst *LI = dyn_cast<LoadInst>(Inst)) {
-        Arg = LI->getOperand(0);
+        Arg = LI->getPointerOperand();
       } else {
         continue;
       }
@@ -1389,7 +1449,7 @@ public:
     // may be grown during speculation. However, we never need to re-visit the
     // new uses, and so we can use the initial size bound.
     for (unsigned Idx = 0, Size = P.use_size(PI); Idx != Size; ++Idx) {
-      const AllocaPartitioning::PartitionUse &PU = P.getUse(PI, Idx);
+      const PartitionUse &PU = P.getUse(PI, Idx);
       if (!PU.getUse())
         continue; // Skip dead use.
 
@@ -1487,7 +1547,7 @@ private:
     assert(!Loads.empty());
 
     Type *LoadTy = cast<PointerType>(PN.getType())->getElementType();
-    IRBuilder<> PHIBuilder(&PN);
+    IRBuilderTy PHIBuilder(&PN);
     PHINode *NewPN = PHIBuilder.CreatePHI(LoadTy, PN.getNumIncomingValues(),
                                           PN.getName() + ".sroa.speculated");
 
@@ -1510,7 +1570,7 @@ private:
       TerminatorInst *TI = Pred->getTerminator();
       Use *InUse = &PN.getOperandUse(PN.getOperandNumForIncomingValue(Idx));
       Value *InVal = PN.getIncomingValue(Idx);
-      IRBuilder<> PredBuilder(TI);
+      IRBuilderTy PredBuilder(TI);
 
       LoadInst *Load
         = PredBuilder.CreateLoad(InVal, (PN.getName() + ".sroa.speculate.load." +
@@ -1591,10 +1651,10 @@ private:
     if (!isSafeSelectToSpeculate(SI, Loads))
       return;
 
-    IRBuilder<> IRB(&SI);
+    IRBuilderTy IRB(&SI);
     Use *Ops[2] = { &SI.getOperandUse(1), &SI.getOperandUse(2) };
     AllocaPartitioning::iterator PIs[2];
-    AllocaPartitioning::PartitionUse PUs[2];
+    PartitionUse PUs[2];
     for (unsigned i = 0, e = 2; i != e; ++i) {
       PIs[i] = P.findPartitionForPHIOrSelectOperand(Ops[i]);
       if (PIs[i] != P.end()) {
@@ -1655,9 +1715,8 @@ private:
 ///
 /// This will return the BasePtr if that is valid, or build a new GEP
 /// instruction using the IRBuilder if GEP-ing is needed.
-static Value *buildGEP(IRBuilder<> &IRB, Value *BasePtr,
-                       SmallVectorImpl<Value *> &Indices,
-                       const Twine &Prefix) {
+static Value *buildGEP(IRBuilderTy &IRB, Value *BasePtr,
+                       SmallVectorImpl<Value *> &Indices) {
   if (Indices.empty())
     return BasePtr;
 
@@ -1666,7 +1725,7 @@ static Value *buildGEP(IRBuilder<> &IRB, Value *BasePtr,
   if (Indices.size() == 1 && cast<ConstantInt>(Indices.back())->isZero())
     return BasePtr;
 
-  return IRB.CreateInBoundsGEP(BasePtr, Indices, Prefix + ".idx");
+  return IRB.CreateInBoundsGEP(BasePtr, Indices, "idx");
 }
 
 /// \brief Get a natural GEP off of the BasePtr walking through Ty toward
@@ -1678,12 +1737,11 @@ static Value *buildGEP(IRBuilder<> &IRB, Value *BasePtr,
 /// TargetTy. If we can't find one with the same type, we at least try to use
 /// one with the same size. If none of that works, we just produce the GEP as
 /// indicated by Indices to have the correct offset.
-static Value *getNaturalGEPWithType(IRBuilder<> &IRB, const DataLayout &TD,
+static Value *getNaturalGEPWithType(IRBuilderTy &IRB, const DataLayout &TD,
                                     Value *BasePtr, Type *Ty, Type *TargetTy,
-                                    SmallVectorImpl<Value *> &Indices,
-                                    const Twine &Prefix) {
+                                    SmallVectorImpl<Value *> &Indices) {
   if (Ty == TargetTy)
-    return buildGEP(IRB, BasePtr, Indices, Prefix);
+    return buildGEP(IRB, BasePtr, Indices);
 
   // See if we can descend into a struct and locate a field with the correct
   // type.
@@ -1710,20 +1768,19 @@ static Value *getNaturalGEPWithType(IRBuilder<> &IRB, const DataLayout &TD,
   if (ElementTy != TargetTy)
     Indices.erase(Indices.end() - NumLayers, Indices.end());
 
-  return buildGEP(IRB, BasePtr, Indices, Prefix);
+  return buildGEP(IRB, BasePtr, Indices);
 }
 
 /// \brief Recursively compute indices for a natural GEP.
 ///
 /// This is the recursive step for getNaturalGEPWithOffset that walks down the
 /// element types adding appropriate indices for the GEP.
-static Value *getNaturalGEPRecursively(IRBuilder<> &IRB, const DataLayout &TD,
+static Value *getNaturalGEPRecursively(IRBuilderTy &IRB, const DataLayout &TD,
                                        Value *Ptr, Type *Ty, APInt &Offset,
                                        Type *TargetTy,
-                                       SmallVectorImpl<Value *> &Indices,
-                                       const Twine &Prefix) {
+                                       SmallVectorImpl<Value *> &Indices) {
   if (Offset == 0)
-    return getNaturalGEPWithType(IRB, TD, Ptr, Ty, TargetTy, Indices, Prefix);
+    return getNaturalGEPWithType(IRB, TD, Ptr, Ty, TargetTy, Indices);
 
   // We can't recurse through pointer types.
   if (Ty->isPointerTy())
@@ -1743,7 +1800,7 @@ static Value *getNaturalGEPRecursively(IRBuilder<> &IRB, const DataLayout &TD,
     Offset -= NumSkippedElements * ElementSize;
     Indices.push_back(IRB.getInt(NumSkippedElements));
     return getNaturalGEPRecursively(IRB, TD, Ptr, VecTy->getElementType(),
-                                    Offset, TargetTy, Indices, Prefix);
+                                    Offset, TargetTy, Indices);
   }
 
   if (ArrayType *ArrTy = dyn_cast<ArrayType>(Ty)) {
@@ -1756,7 +1813,7 @@ static Value *getNaturalGEPRecursively(IRBuilder<> &IRB, const DataLayout &TD,
     Offset -= NumSkippedElements * ElementSize;
     Indices.push_back(IRB.getInt(NumSkippedElements));
     return getNaturalGEPRecursively(IRB, TD, Ptr, ElementTy, Offset, TargetTy,
-                                    Indices, Prefix);
+                                    Indices);
   }
 
   StructType *STy = dyn_cast<StructType>(Ty);
@@ -1775,7 +1832,7 @@ static Value *getNaturalGEPRecursively(IRBuilder<> &IRB, const DataLayout &TD,
 
   Indices.push_back(IRB.getInt32(Index));
   return getNaturalGEPRecursively(IRB, TD, Ptr, ElementTy, Offset, TargetTy,
-                                  Indices, Prefix);
+                                  Indices);
 }
 
 /// \brief Get a natural GEP from a base pointer to a particular offset and
@@ -1788,10 +1845,9 @@ static Value *getNaturalGEPRecursively(IRBuilder<> &IRB, const DataLayout &TD,
 /// Indices, and setting Ty to the result subtype.
 ///
 /// If no natural GEP can be constructed, this function returns null.
-static Value *getNaturalGEPWithOffset(IRBuilder<> &IRB, const DataLayout &TD,
+static Value *getNaturalGEPWithOffset(IRBuilderTy &IRB, const DataLayout &TD,
                                       Value *Ptr, APInt Offset, Type *TargetTy,
-                                      SmallVectorImpl<Value *> &Indices,
-                                      const Twine &Prefix) {
+                                      SmallVectorImpl<Value *> &Indices) {
   PointerType *Ty = cast<PointerType>(Ptr->getType());
 
   // Don't consider any GEPs through an i8* as natural unless the TargetTy is
@@ -1810,7 +1866,7 @@ static Value *getNaturalGEPWithOffset(IRBuilder<> &IRB, const DataLayout &TD,
   Offset -= NumSkippedElements * ElementSize;
   Indices.push_back(IRB.getInt(NumSkippedElements));
   return getNaturalGEPRecursively(IRB, TD, Ptr, ElementTy, Offset, TargetTy,
-                                  Indices, Prefix);
+                                  Indices);
 }
 
 /// \brief Compute an adjusted pointer from Ptr by Offset bytes where the
@@ -1828,9 +1884,8 @@ static Value *getNaturalGEPWithOffset(IRBuilder<> &IRB, const DataLayout &TD,
 /// properties. The algorithm tries to fold as many constant indices into
 /// a single GEP as possible, thus making each GEP more independent of the
 /// surrounding code.
-static Value *getAdjustedPtr(IRBuilder<> &IRB, const DataLayout &TD,
-                             Value *Ptr, APInt Offset, Type *PointerTy,
-                             const Twine &Prefix) {
+static Value *getAdjustedPtr(IRBuilderTy &IRB, const DataLayout &TD,
+                             Value *Ptr, APInt Offset, Type *PointerTy) {
   // Even though we don't look through PHI nodes, we could be called on an
   // instruction in an unreachable block, which may be on a cycle.
   SmallPtrSet<Value *, 4> Visited;
@@ -1864,7 +1919,7 @@ static Value *getAdjustedPtr(IRBuilder<> &IRB, const DataLayout &TD,
     // See if we can perform a natural GEP here.
     Indices.clear();
     if (Value *P = getNaturalGEPWithOffset(IRB, TD, Ptr, Offset, TargetTy,
-                                           Indices, Prefix)) {
+                                           Indices)) {
       if (P->getType() == PointerTy) {
         // Zap any offset pointer that we ended up computing in previous rounds.
         if (OffsetPtr && OffsetPtr->use_empty())
@@ -1899,19 +1954,19 @@ static Value *getAdjustedPtr(IRBuilder<> &IRB, const DataLayout &TD,
   if (!OffsetPtr) {
     if (!Int8Ptr) {
       Int8Ptr = IRB.CreateBitCast(Ptr, IRB.getInt8PtrTy(),
-                                  Prefix + ".raw_cast");
+                                  "raw_cast");
       Int8PtrOffset = Offset;
     }
 
     OffsetPtr = Int8PtrOffset == 0 ? Int8Ptr :
       IRB.CreateInBoundsGEP(Int8Ptr, IRB.getInt(Int8PtrOffset),
-                            Prefix + ".raw_idx");
+                            "raw_idx");
   }
   Ptr = OffsetPtr;
 
   // On the off chance we were targeting i8*, guard the bitcast here.
   if (Ptr->getType() != PointerTy)
-    Ptr = IRB.CreateBitCast(Ptr, PointerTy, Prefix + ".cast");
+    Ptr = IRB.CreateBitCast(Ptr, PointerTy, "cast");
 
   return Ptr;
 }
@@ -1951,7 +2006,7 @@ static bool canConvertValue(const DataLayout &DL, Type *OldTy, Type *NewTy) {
 /// This will try various different casting techniques, such as bitcasts,
 /// inttoptr, and ptrtoint casts. Use the \c canConvertValue predicate to test
 /// two types for viability with this routine.
-static Value *convertValue(const DataLayout &DL, IRBuilder<> &IRB, Value *V,
+static Value *convertValue(const DataLayout &DL, IRBuilderTy &IRB, Value *V,
                            Type *Ty) {
   assert(canConvertValue(DL, V->getType(), Ty) &&
          "Value not convertable to type");
@@ -2149,7 +2204,7 @@ static bool isIntegerWideningViable(const DataLayout &TD,
   return WholeAllocaOp;
 }
 
-static Value *extractInteger(const DataLayout &DL, IRBuilder<> &IRB, Value *V,
+static Value *extractInteger(const DataLayout &DL, IRBuilderTy &IRB, Value *V,
                              IntegerType *Ty, uint64_t Offset,
                              const Twine &Name) {
   DEBUG(dbgs() << "       start: " << *V << "\n");
@@ -2172,7 +2227,7 @@ static Value *extractInteger(const DataLayout &DL, IRBuilder<> &IRB, Value *V,
   return V;
 }
 
-static Value *insertInteger(const DataLayout &DL, IRBuilder<> &IRB, Value *Old,
+static Value *insertInteger(const DataLayout &DL, IRBuilderTy &IRB, Value *Old,
                             Value *V, uint64_t Offset, const Twine &Name) {
   IntegerType *IntTy = cast<IntegerType>(Old->getType());
   IntegerType *Ty = cast<IntegerType>(V->getType());
@@ -2203,7 +2258,7 @@ static Value *insertInteger(const DataLayout &DL, IRBuilder<> &IRB, Value *Old,
   return V;
 }
 
-static Value *extractVector(IRBuilder<> &IRB, Value *V,
+static Value *extractVector(IRBuilderTy &IRB, Value *V,
                             unsigned BeginIndex, unsigned EndIndex,
                             const Twine &Name) {
   VectorType *VecTy = cast<VectorType>(V->getType());
@@ -2231,7 +2286,7 @@ static Value *extractVector(IRBuilder<> &IRB, Value *V,
   return V;
 }
 
-static Value *insertVector(IRBuilder<> &IRB, Value *Old, Value *V,
+static Value *insertVector(IRBuilderTy &IRB, Value *Old, Value *V,
                            unsigned BeginIndex, const Twine &Name) {
   VectorType *VecTy = cast<VectorType>(Old->getType());
   assert(VecTy && "Can only insert a vector into a vector");
@@ -2325,8 +2380,9 @@ class AllocaPartitionRewriter : public InstVisitor<AllocaPartitionRewriter,
   Use *OldUse;
   Instruction *OldPtr;
 
-  // The name prefix to use when rewriting instructions for this alloca.
-  std::string NamePrefix;
+  // Utility IR builder, whose name prefix is setup for each visited use, and
+  // the insertion point is set to point to the user.
+  IRBuilderTy IRB;
 
 public:
   AllocaPartitionRewriter(const DataLayout &TD, AllocaPartitioning &P,
@@ -2339,7 +2395,8 @@ public:
       NewAllocaEndOffset(NewEndOffset),
       NewAllocaTy(NewAI.getAllocatedType()),
       VecTy(), ElementTy(), ElementSize(), IntTy(),
-      BeginOffset(), EndOffset(), IsSplit(), OldUse(), OldPtr() {
+      BeginOffset(), EndOffset(), IsSplit(), OldUse(), OldPtr(),
+      IRB(NewAI.getContext(), ConstantFolder()) {
   }
 
   /// \brief Visit the users of the alloca partition and rewrite them.
@@ -2368,7 +2425,13 @@ public:
       IsSplit = I->isSplit();
       OldUse = I->getUse();
       OldPtr = cast<Instruction>(OldUse->get());
-      NamePrefix = (Twine(NewAI.getName()) + "." + Twine(BeginOffset)).str();
+
+      Instruction *OldUserI = cast<Instruction>(OldUse->getUser());
+      IRB.SetInsertPoint(OldUserI);
+      IRB.SetCurrentDebugLocation(OldUserI->getDebugLoc());
+      IRB.SetNamePrefix(Twine(NewAI.getName()) + "." + Twine(BeginOffset) +
+                        ".");
+
       CanSROA &= visit(cast<Instruction>(OldUse->getUser()));
     }
     if (VecTy) {
@@ -2391,14 +2454,10 @@ private:
     llvm_unreachable("No rewrite rule for this instruction!");
   }
 
-  Twine getName(const Twine &Suffix) {
-    return NamePrefix + Suffix;
-  }
-
-  Value *getAdjustedAllocaPtr(IRBuilder<> &IRB, Type *PointerTy) {
+  Value *getAdjustedAllocaPtr(IRBuilderTy &IRB, Type *PointerTy) {
     assert(BeginOffset >= NewAllocaBeginOffset);
     APInt Offset(TD.getPointerSizeInBits(), BeginOffset - NewAllocaBeginOffset);
-    return getAdjustedPtr(IRB, TD, &NewAI, Offset, PointerTy, getName(""));
+    return getAdjustedPtr(IRB, TD, &NewAI, Offset, PointerTy);
   }
 
   /// \brief Compute suitable alignment to access an offset into the new alloca.
@@ -2448,27 +2507,27 @@ private:
       Pass.DeadInsts.insert(I);
   }
 
-  Value *rewriteVectorizedLoadInst(IRBuilder<> &IRB) {
+  Value *rewriteVectorizedLoadInst() {
     unsigned BeginIndex = getIndex(BeginOffset);
     unsigned EndIndex = getIndex(EndOffset);
     assert(EndIndex > BeginIndex && "Empty vector!");
 
     Value *V = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
-                                     getName(".load"));
-    return extractVector(IRB, V, BeginIndex, EndIndex, getName(".vec"));
+                                     "load");
+    return extractVector(IRB, V, BeginIndex, EndIndex, "vec");
   }
 
-  Value *rewriteIntegerLoad(IRBuilder<> &IRB, LoadInst &LI) {
+  Value *rewriteIntegerLoad(LoadInst &LI) {
     assert(IntTy && "We cannot insert an integer to the alloca");
     assert(!LI.isVolatile());
     Value *V = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
-                                     getName(".load"));
+                                     "load");
     V = convertValue(TD, IRB, V, IntTy);
     assert(BeginOffset >= NewAllocaBeginOffset && "Out of bounds offset");
     uint64_t Offset = BeginOffset - NewAllocaBeginOffset;
     if (Offset > 0 || EndOffset < NewAllocaEndOffset)
       V = extractInteger(TD, IRB, V, cast<IntegerType>(LI.getType()), Offset,
-                         getName(".extract"));
+                         "extract");
     return V;
   }
 
@@ -2479,24 +2538,23 @@ private:
 
     uint64_t Size = EndOffset - BeginOffset;
 
-    IRBuilder<> IRB(&LI);
     Type *TargetTy = IsSplit ? Type::getIntNTy(LI.getContext(), Size * 8)
                              : LI.getType();
     bool IsPtrAdjusted = false;
     Value *V;
     if (VecTy) {
-      V = rewriteVectorizedLoadInst(IRB);
+      V = rewriteVectorizedLoadInst();
     } else if (IntTy && LI.getType()->isIntegerTy()) {
-      V = rewriteIntegerLoad(IRB, LI);
+      V = rewriteIntegerLoad(LI);
     } else if (BeginOffset == NewAllocaBeginOffset &&
                canConvertValue(TD, NewAllocaTy, LI.getType())) {
       V = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
-                                LI.isVolatile(), getName(".load"));
+                                LI.isVolatile(), "load");
     } else {
       Type *LTy = TargetTy->getPointerTo();
       V = IRB.CreateAlignedLoad(getAdjustedAllocaPtr(IRB, LTy),
                                 getPartitionTypeAlign(TargetTy),
-                                LI.isVolatile(), getName(".load"));
+                                LI.isVolatile(), "load");
       IsPtrAdjusted = true;
     }
     V = convertValue(TD, IRB, V, TargetTy);
@@ -2519,7 +2577,7 @@ private:
       Value *Placeholder
         = new LoadInst(UndefValue::get(LI.getType()->getPointerTo()));
       V = insertInteger(TD, IRB, Placeholder, V, BeginOffset,
-                        getName(".insert"));
+                        "insert");
       LI.replaceAllUsesWith(V);
       Placeholder->replaceAllUsesWith(&LI);
       delete Placeholder;
@@ -2533,7 +2591,7 @@ private:
     return !LI.isVolatile() && !IsPtrAdjusted;
   }
 
-  bool rewriteVectorizedStoreInst(IRBuilder<> &IRB, Value *V,
+  bool rewriteVectorizedStoreInst(Value *V,
                                   StoreInst &SI, Value *OldOp) {
     unsigned BeginIndex = getIndex(BeginOffset);
     unsigned EndIndex = getIndex(EndOffset);
@@ -2548,8 +2606,8 @@ private:
 
     // Mix in the existing elements.
     Value *Old = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
-                                       getName(".load"));
-    V = insertVector(IRB, Old, V, BeginIndex, getName(".vec"));
+                                       "load");
+    V = insertVector(IRB, Old, V, BeginIndex, "vec");
 
     StoreInst *Store = IRB.CreateAlignedStore(V, &NewAI, NewAI.getAlignment());
     Pass.DeadInsts.insert(&SI);
@@ -2559,17 +2617,17 @@ private:
     return true;
   }
 
-  bool rewriteIntegerStore(IRBuilder<> &IRB, Value *V, StoreInst &SI) {
+  bool rewriteIntegerStore(Value *V, StoreInst &SI) {
     assert(IntTy && "We cannot extract an integer from the alloca");
     assert(!SI.isVolatile());
     if (TD.getTypeSizeInBits(V->getType()) != IntTy->getBitWidth()) {
       Value *Old = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
-                                         getName(".oldload"));
+                                         "oldload");
       Old = convertValue(TD, IRB, Old, IntTy);
       assert(BeginOffset >= NewAllocaBeginOffset && "Out of bounds offset");
       uint64_t Offset = BeginOffset - NewAllocaBeginOffset;
       V = insertInteger(TD, IRB, Old, SI.getValueOperand(), Offset,
-                        getName(".insert"));
+                        "insert");
     }
     V = convertValue(TD, IRB, V, NewAllocaTy);
     StoreInst *Store = IRB.CreateAlignedStore(V, &NewAI, NewAI.getAlignment());
@@ -2583,7 +2641,6 @@ private:
     DEBUG(dbgs() << "    original: " << SI << "\n");
     Value *OldOp = SI.getOperand(1);
     assert(OldOp == OldPtr);
-    IRBuilder<> IRB(&SI);
 
     Value *V = SI.getValueOperand();
 
@@ -2604,13 +2661,13 @@ private:
              "Non-byte-multiple bit width");
       IntegerType *NarrowTy = Type::getIntNTy(SI.getContext(), Size * 8);
       V = extractInteger(TD, IRB, V, NarrowTy, BeginOffset,
-                         getName(".extract"));
+                         "extract");
     }
 
     if (VecTy)
-      return rewriteVectorizedStoreInst(IRB, V, SI, OldOp);
+      return rewriteVectorizedStoreInst(V, SI, OldOp);
     if (IntTy && V->getType()->isIntegerTy())
-      return rewriteIntegerStore(IRB, V, SI);
+      return rewriteIntegerStore(V, SI);
 
     StoreInst *NewSI;
     if (BeginOffset == NewAllocaBeginOffset &&
@@ -2641,7 +2698,7 @@ private:
   ///
   /// \param V The i8 value to splat.
   /// \param Size The number of bytes in the output (assuming i8 is one byte)
-  Value *getIntegerSplat(IRBuilder<> &IRB, Value *V, unsigned Size) {
+  Value *getIntegerSplat(Value *V, unsigned Size) {
     assert(Size > 0 && "Expected a positive number of bytes.");
     IntegerType *VTy = cast<IntegerType>(V->getType());
     assert(VTy->getBitWidth() == 8 && "Expected an i8 value for the byte");
@@ -2649,26 +2706,25 @@ private:
       return V;
 
     Type *SplatIntTy = Type::getIntNTy(VTy->getContext(), Size*8);
-    V = IRB.CreateMul(IRB.CreateZExt(V, SplatIntTy, getName(".zext")),
+    V = IRB.CreateMul(IRB.CreateZExt(V, SplatIntTy, "zext"),
                       ConstantExpr::getUDiv(
                         Constant::getAllOnesValue(SplatIntTy),
                         ConstantExpr::getZExt(
                           Constant::getAllOnesValue(V->getType()),
                           SplatIntTy)),
-                      getName(".isplat"));
+                      "isplat");
     return V;
   }
 
   /// \brief Compute a vector splat for a given element value.
-  Value *getVectorSplat(IRBuilder<> &IRB, Value *V, unsigned NumElements) {
-    V = IRB.CreateVectorSplat(NumElements, V, NamePrefix);
+  Value *getVectorSplat(Value *V, unsigned NumElements) {
+    V = IRB.CreateVectorSplat(NumElements, V, "vsplat");
     DEBUG(dbgs() << "       splat: " << *V << "\n");
     return V;
   }
 
   bool visitMemSetInst(MemSetInst &II) {
     DEBUG(dbgs() << "    original: " << II << "\n");
-    IRBuilder<> IRB(&II);
     assert(II.getRawDest() == OldPtr);
 
     // If the memset has a variable size, it cannot be split, just adjust the
@@ -2725,31 +2781,31 @@ private:
       unsigned NumElements = EndIndex - BeginIndex;
       assert(NumElements <= VecTy->getNumElements() && "Too many elements!");
 
-      Value *Splat = getIntegerSplat(IRB, II.getValue(),
-                                     TD.getTypeSizeInBits(ElementTy)/8);
+      Value *Splat =
+          getIntegerSplat(II.getValue(), TD.getTypeSizeInBits(ElementTy) / 8);
       Splat = convertValue(TD, IRB, Splat, ElementTy);
       if (NumElements > 1)
-        Splat = getVectorSplat(IRB, Splat, NumElements);
+        Splat = getVectorSplat(Splat, NumElements);
 
       Value *Old = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
-                                         getName(".oldload"));
-      V = insertVector(IRB, Old, Splat, BeginIndex, getName(".vec"));
+                                         "oldload");
+      V = insertVector(IRB, Old, Splat, BeginIndex, "vec");
     } else if (IntTy) {
       // If this is a memset on an alloca where we can widen stores, insert the
       // set integer.
       assert(!II.isVolatile());
 
       uint64_t Size = EndOffset - BeginOffset;
-      V = getIntegerSplat(IRB, II.getValue(), Size);
+      V = getIntegerSplat(II.getValue(), Size);
 
       if (IntTy && (BeginOffset != NewAllocaBeginOffset ||
                     EndOffset != NewAllocaBeginOffset)) {
         Value *Old = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
-                                           getName(".oldload"));
+                                           "oldload");
         Old = convertValue(TD, IRB, Old, IntTy);
         assert(BeginOffset >= NewAllocaBeginOffset && "Out of bounds offset");
         uint64_t Offset = BeginOffset - NewAllocaBeginOffset;
-        V = insertInteger(TD, IRB, Old, V, Offset, getName(".insert"));
+        V = insertInteger(TD, IRB, Old, V, Offset, "insert");
       } else {
         assert(V->getType() == IntTy &&
                "Wrong type for an alloca wide integer!");
@@ -2760,10 +2816,9 @@ private:
       assert(BeginOffset == NewAllocaBeginOffset);
       assert(EndOffset == NewAllocaEndOffset);
 
-      V = getIntegerSplat(IRB, II.getValue(),
-                          TD.getTypeSizeInBits(ScalarTy)/8);
+      V = getIntegerSplat(II.getValue(), TD.getTypeSizeInBits(ScalarTy) / 8);
       if (VectorType *AllocaVecTy = dyn_cast<VectorType>(AllocaTy))
-        V = getVectorSplat(IRB, V, AllocaVecTy->getNumElements());
+        V = getVectorSplat(V, AllocaVecTy->getNumElements());
 
       V = convertValue(TD, IRB, V, AllocaTy);
     }
@@ -2780,7 +2835,6 @@ private:
     // them into two categories: split intrinsics and unsplit intrinsics.
 
     DEBUG(dbgs() << "    original: " << II << "\n");
-    IRBuilder<> IRB(&II);
 
     assert(II.getRawSource() == OldPtr || II.getRawDest() == OldPtr);
     bool IsDest = II.getRawDest() == OldPtr;
@@ -2864,8 +2918,7 @@ private:
 
       // Compute the other pointer, folding as much as possible to produce
       // a single, simple GEP in most cases.
-      OtherPtr = getAdjustedPtr(IRB, TD, OtherPtr, RelOffset, OtherPtrTy,
-                                getName("." + OtherPtr->getName()));
+      OtherPtr = getAdjustedPtr(IRB, TD, OtherPtr, RelOffset, OtherPtrTy);
 
       Value *OurPtr
         = getAdjustedAllocaPtr(IRB, IsDest ? II.getRawDest()->getType()
@@ -2908,8 +2961,7 @@ private:
       OtherPtrTy = SubIntTy->getPointerTo();
     }
 
-    Value *SrcPtr = getAdjustedPtr(IRB, TD, OtherPtr, RelOffset, OtherPtrTy,
-                                   getName("." + OtherPtr->getName()));
+    Value *SrcPtr = getAdjustedPtr(IRB, TD, OtherPtr, RelOffset, OtherPtrTy);
     Value *DstPtr = &NewAI;
     if (!IsDest)
       std::swap(SrcPtr, DstPtr);
@@ -2917,31 +2969,31 @@ private:
     Value *Src;
     if (VecTy && !IsWholeAlloca && !IsDest) {
       Src = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
-                                  getName(".load"));
-      Src = extractVector(IRB, Src, BeginIndex, EndIndex, getName(".vec"));
+                                  "load");
+      Src = extractVector(IRB, Src, BeginIndex, EndIndex, "vec");
     } else if (IntTy && !IsWholeAlloca && !IsDest) {
       Src = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
-                                  getName(".load"));
+                                  "load");
       Src = convertValue(TD, IRB, Src, IntTy);
       assert(BeginOffset >= NewAllocaBeginOffset && "Out of bounds offset");
       uint64_t Offset = BeginOffset - NewAllocaBeginOffset;
-      Src = extractInteger(TD, IRB, Src, SubIntTy, Offset, getName(".extract"));
+      Src = extractInteger(TD, IRB, Src, SubIntTy, Offset, "extract");
     } else {
       Src = IRB.CreateAlignedLoad(SrcPtr, Align, II.isVolatile(),
-                                  getName(".copyload"));
+                                  "copyload");
     }
 
     if (VecTy && !IsWholeAlloca && IsDest) {
       Value *Old = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
-                                         getName(".oldload"));
-      Src = insertVector(IRB, Old, Src, BeginIndex, getName(".vec"));
+                                         "oldload");
+      Src = insertVector(IRB, Old, Src, BeginIndex, "vec");
     } else if (IntTy && !IsWholeAlloca && IsDest) {
       Value *Old = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
-                                         getName(".oldload"));
+                                         "oldload");
       Old = convertValue(TD, IRB, Old, IntTy);
       assert(BeginOffset >= NewAllocaBeginOffset && "Out of bounds offset");
       uint64_t Offset = BeginOffset - NewAllocaBeginOffset;
-      Src = insertInteger(TD, IRB, Old, Src, Offset, getName(".insert"));
+      Src = insertInteger(TD, IRB, Old, Src, Offset, "insert");
       Src = convertValue(TD, IRB, Src, NewAllocaTy);
     }
 
@@ -2956,7 +3008,6 @@ private:
     assert(II.getIntrinsicID() == Intrinsic::lifetime_start ||
            II.getIntrinsicID() == Intrinsic::lifetime_end);
     DEBUG(dbgs() << "    original: " << II << "\n");
-    IRBuilder<> IRB(&II);
     assert(II.getArgOperand(1) == OldPtr);
 
     // Record this instruction for deletion.
@@ -2984,7 +3035,9 @@ private:
     // as local as possible to the PHI. To do that, we re-use the location of
     // the old pointer, which necessarily must be in the right position to
     // dominate the PHI.
-    IRBuilder<> PtrBuilder(cast<Instruction>(OldPtr));
+    IRBuilderTy PtrBuilder(cast<Instruction>(OldPtr));
+    PtrBuilder.SetNamePrefix(Twine(NewAI.getName()) + "." + Twine(BeginOffset) +
+                             ".");
 
     Value *NewPtr = getAdjustedAllocaPtr(PtrBuilder, OldPtr->getType());
     // Replace the operands which were using the old pointer.
@@ -2997,7 +3050,6 @@ private:
 
   bool visitSelectInst(SelectInst &SI) {
     DEBUG(dbgs() << "    original: " << SI << "\n");
-    IRBuilder<> IRB(&SI);
 
     // Find the operand we need to rewrite here.
     bool IsTrueVal = SI.getTrueValue() == OldPtr;
@@ -3072,7 +3124,7 @@ private:
   class OpSplitter {
   protected:
     /// The builder used to form new instructions.
-    IRBuilder<> IRB;
+    IRBuilderTy IRB;
     /// The indices which to be used with insert- or extractvalue to select the
     /// appropriate value within the aggregate.
     SmallVector<unsigned, 4> Indices;
@@ -3284,12 +3336,13 @@ static Type *getTypePartition(const DataLayout &TD, Type *Ty,
     Type *ElementTy = SeqTy->getElementType();
     uint64_t ElementSize = TD.getTypeAllocSize(ElementTy);
     uint64_t NumSkippedElements = Offset / ElementSize;
-    if (ArrayType *ArrTy = dyn_cast<ArrayType>(SeqTy))
+    if (ArrayType *ArrTy = dyn_cast<ArrayType>(SeqTy)) {
       if (NumSkippedElements >= ArrTy->getNumElements())
         return 0;
-    if (VectorType *VecTy = dyn_cast<VectorType>(SeqTy))
+    } else if (VectorType *VecTy = dyn_cast<VectorType>(SeqTy)) {
       if (NumSkippedElements >= VecTy->getNumElements())
         return 0;
+    }
     Offset -= NumSkippedElements * ElementSize;
 
     // First check if we need to recurse.

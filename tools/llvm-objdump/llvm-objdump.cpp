@@ -228,6 +228,7 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
       if (!error(i->containsSymbol(*si, contains)) && contains) {
         uint64_t Address;
         if (error(si->getAddress(Address))) break;
+        if (Address == UnknownAddressOrSize) continue;
         Address -= SectionAddr;
 
         StringRef Name;
@@ -256,8 +257,7 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
     StringRef SegmentName = "";
     if (const MachOObjectFile *MachO = dyn_cast<const MachOObjectFile>(Obj)) {
       DataRefImpl DR = i->getRawDataRefImpl();
-      if (error(MachO->getSectionFinalSegmentName(DR, SegmentName)))
-        break;
+      SegmentName = MachO->getSectionFinalSegmentName(DR);
     }
     StringRef name;
     if (error(i->getName(name))) break;
@@ -592,10 +592,8 @@ static void PrintSymbolTable(const ObjectFile *o) {
         outs() << "*UND*";
       else {
         if (const MachOObjectFile *MachO = dyn_cast<const MachOObjectFile>(o)) {
-          StringRef SegmentName;
           DataRefImpl DR = Section->getRawDataRefImpl();
-          if (error(MachO->getSectionFinalSegmentName(DR, SegmentName)))
-            SegmentName = "";
+          StringRef SegmentName = MachO->getSectionFinalSegmentName(DR);
           outs() << SegmentName << ",";
         }
         StringRef SectionName;

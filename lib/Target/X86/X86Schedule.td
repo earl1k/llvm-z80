@@ -53,6 +53,10 @@ def WriteLoad  : SchedWrite;
 def WriteStore : SchedWrite;
 def WriteMove  : SchedWrite;
 
+// Idioms that clear a register, like xorps %xmm0, %xmm0.
+// These can often bypass execution ports completely.
+def WriteZero : SchedWrite;
+
 // Branches don't produce values, so they have no latency, but they still
 // consume resources. Indirect branches can fold loads.
 defm WriteJump : X86SchedWritePair;
@@ -63,6 +67,10 @@ defm WriteFMul  : X86SchedWritePair; // Floating point multiplication.
 defm WriteFDiv  : X86SchedWritePair; // Floating point division.
 defm WriteFSqrt : X86SchedWritePair; // Floating point square root.
 defm WriteFRcp  : X86SchedWritePair; // Floating point reciprocal.
+defm WriteFMA   : X86SchedWritePair; // Fused Multiply Add.
+
+// FMA Scheduling helper class.
+class FMASC { X86FoldableSchedWrite Sched = WriteFAdd; }
 
 // Vector integer operations.
 defm WriteVecALU   : X86SchedWritePair; // Vector integer ALU op, no logicals.
@@ -79,9 +87,14 @@ defm WriteCvtF2I : X86SchedWritePair; // Float -> Integer.
 defm WriteCvtI2F : X86SchedWritePair; // Integer -> Float.
 defm WriteCvtF2F : X86SchedWritePair; // Float -> Float size conversion.
 
+// Catch-all for expensive system instructions.
+def WriteSystem : SchedWrite;
+
+// Old microcoded instructions that nobody use.
+def WriteMicrocoded : SchedWrite;
+
 //===----------------------------------------------------------------------===//
 // Instruction Itinerary classes used for X86
-def IIC_DEFAULT     : InstrItinClass;
 def IIC_ALU_MEM     : InstrItinClass;
 def IIC_ALU_NONMEM  : InstrItinClass;
 def IIC_LEA         : InstrItinClass;
@@ -556,3 +569,5 @@ def GenericModel : SchedMachineModel {
 }
 
 include "X86ScheduleAtom.td"
+include "X86SchedSandyBridge.td"
+include "X86SchedHaswell.td"

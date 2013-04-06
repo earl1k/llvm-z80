@@ -26,6 +26,10 @@ def HI32 : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(N->getZExtValue() >> 32, MVT::i32);
 }]>;
 
+def SIbuffer_store : SDNode<"AMDGPUISD::BUFFER_STORE",
+                           SDTypeProfile<0, 3, [SDTCisPtrTy<1>, SDTCisInt<2>]>,
+                           [SDNPHasChain, SDNPMayStore]>;
+
 def IMM8bitDWORD : ImmLeaf <
   i32, [{
     return (Imm & ~0x3FC) == 0;
@@ -115,16 +119,17 @@ class SOPK_64 <bits<5> op, string opName, list<dag> pattern> : SOPK <
   opName#" $dst, $src0", pattern
 >;
 
-multiclass SMRD_Helper <bits<5> op, string asm, RegisterClass dstClass> {
+multiclass SMRD_Helper <bits<5> op, string asm, RegisterClass baseClass,
+                        RegisterClass dstClass> {
   def _IMM : SMRD <
     op, 1, (outs dstClass:$dst),
-    (ins SReg_64:$sbase, i32imm:$offset),
+    (ins baseClass:$sbase, i32imm:$offset),
     asm#" $dst, $sbase, $offset", []
   >;
 
   def _SGPR : SMRD <
     op, 0, (outs dstClass:$dst),
-    (ins SReg_64:$sbase, SReg_32:$soff),
+    (ins baseClass:$sbase, SReg_32:$soff),
     asm#" $dst, $sbase, $soff", []
   >;
 }
@@ -135,6 +140,11 @@ multiclass SMRD_Helper <bits<5> op, string asm, RegisterClass dstClass> {
 
 class VOP <string opName> {
   string OpName = opName;
+}
+
+class VOP2_REV <string revOp, bit isOrig> {
+  string RevOp = revOp;
+  bit IsOrig = isOrig;
 }
 
 multiclass VOP1_Helper <bits<8> op, RegisterClass drc, RegisterClass src,
@@ -165,11 +175,11 @@ multiclass VOP1_64 <bits<8> op, string opName, list<dag> pattern>
   : VOP1_Helper <op, VReg_64, VSrc_64, opName, pattern>;
 
 multiclass VOP2_Helper <bits<6> op, RegisterClass vrc, RegisterClass arc,
-                        string opName, list<dag> pattern> {
+                        string opName, list<dag> pattern, string revOp> {
   def _e32 : VOP2 <
     op, (outs vrc:$dst), (ins arc:$src0, vrc:$src1),
     opName#"_e32 $dst, $src0, $src1", pattern
-  >, VOP <opName>;
+  >, VOP <opName>, VOP2_REV<revOp#"_e32", !eq(revOp, opName)>;
 
   def _e64 : VOP3 <
     {1, 0, 0, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
@@ -178,23 +188,26 @@ multiclass VOP2_Helper <bits<6> op, RegisterClass vrc, RegisterClass arc,
          i32imm:$abs, i32imm:$clamp,
          i32imm:$omod, i32imm:$neg),
     opName#"_e64 $dst, $src0, $src1, $abs, $clamp, $omod, $neg", []
-  >, VOP <opName> {
+  >, VOP <opName>, VOP2_REV<revOp#"_e64", !eq(revOp, opName)> {
     let SRC2 = SIOperand.ZERO;
   }
 }
 
-multiclass VOP2_32 <bits<6> op, string opName, list<dag> pattern>
-  : VOP2_Helper <op, VReg_32, VSrc_32, opName, pattern>;
+multiclass VOP2_32 <bits<6> op, string opName, list<dag> pattern,
+                    string revOp = opName>
+  : VOP2_Helper <op, VReg_32, VSrc_32, opName, pattern, revOp>;
 
-multiclass VOP2_64 <bits<6> op, string opName, list<dag> pattern>
-  : VOP2_Helper <op, VReg_64, VSrc_64, opName, pattern>;
+multiclass VOP2_64 <bits<6> op, string opName, list<dag> pattern,
+                    string revOp = opName>
+  : VOP2_Helper <op, VReg_64, VSrc_64, opName, pattern, revOp>;
 
-multiclass VOP2b_32 <bits<6> op, string opName, list<dag> pattern> {
+multiclass VOP2b_32 <bits<6> op, string opName, list<dag> pattern,
+                     string revOp = opName> {
 
   def _e32 : VOP2 <
     op, (outs VReg_32:$dst), (ins VSrc_32:$src0, VReg_32:$src1),
     opName#"_e32 $dst, $src0, $src1", pattern
-  >, VOP <opName>;
+  >, VOP <opName>, VOP2_REV<revOp#"_e32", !eq(revOp, opName)>;
 
   def _e64 : VOP3b <
     {1, 0, 0, op{5}, op{4}, op{3}, op{2}, op{1}, op{0}},
@@ -203,7 +216,7 @@ multiclass VOP2b_32 <bits<6> op, string opName, list<dag> pattern> {
          i32imm:$abs, i32imm:$clamp,
          i32imm:$omod, i32imm:$neg),
     opName#"_e64 $dst, $src0, $src1, $abs, $clamp, $omod, $neg", []
-  >, VOP <opName> {
+  >, VOP <opName>, VOP2_REV<revOp#"_e64", !eq(revOp, opName)> {
     let SRC2 = SIOperand.ZERO;
     /* the VOP2 variant puts the carry out into VCC, the VOP3 variant
        can write it into any SGPR. We currently don't use the carry out,
@@ -276,15 +289,37 @@ class MTBUF_Store_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBU
 
 class MUBUF_Load_Helper <bits<7> op, string asm, RegisterClass regClass> : MUBUF <
   op,
-  (outs regClass:$dst),
+  (outs regClass:$vdata),
   (ins i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc, i1imm:$addr64,
        i1imm:$lds, VReg_32:$vaddr, SReg_128:$srsrc, i1imm:$slc,
        i1imm:$tfe, SSrc_32:$soffset),
-  asm#" $dst, $offset, $offen, $idxen, $glc, $addr64, "
+  asm#" $vdata, $offset, $offen, $idxen, $glc, $addr64, "
      #"$lds, $vaddr, $srsrc, $slc, $tfe, $soffset",
   []> {
   let mayLoad = 1;
   let mayStore = 0;
+}
+
+class MUBUF_Store_Helper <bits<7> op, string name, RegisterClass vdataClass,
+                         ValueType VT> :
+    MUBUF <op, (outs), (ins vdataClass:$vdata, SReg_128:$srsrc, VReg_64:$vaddr),
+          name#" $vdata, $srsrc + $vaddr",
+          [(SIbuffer_store (VT vdataClass:$vdata), (i128 SReg_128:$srsrc),
+                                                    (i64 VReg_64:$vaddr))]> {
+
+  let mayLoad = 0;
+  let mayStore = 1;
+
+  // Encoding
+  let offset = 0;
+  let offen = 0;
+  let idxen = 0;
+  let glc = 0;
+  let addr64 = 1;
+  let lds = 0;
+  let slc = 0;
+  let tfe = 0;
+  let soffset = 128; // ZERO
 }
 
 class MTBUF_Load_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBUF <
@@ -304,7 +339,7 @@ class MIMG_Load_Helper <bits<7> op, string asm> : MIMG <
   op,
   (outs VReg_128:$vdata),
   (ins i32imm:$dmask, i1imm:$unorm, i1imm:$glc, i1imm:$da, i1imm:$r128,
-       i1imm:$tfe, i1imm:$lwe, i1imm:$slc, VReg_32:$vaddr,
+       i1imm:$tfe, i1imm:$lwe, i1imm:$slc, unknown:$vaddr,
        SReg_256:$srsrc, SReg_128:$ssamp),
   asm#" $vdata, $dmask, $unorm, $glc, $da, $r128,"
      #" $tfe, $lwe, $slc, $vaddr, $srsrc, $ssamp",
@@ -324,6 +359,24 @@ def getVOPe64 : InstrMapping {
   let ColFields = ["Size"];
   let KeyCol = ["4"];
   let ValueCols = [["8"]];
+}
+
+// Maps an original opcode to its commuted version
+def getCommuteRev : InstrMapping {
+  let FilterClass = "VOP2_REV";
+  let RowFields = ["RevOp"];
+  let ColFields = ["IsOrig"];
+  let KeyCol = ["1"];
+  let ValueCols = [["0"]];
+}
+
+// Maps an commuted opcode to its original version
+def getCommuteOrig : InstrMapping {
+  let FilterClass = "VOP2_REV";
+  let RowFields = ["RevOp"];
+  let ColFields = ["IsOrig"];
+  let KeyCol = ["0"];
+  let ValueCols = [["1"]];
 }
 
 include "SIInstructions.td"

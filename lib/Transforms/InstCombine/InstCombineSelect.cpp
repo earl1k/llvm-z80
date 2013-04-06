@@ -127,13 +127,14 @@ Instruction *InstCombiner::FoldSelectOpOp(SelectInst &SI, Instruction *TI,
     // If this is a non-volatile load or a cast from the same type,
     // merge.
     if (TI->isCast()) {
-      if (TI->getOperand(0)->getType() != FI->getOperand(0)->getType())
+      Type *FIOpndTy = FI->getOperand(0)->getType();
+      if (TI->getOperand(0)->getType() != FIOpndTy)
         return 0;
       // The select condition may be a vector. We may only change the operand
       // type if the vector width remains the same (and matches the condition).
       Type *CondTy = SI.getCondition()->getType();
-      if (CondTy->isVectorTy() && CondTy->getVectorNumElements() !=
-          FI->getOperand(0)->getType()->getVectorNumElements())
+      if (CondTy->isVectorTy() && (!FIOpndTy->isVectorTy() ||
+          CondTy->getVectorNumElements() != FIOpndTy->getVectorNumElements()))
         return 0;
     } else {
       return 0;  // unknown unary op.
@@ -837,7 +838,7 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
             Value *NewFalseOp = NegVal;
             if (AddOp != TI)
               std::swap(NewTrueOp, NewFalseOp);
-            Value *NewSel = 
+            Value *NewSel =
               Builder->CreateSelect(CondVal, NewTrueOp,
                                     NewFalseOp, SI.getName() + ".p");
 
@@ -861,7 +862,7 @@ Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
     Value *LHS, *RHS, *LHS2, *RHS2;
     if (SelectPatternFlavor SPF = MatchSelectPattern(&SI, LHS, RHS)) {
       if (SelectPatternFlavor SPF2 = MatchSelectPattern(LHS, LHS2, RHS2))
-        if (Instruction *R = FoldSPFofSPF(cast<Instruction>(LHS),SPF2,LHS2,RHS2, 
+        if (Instruction *R = FoldSPFofSPF(cast<Instruction>(LHS),SPF2,LHS2,RHS2,
                                           SI, SPF, RHS))
           return R;
       if (SelectPatternFlavor SPF2 = MatchSelectPattern(RHS, LHS2, RHS2))

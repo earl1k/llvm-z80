@@ -194,6 +194,9 @@ if( LLVM_USE_OPROFILE )
   endif( NOT CMAKE_SYSTEM_NAME MATCHES "Linux" )
 endif( LLVM_USE_OPROFILE )
 
+set(LLVM_USE_SANITIZER "" CACHE STRING
+  "Define the sanitizer used to build binaries and tests.")
+
 # Define an option controlling whether we should build for 32-bit on 64-bit
 # platforms, where supported.
 if( CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32 )
@@ -388,6 +391,10 @@ if( ${CMAKE_SYSTEM_NAME} MATCHES SunOS )
    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -include llvm/Support/Solaris.h")
 endif( ${CMAKE_SYSTEM_NAME} MATCHES SunOS )
 
+# Make sure we don't get -rdynamic in every binary. For those that need it,
+# use set_target_properties(target PROPERTIES ENABLE_EXPORTS 1)
+set(CMAKE_SHARED_LIBRARY_LINK_CXX_FLAGS "")
+
 include(AddLLVM)
 include(TableGen)
 
@@ -413,8 +420,6 @@ add_subdirectory(utils/count)
 add_subdirectory(utils/not)
 add_subdirectory(utils/llvm-lit)
 add_subdirectory(utils/yaml-bench)
-add_subdirectory(utils/obj2yaml)
-add_subdirectory(utils/yaml2obj)
 
 add_subdirectory(projects)
 

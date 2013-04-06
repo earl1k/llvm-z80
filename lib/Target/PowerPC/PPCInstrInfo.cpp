@@ -94,12 +94,18 @@ bool PPCInstrInfo::isCoalescableExtInstr(const MachineInstr &MI,
 
 unsigned PPCInstrInfo::isLoadFromStackSlot(const MachineInstr *MI,
                                            int &FrameIndex) const {
+  // Note: This list must be kept consistent with LoadRegFromStackSlot.
   switch (MI->getOpcode()) {
   default: break;
   case PPC::LD:
   case PPC::LWZ:
   case PPC::LFS:
   case PPC::LFD:
+  case PPC::RESTORE_CR:
+  case PPC::LVX:
+  case PPC::RESTORE_VRSAVE:
+    // Check for the operands added by addFrameReference (the immediate is the
+    // offset which defaults to 0).
     if (MI->getOperand(1).isImm() && !MI->getOperand(1).getImm() &&
         MI->getOperand(2).isFI()) {
       FrameIndex = MI->getOperand(2).getIndex();
@@ -112,12 +118,18 @@ unsigned PPCInstrInfo::isLoadFromStackSlot(const MachineInstr *MI,
 
 unsigned PPCInstrInfo::isStoreToStackSlot(const MachineInstr *MI,
                                           int &FrameIndex) const {
+  // Note: This list must be kept consistent with StoreRegToStackSlot.
   switch (MI->getOpcode()) {
   default: break;
   case PPC::STD:
   case PPC::STW:
   case PPC::STFS:
   case PPC::STFD:
+  case PPC::SPILL_CR:
+  case PPC::STVX:
+  case PPC::SPILL_VRSAVE:
+    // Check for the operands added by addFrameReference (the immediate is the
+    // offset which defaults to 0).
     if (MI->getOperand(1).isImm() && !MI->getOperand(1).getImm() &&
         MI->getOperand(2).isFI()) {
       FrameIndex = MI->getOperand(2).getIndex();
@@ -405,6 +417,105 @@ PPCInstrInfo::InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
   return 2;
 }
 
+// Select analysis.
+bool PPCInstrInfo::canInsertSelect(const MachineBasicBlock &MBB,
+                const SmallVectorImpl<MachineOperand> &Cond,
+                unsigned TrueReg, unsigned FalseReg,
+                int &CondCycles, int &TrueCycles, int &FalseCycles) const {
+  if (!TM.getSubtargetImpl()->hasISEL())
+    return false;
+
+  if (Cond.size() != 2)
+    return false;
+
+  // If this is really a bdnz-like condition, then it cannot be turned into a
+  // select.
+  if (Cond[1].getReg() == PPC::CTR || Cond[1].getReg() == PPC::CTR8)
+    return false;
+
+  // Check register classes.
+  const MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
+  const TargetRegisterClass *RC =
+    RI.getCommonSubClass(MRI.getRegClass(TrueReg), MRI.getRegClass(FalseReg));
+  if (!RC)
+    return false;
+
+  // isel is for regular integer GPRs only.
+  if (!PPC::GPRCRegClass.hasSubClassEq(RC) &&
+      !PPC::G8RCRegClass.hasSubClassEq(RC))
+    return false;
+
+  // FIXME: These numbers are for the A2, how well they work for other cores is
+  // an open question. On the A2, the isel instruction has a 2-cycle latency
+  // but single-cycle throughput. These numbers are used in combination with
+  // the MispredictPenalty setting from the active SchedMachineModel.
+  CondCycles = 1;
+  TrueCycles = 1;
+  FalseCycles = 1;
+
+  return true;
+}
+
+void PPCInstrInfo::insertSelect(MachineBasicBlock &MBB,
+                                MachineBasicBlock::iterator MI, DebugLoc dl,
+                                unsigned DestReg,
+                                const SmallVectorImpl<MachineOperand> &Cond,
+                                unsigned TrueReg, unsigned FalseReg) const {
+  assert(Cond.size() == 2 &&
+         "PPC branch conditions have two components!");
+
+  assert(TM.getSubtargetImpl()->hasISEL() &&
+         "Cannot insert select on target without ISEL support");
+
+  // Get the register classes.
+  MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
+  const TargetRegisterClass *RC =
+    RI.getCommonSubClass(MRI.getRegClass(TrueReg), MRI.getRegClass(FalseReg));
+  assert(RC && "TrueReg and FalseReg must have overlapping register classes");
+  assert((PPC::GPRCRegClass.hasSubClassEq(RC) ||
+          PPC::G8RCRegClass.hasSubClassEq(RC)) &&
+         "isel is for regular integer GPRs only");
+
+  unsigned OpCode =
+    PPC::GPRCRegClass.hasSubClassEq(RC) ? PPC::ISEL : PPC::ISEL8;
+  unsigned SelectPred = Cond[0].getImm();
+
+  unsigned SubIdx;
+  bool SwapOps;
+  switch (SelectPred) {
+  default: llvm_unreachable("invalid predicate for isel");
+  case PPC::PRED_EQ: SubIdx = PPC::sub_eq; SwapOps = false; break;
+  case PPC::PRED_NE: SubIdx = PPC::sub_eq; SwapOps = true; break;
+  case PPC::PRED_LT: SubIdx = PPC::sub_lt; SwapOps = false; break;
+  case PPC::PRED_GE: SubIdx = PPC::sub_lt; SwapOps = true; break;
+  case PPC::PRED_GT: SubIdx = PPC::sub_gt; SwapOps = false; break;
+  case PPC::PRED_LE: SubIdx = PPC::sub_gt; SwapOps = true; break;
+  case PPC::PRED_UN: SubIdx = PPC::sub_un; SwapOps = false; break;
+  case PPC::PRED_NU: SubIdx = PPC::sub_un; SwapOps = true; break;
+  }
+
+  unsigned FirstReg =  SwapOps ? FalseReg : TrueReg,
+           SecondReg = SwapOps ? TrueReg  : FalseReg;
+
+  // The first input register of isel cannot be r0. If it is a member
+  // of a register class that can be r0, then copy it first (the
+  // register allocator should eliminate the copy).
+  if (MRI.getRegClass(FirstReg)->contains(PPC::R0) ||
+      MRI.getRegClass(FirstReg)->contains(PPC::X0)) {
+    const TargetRegisterClass *FirstRC =
+      MRI.getRegClass(FirstReg)->contains(PPC::X0) ?
+        &PPC::G8RC_NOX0RegClass : &PPC::GPRC_NOR0RegClass;
+    unsigned OldFirstReg = FirstReg;
+    FirstReg = MRI.createVirtualRegister(FirstRC);
+    BuildMI(MBB, MI, dl, get(TargetOpcode::COPY), FirstReg)
+      .addReg(OldFirstReg);
+  }
+
+  BuildMI(MBB, MI, dl, get(OpCode), DestReg)
+    .addReg(FirstReg).addReg(SecondReg)
+    .addReg(Cond[1].getReg(), 0, SubIdx);
+}
+
 void PPCInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                MachineBasicBlock::iterator I, DebugLoc DL,
                                unsigned DestReg, unsigned SrcReg,
@@ -440,40 +551,21 @@ PPCInstrInfo::StoreRegToStackSlot(MachineFunction &MF,
                                   int FrameIdx,
                                   const TargetRegisterClass *RC,
                                   SmallVectorImpl<MachineInstr*> &NewMIs,
-                                  bool &NonRI) const{
+                                  bool &NonRI, bool &SpillsVRS) const{
+  // Note: If additional store instructions are added here,
+  // update isStoreToStackSlot.
+
   DebugLoc DL;
   if (PPC::GPRCRegClass.hasSubClassEq(RC)) {
-    if (SrcReg != PPC::LR) {
-      NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::STW))
-                                         .addReg(SrcReg,
-                                                 getKillRegState(isKill)),
-                                         FrameIdx));
-    } else {
-      // FIXME: this spills LR immediately to memory in one step.  To do this,
-      // we use R11, which we know cannot be used in the prolog/epilog.  This is
-      // a hack.
-      NewMIs.push_back(BuildMI(MF, DL, get(PPC::MFLR), PPC::R11));
-      NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::STW))
-                                         .addReg(PPC::R11,
-                                                 getKillRegState(isKill)),
-                                         FrameIdx));
-    }
+    NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::STW))
+                                       .addReg(SrcReg,
+                                               getKillRegState(isKill)),
+                                       FrameIdx));
   } else if (PPC::G8RCRegClass.hasSubClassEq(RC)) {
-    if (SrcReg != PPC::LR8) {
-      NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::STD))
-                                         .addReg(SrcReg,
-                                                 getKillRegState(isKill)),
-                                         FrameIdx));
-    } else {
-      // FIXME: this spills LR immediately to memory in one step.  To do this,
-      // we use X11, which we know cannot be used in the prolog/epilog.  This is
-      // a hack.
-      NewMIs.push_back(BuildMI(MF, DL, get(PPC::MFLR8), PPC::X11));
-      NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::STD))
-                                         .addReg(PPC::X11,
-                                                 getKillRegState(isKill)),
-                                         FrameIdx));
-    }
+    NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::STD))
+                                       .addReg(SrcReg,
+                                               getKillRegState(isKill)),
+                                       FrameIdx));
   } else if (PPC::F8RCRegClass.hasSubClassEq(RC)) {
     NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::STFD))
                                        .addReg(SrcReg,
@@ -522,7 +614,7 @@ PPCInstrInfo::StoreRegToStackSlot(MachineFunction &MF,
       Reg = PPC::CR7;
 
     return StoreRegToStackSlot(MF, Reg, isKill, FrameIdx,
-                               &PPC::CRRCRegClass, NewMIs, NonRI);
+                               &PPC::CRRCRegClass, NewMIs, NonRI, SpillsVRS);
 
   } else if (PPC::VRRCRegClass.hasSubClassEq(RC)) {
     NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::STVX))
@@ -530,6 +622,14 @@ PPCInstrInfo::StoreRegToStackSlot(MachineFunction &MF,
                                                getKillRegState(isKill)),
                                        FrameIdx));
     NonRI = true;
+  } else if (PPC::VRSAVERCRegClass.hasSubClassEq(RC)) {
+    assert(TM.getSubtargetImpl()->isDarwin() &&
+           "VRSAVE only needs spill/restore on Darwin");
+    NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::SPILL_VRSAVE))
+                                       .addReg(SrcReg,
+                                               getKillRegState(isKill)),
+                                       FrameIdx));
+    SpillsVRS = true;
   } else {
     llvm_unreachable("Unknown regclass!");
   }
@@ -549,9 +649,13 @@ PPCInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
   PPCFunctionInfo *FuncInfo = MF.getInfo<PPCFunctionInfo>();
   FuncInfo->setHasSpills();
 
-  bool NonRI = false;
-  if (StoreRegToStackSlot(MF, SrcReg, isKill, FrameIdx, RC, NewMIs, NonRI))
+  bool NonRI = false, SpillsVRS = false;
+  if (StoreRegToStackSlot(MF, SrcReg, isKill, FrameIdx, RC, NewMIs,
+                          NonRI, SpillsVRS))
     FuncInfo->setSpillsCR();
+
+  if (SpillsVRS)
+    FuncInfo->setSpillsVRSAVE();
 
   if (NonRI)
     FuncInfo->setHasNonRISpills();
@@ -573,25 +677,16 @@ PPCInstrInfo::LoadRegFromStackSlot(MachineFunction &MF, DebugLoc DL,
                                    unsigned DestReg, int FrameIdx,
                                    const TargetRegisterClass *RC,
                                    SmallVectorImpl<MachineInstr*> &NewMIs,
-                                   bool &NonRI) const{
+                                   bool &NonRI, bool &SpillsVRS) const{
+  // Note: If additional load instructions are added here,
+  // update isLoadFromStackSlot.
+
   if (PPC::GPRCRegClass.hasSubClassEq(RC)) {
-    if (DestReg != PPC::LR) {
-      NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::LWZ),
-                                                 DestReg), FrameIdx));
-    } else {
-      NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::LWZ),
-                                                 PPC::R11), FrameIdx));
-      NewMIs.push_back(BuildMI(MF, DL, get(PPC::MTLR)).addReg(PPC::R11));
-    }
+    NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::LWZ),
+                                               DestReg), FrameIdx));
   } else if (PPC::G8RCRegClass.hasSubClassEq(RC)) {
-    if (DestReg != PPC::LR8) {
-      NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::LD), DestReg),
-                                         FrameIdx));
-    } else {
-      NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::LD),
-                                                 PPC::X11), FrameIdx));
-      NewMIs.push_back(BuildMI(MF, DL, get(PPC::MTLR8)).addReg(PPC::X11));
-    }
+    NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::LD), DestReg),
+                                       FrameIdx));
   } else if (PPC::F8RCRegClass.hasSubClassEq(RC)) {
     NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::LFD), DestReg),
                                        FrameIdx));
@@ -632,12 +727,20 @@ PPCInstrInfo::LoadRegFromStackSlot(MachineFunction &MF, DebugLoc DL,
       Reg = PPC::CR7;
 
     return LoadRegFromStackSlot(MF, DL, Reg, FrameIdx,
-                                &PPC::CRRCRegClass, NewMIs, NonRI);
+                                &PPC::CRRCRegClass, NewMIs, NonRI, SpillsVRS);
 
   } else if (PPC::VRRCRegClass.hasSubClassEq(RC)) {
     NewMIs.push_back(addFrameReference(BuildMI(MF, DL, get(PPC::LVX), DestReg),
                                        FrameIdx));
     NonRI = true;
+  } else if (PPC::VRSAVERCRegClass.hasSubClassEq(RC)) {
+    assert(TM.getSubtargetImpl()->isDarwin() &&
+           "VRSAVE only needs spill/restore on Darwin");
+    NewMIs.push_back(addFrameReference(BuildMI(MF, DL,
+                                               get(PPC::RESTORE_VRSAVE),
+                                               DestReg),
+                                       FrameIdx));
+    SpillsVRS = true;
   } else {
     llvm_unreachable("Unknown regclass!");
   }
@@ -659,9 +762,13 @@ PPCInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
   PPCFunctionInfo *FuncInfo = MF.getInfo<PPCFunctionInfo>();
   FuncInfo->setHasSpills();
 
-  bool NonRI = false;
-  if (LoadRegFromStackSlot(MF, DL, DestReg, FrameIdx, RC, NewMIs, NonRI))
+  bool NonRI = false, SpillsVRS = false;
+  if (LoadRegFromStackSlot(MF, DL, DestReg, FrameIdx, RC, NewMIs,
+                           NonRI, SpillsVRS))
     FuncInfo->setSpillsCR();
+
+  if (SpillsVRS)
+    FuncInfo->setSpillsVRSAVE();
 
   if (NonRI)
     FuncInfo->setHasNonRISpills();
@@ -714,8 +821,8 @@ unsigned PPCInstrInfo::GetInstSizeInBytes(const MachineInstr *MI) const {
   case PPC::GC_LABEL:
   case PPC::DBG_VALUE:
     return 0;
-  case PPC::BL8_NOP_ELF:
-  case PPC::BLA8_NOP_ELF:
+  case PPC::BL8_NOP:
+  case PPC::BLA8_NOP:
     return 8;
   default:
     return 4; // PowerPC instructions are all 4 bytes

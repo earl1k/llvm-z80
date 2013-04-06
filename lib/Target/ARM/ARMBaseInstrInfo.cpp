@@ -3734,9 +3734,9 @@ ARMBaseInstrInfo::getExecutionDomain(const MachineInstr *MI) const {
   if (MI->getOpcode() == ARM::VMOVD && !isPredicated(MI))
     return std::make_pair(ExeVFP, (1<<ExeVFP) | (1<<ExeNEON));
 
-  // A9-like cores are particularly picky about mixing the two and want these
+  // CortexA9 is particularly picky about mixing the two and wants these
   // converted.
-  if (Subtarget.isLikeA9() && !isPredicated(MI) &&
+  if (Subtarget.isCortexA9() && !isPredicated(MI) &&
       (MI->getOpcode() == ARM::VMOVRS ||
        MI->getOpcode() == ARM::VMOVSR ||
        MI->getOpcode() == ARM::VMOVS))
@@ -4023,14 +4023,12 @@ ARMBaseInstrInfo::setExecutionDomain(MachineInstr *MI, unsigned Domain) const {
 // VLD1DUPd32 - Writes all D-regs, no partial reg update, 2 uops.
 //
 // FCONSTD can be used as a dependency-breaking instruction.
-
-
 unsigned ARMBaseInstrInfo::
 getPartialRegUpdateClearance(const MachineInstr *MI,
                              unsigned OpNum,
                              const TargetRegisterInfo *TRI) const {
-  // Only Swift has partial register update problems.
-  if (!SwiftPartialUpdateClearance || !Subtarget.isSwift())
+  if (!SwiftPartialUpdateClearance ||
+      !(Subtarget.isSwift() || Subtarget.isCortexA15()))
     return 0;
 
   assert(TRI && "Need TRI instance");
@@ -4056,7 +4054,7 @@ getPartialRegUpdateClearance(const MachineInstr *MI,
 
     // Explicitly reads the dependency.
   case ARM::VLD1LNd32:
-    UseOp = 1;
+    UseOp = 3;
     break;
   default:
     return 0;
@@ -4124,4 +4122,16 @@ breakPartialRegDependency(MachineBasicBlock::iterator MI,
 
 bool ARMBaseInstrInfo::hasNOP() const {
   return (Subtarget.getFeatureBits() & ARM::HasV6T2Ops) != 0;
+}
+
+bool ARMBaseInstrInfo::isSwiftFastImmShift(const MachineInstr *MI) const {
+  unsigned ShOpVal = MI->getOperand(3).getImm();
+  unsigned ShImm = ARM_AM::getSORegOffset(ShOpVal);
+  // Swift supports faster shifts for: lsl 2, lsl 1, and lsr 1.
+  if ((ShImm == 1 && ARM_AM::getSORegShOp(ShOpVal) == ARM_AM::lsr) ||
+      ((ShImm == 1 || ShImm == 2) &&
+       ARM_AM::getSORegShOp(ShOpVal) == ARM_AM::lsl))
+    return true;
+
+  return false;
 }

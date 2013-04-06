@@ -330,6 +330,14 @@ struct Elf_Rel_Base<ELFT<TargetEndianness, MaxAlign, false>, false> {
                              MaxAlign LLVM_ELF_COMMA false>)
   Elf_Addr      r_offset; // Location (file byte offset, or program virtual addr)
   Elf_Word      r_info;  // Symbol table index and type of relocation to apply
+
+  uint32_t getRInfo(bool isMips64EL) const {
+    assert(!isMips64EL);
+    return r_info;
+  }
+  void setRInfo(uint32_t R) {
+    r_info = R;
+  }
 };
 
 template<template<endianness, std::size_t, bool> class ELFT,
@@ -339,6 +347,22 @@ struct Elf_Rel_Base<ELFT<TargetEndianness, MaxAlign, true>, false> {
                              MaxAlign LLVM_ELF_COMMA true>)
   Elf_Addr      r_offset; // Location (file byte offset, or program virtual addr)
   Elf_Xword     r_info;   // Symbol table index and type of relocation to apply
+
+  uint64_t getRInfo(bool isMips64EL) const {
+    uint64_t t = r_info;
+    if (!isMips64EL)
+      return t;
+    // Mip64 little endian has a "special" encoding of r_info. Instead of one
+    // 64 bit little endian number, it is a little ending 32 bit number followed
+    // by a 32 bit big endian number.
+    return (t << 32) | ((t >> 8) & 0xff000000) | ((t >> 24) & 0x00ff0000) |
+      ((t >> 40) & 0x0000ff00) | ((t >> 56) & 0x000000ff);
+    return r_info;
+  }
+  void setRInfo(uint64_t R) {
+    // FIXME: Add mips64el support.
+    r_info = R;
+  }
 };
 
 template<template<endianness, std::size_t, bool> class ELFT,
@@ -349,6 +373,14 @@ struct Elf_Rel_Base<ELFT<TargetEndianness, MaxAlign, false>, true> {
   Elf_Addr      r_offset; // Location (file byte offset, or program virtual addr)
   Elf_Word      r_info;   // Symbol table index and type of relocation to apply
   Elf_Sword     r_addend; // Compute value for relocatable field by adding this
+
+  uint32_t getRInfo(bool isMips64EL) const {
+    assert(!isMips64EL);
+    return r_info;
+  }
+  void setRInfo(uint32_t R) {
+    r_info = R;
+  }
 };
 
 template<template<endianness, std::size_t, bool> class ELFT,
@@ -359,6 +391,21 @@ struct Elf_Rel_Base<ELFT<TargetEndianness, MaxAlign, true>, true> {
   Elf_Addr      r_offset; // Location (file byte offset, or program virtual addr)
   Elf_Xword     r_info;   // Symbol table index and type of relocation to apply
   Elf_Sxword    r_addend; // Compute value for relocatable field by adding this.
+
+  uint64_t getRInfo(bool isMips64EL) const {
+    // Mip64 little endian has a "special" encoding of r_info. Instead of one
+    // 64 bit little endian number, it is a little ending 32 bit number followed
+    // by a 32 bit big endian number.
+    uint64_t t = r_info;
+    if (!isMips64EL)
+      return t;
+    return (t << 32) | ((t >> 8) & 0xff000000) | ((t >> 24) & 0x00ff0000) |
+      ((t >> 40) & 0x0000ff00) | ((t >> 56) & 0x000000ff);
+  }
+  void setRInfo(uint64_t R) {
+    // FIXME: Add mips64el support.
+    r_info = R;
+  }
 };
 
 template<class ELFT, bool isRela>
@@ -368,20 +415,21 @@ template<template<endianness, std::size_t, bool> class ELFT,
          endianness TargetEndianness, std::size_t MaxAlign, bool isRela>
 struct Elf_Rel_Impl<ELFT<TargetEndianness, MaxAlign, true>, isRela>
        : Elf_Rel_Base<ELFT<TargetEndianness, MaxAlign, true>, isRela> {
-  using Elf_Rel_Base<ELFT<TargetEndianness, MaxAlign, true>, isRela>::r_info;
   LLVM_ELF_IMPORT_TYPES(ELFT<TargetEndianness LLVM_ELF_COMMA
                              MaxAlign LLVM_ELF_COMMA true>)
 
   // These accessors and mutators correspond to the ELF64_R_SYM, ELF64_R_TYPE,
   // and ELF64_R_INFO macros defined in the ELF specification:
-  uint32_t getSymbol() const { return (uint32_t) (r_info >> 32); }
-  uint32_t getType() const {
-    return (uint32_t) (r_info & 0xffffffffL);
+  uint32_t getSymbol(bool isMips64EL) const {
+    return (uint32_t) (this->getRInfo(isMips64EL) >> 32);
+  }
+  uint32_t getType(bool isMips64EL) const {
+    return (uint32_t) (this->getRInfo(isMips64EL) & 0xffffffffL);
   }
   void setSymbol(uint32_t s) { setSymbolAndType(s, getType()); }
   void setType(uint32_t t) { setSymbolAndType(getSymbol(), t); }
   void setSymbolAndType(uint32_t s, uint32_t t) {
-    r_info = ((uint64_t)s << 32) + (t&0xffffffffL);
+    this->setRInfo(((uint64_t)s << 32) + (t&0xffffffffL));
   }
 };
 
@@ -389,18 +437,21 @@ template<template<endianness, std::size_t, bool> class ELFT,
          endianness TargetEndianness, std::size_t MaxAlign, bool isRela>
 struct Elf_Rel_Impl<ELFT<TargetEndianness, MaxAlign, false>, isRela>
        : Elf_Rel_Base<ELFT<TargetEndianness, MaxAlign, false>, isRela> {
-  using Elf_Rel_Base<ELFT<TargetEndianness, MaxAlign, false>, isRela>::r_info;
   LLVM_ELF_IMPORT_TYPES(ELFT<TargetEndianness LLVM_ELF_COMMA
                              MaxAlign LLVM_ELF_COMMA false>)
 
   // These accessors and mutators correspond to the ELF32_R_SYM, ELF32_R_TYPE,
   // and ELF32_R_INFO macros defined in the ELF specification:
-  uint32_t getSymbol() const { return (r_info >> 8); }
-  unsigned char getType() const { return (unsigned char) (r_info & 0x0ff); }
+  uint32_t getSymbol(bool isMips64EL) const {
+    return this->getRInfo(isMips64EL) >> 8;
+  }
+  unsigned char getType(bool isMips64EL) const {
+    return (unsigned char) (this->getRInfo(isMips64EL) & 0x0ff);
+  }
   void setSymbol(uint32_t s) { setSymbolAndType(s, getType()); }
   void setType(unsigned char t) { setSymbolAndType(getSymbol(), t); }
   void setSymbolAndType(uint32_t s, unsigned char t) {
-    r_info = (s << 8) + t;
+    this->setRInfo((s << 8) + t);
   }
 };
 
@@ -703,6 +754,13 @@ protected:
 
 public:
   ELFObjectFile(MemoryBuffer *Object, error_code &ec);
+
+  bool isMips64EL() const {
+    return Header->e_machine == ELF::EM_MIPS &&
+      Header->getFileClass() == ELF::ELFCLASS64 &&
+      Header->getDataEncoding() == ELF::ELFDATA2LSB;
+  }
+
   virtual symbol_iterator begin_symbols() const;
   virtual symbol_iterator end_symbols() const;
 
@@ -790,6 +848,7 @@ public:
   uint64_t getNumSections() const;
   uint64_t getStringTableIndex() const;
   ELF::Elf64_Word getSymbolTableIndex(const Elf_Sym *symb) const;
+  const Elf_Ehdr *getElfHeader() const;
   const Elf_Shdr *getSection(const Elf_Sym *symb) const;
   const Elf_Shdr *getElfSection(section_iterator &It) const;
   const Elf_Sym *getElfSymbol(symbol_iterator &It) const;
@@ -969,6 +1028,12 @@ ELFObjectFile<ELFT>::getSection(const Elf_Sym *symb) const {
 }
 
 template<class ELFT>
+const typename ELFObjectFile<ELFT>::Elf_Ehdr *
+ELFObjectFile<ELFT>::getElfHeader() const {
+  return Header;
+}
+
+template<class ELFT>
 const typename ELFObjectFile<ELFT>::Elf_Shdr *
 ELFObjectFile<ELFT>::getElfSection(section_iterator &It) const {
   llvm::object::DataRefImpl ShdrRef = It->getRawDataRefImpl();
@@ -1058,6 +1123,11 @@ error_code ELFObjectFile<ELFT>::getSymbolAddress(DataRefImpl Symb,
       IsRelocatable = true;
     }
     Result = symb->st_value;
+
+    // Clear the ARM/Thumb indicator flag.
+    if (Header->e_machine == ELF::EM_ARM)
+      Result &= ~1;
+
     if (IsRelocatable && Section != 0)
       Result += Section->sh_addr;
     return object_error::success;
@@ -1373,8 +1443,16 @@ template<class ELFT>
 error_code ELFObjectFile<ELFT>::sectionContainsSymbol(DataRefImpl Sec,
                                                       DataRefImpl Symb,
                                                       bool &Result) const {
-  // FIXME: Unimplemented.
-  Result = false;
+  validateSymbol(Symb);
+
+  const Elf_Shdr *sec = reinterpret_cast<const Elf_Shdr *>(Sec.p);
+  const Elf_Sym  *symb = getSymbol(Symb);
+
+  unsigned shndx = symb->st_shndx;
+  bool Reserved = shndx >= ELF::SHN_LORESERVE
+               && shndx <= ELF::SHN_HIRESERVE;
+
+  Result = !Reserved && (sec == getSection(symb->st_shndx));
   return object_error::success;
 }
 
@@ -1447,11 +1525,11 @@ error_code ELFObjectFile<ELFT>::getRelocationSymbol(DataRefImpl Rel,
     default :
       report_fatal_error("Invalid section type in Rel!");
     case ELF::SHT_REL : {
-      symbolIdx = getRel(Rel)->getSymbol();
+      symbolIdx = getRel(Rel)->getSymbol(isMips64EL());
       break;
     }
     case ELF::SHT_RELA : {
-      symbolIdx = getRela(Rel)->getSymbol();
+      symbolIdx = getRela(Rel)->getSymbol(isMips64EL());
       break;
     }
   }
@@ -1517,11 +1595,11 @@ error_code ELFObjectFile<ELFT>::getRelocationType(DataRefImpl Rel,
     default :
       report_fatal_error("Invalid section type in Rel!");
     case ELF::SHT_REL : {
-      Result = getRel(Rel)->getType();
+      Result = getRel(Rel)->getType(isMips64EL());
       break;
     }
     case ELF::SHT_RELA : {
-      Result = getRela(Rel)->getType();
+      Result = getRela(Rel)->getType(isMips64EL());
       break;
     }
   }
@@ -1541,11 +1619,11 @@ error_code ELFObjectFile<ELFT>::getRelocationTypeName(
     default :
       return object_error::parse_failed;
     case ELF::SHT_REL : {
-      type = getRel(Rel)->getType();
+      type = getRel(Rel)->getType(isMips64EL());
       break;
     }
     case ELF::SHT_RELA : {
-      type = getRela(Rel)->getType();
+      type = getRela(Rel)->getType(isMips64EL());
       break;
     }
   }
@@ -1630,6 +1708,63 @@ error_code ELFObjectFile<ELFT>::getRelocationTypeName(
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_386_TLS_DESC_CALL);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_386_TLS_DESC);
       LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_386_IRELATIVE);
+    default:
+      res = "Unknown";
+    }
+    break;
+  case ELF::EM_MIPS:
+    switch (type) {
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_NONE);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_REL32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_26);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_HI16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_LO16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GPREL16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_LITERAL);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GOT16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_PC16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_CALL16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GPREL32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_SHIFT5);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_SHIFT6);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_64);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GOT_DISP);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GOT_PAGE);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GOT_OFST);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GOT_HI16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GOT_LO16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_SUB);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_INSERT_A);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_INSERT_B);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_DELETE);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_HIGHER);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_HIGHEST);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_CALL_HI16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_CALL_LO16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_SCN_DISP);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_REL16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_ADD_IMMEDIATE);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_PJUMP);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_RELGOT);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_JALR);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_DTPMOD32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_DTPREL32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_DTPMOD64);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_DTPREL64);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_GD);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_LDM);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_DTPREL_HI16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_DTPREL_LO16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_GOTTPREL);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_TPREL32);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_TPREL64);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_TPREL_HI16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_TLS_TPREL_LO16);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_GLOB_DAT);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_COPY);
+      LLVM_ELF_SWITCH_RELOC_TYPE_NAME(R_MIPS_JUMP_SLOT);
     default:
       res = "Unknown";
     }
@@ -1982,14 +2117,14 @@ error_code ELFObjectFile<ELFT>::getRelocationValueString(
     default:
       return object_error::parse_failed;
     case ELF::SHT_REL: {
-      type = getRel(Rel)->getType();
-      symbol_index = getRel(Rel)->getSymbol();
+      type = getRel(Rel)->getType(isMips64EL());
+      symbol_index = getRel(Rel)->getSymbol(isMips64EL());
       // TODO: Read implicit addend from section data.
       break;
     }
     case ELF::SHT_RELA: {
-      type = getRela(Rel)->getType();
-      symbol_index = getRela(Rel)->getSymbol();
+      type = getRela(Rel)->getType(isMips64EL());
+      symbol_index = getRela(Rel)->getSymbol(isMips64EL());
       addend = getRela(Rel)->r_addend;
       break;
     }
@@ -2303,8 +2438,9 @@ ELFObjectFile<ELFT>::end_dynamic_table(bool NULLEnd) const {
 
     if (NULLEnd) {
       Elf_Dyn_iterator Start = begin_dynamic_table();
-      for (; Start != Ret && Start->getTag() != ELF::DT_NULL; ++Start)
-        ;
+      while (Start != Ret && Start->getTag() != ELF::DT_NULL)
+        ++Start;
+
       // Include the DT_NULL.
       if (Start != Ret)
         ++Start;
@@ -2321,10 +2457,9 @@ StringRef ELFObjectFile<ELFT>::getLoadName() const {
     // Find the DT_SONAME entry
     Elf_Dyn_iterator it = begin_dynamic_table();
     Elf_Dyn_iterator ie = end_dynamic_table();
-    for (; it != ie; ++it) {
-      if (it->getTag() == ELF::DT_SONAME)
-        break;
-    }
+    while (it != ie && it->getTag() != ELF::DT_SONAME)
+      ++it;
+
     if (it != ie) {
       if (dot_dynstr_sec == NULL)
         report_fatal_error("Dynamic string table is missing");
@@ -2341,10 +2476,8 @@ library_iterator ELFObjectFile<ELFT>::begin_libraries_needed() const {
   // Find the first DT_NEEDED entry
   Elf_Dyn_iterator i = begin_dynamic_table();
   Elf_Dyn_iterator e = end_dynamic_table();
-  for (; i != e; ++i) {
-    if (i->getTag() == ELF::DT_NEEDED)
-      break;
-  }
+  while (i != e && i->getTag() != ELF::DT_NEEDED)
+    ++i;
 
   DataRefImpl DRI;
   DRI.p = reinterpret_cast<uintptr_t>(i.get());
@@ -2359,11 +2492,10 @@ error_code ELFObjectFile<ELFT>::getLibraryNext(DataRefImpl Data,
                                         reinterpret_cast<const char *>(Data.p));
   Elf_Dyn_iterator e = end_dynamic_table();
 
-  // Skip the current dynamic table entry.
-  ++i;
-
-  // Find the next DT_NEEDED entry.
-  for (; i != e && i->getTag() != ELF::DT_NEEDED; ++i);
+  // Skip the current dynamic table entry and find the next DT_NEEDED entry.
+  do
+    ++i;
+  while (i != e && i->getTag() != ELF::DT_NEEDED);
 
   DataRefImpl DRI;
   DRI.p = reinterpret_cast<uintptr_t>(i.get());
@@ -2702,6 +2834,21 @@ static inline error_code GetELFSymbolVersion(const ObjectFile *Obj,
     return ELFObj->getSymbolVersion(Sym, Version, IsDefault);
 
   llvm_unreachable("Object passed to GetELFSymbolVersion() is not ELF");
+}
+
+/// This function returns the hash value for a symbol in the .dynsym section
+/// Name of the API remains consistent as specified in the libelf
+/// REF : http://www.sco.com/developers/gabi/latest/ch5.dynamic.html#hash
+static inline unsigned elf_hash(StringRef &symbolName) {
+  unsigned h = 0, g;
+  for (unsigned i = 0, j = symbolName.size(); i < j; i++) {
+    h = (h << 4) + symbolName[i];
+    g = h & 0xf0000000L;
+    if (g != 0)
+      h ^= g >> 24;
+    h &= ~g;
+  }
+  return h;
 }
 
 }

@@ -15,14 +15,105 @@
 #ifndef LLVM_OBJECT_MACHO_H
 #define LLVM_OBJECT_MACHO_H
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Object/MachOObject.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Support/Endian.h"
 #include "llvm/Support/MachO.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace llvm {
 namespace object {
+
+namespace MachOFormat {
+  struct Section {
+    char Name[16];
+    char SegmentName[16];
+    support::ulittle32_t Address;
+    support::ulittle32_t Size;
+    support::ulittle32_t Offset;
+    support::ulittle32_t Align;
+    support::ulittle32_t RelocationTableOffset;
+    support::ulittle32_t NumRelocationTableEntries;
+    support::ulittle32_t Flags;
+    support::ulittle32_t Reserved1;
+    support::ulittle32_t Reserved2;
+  };
+
+  struct Section64 {
+    char Name[16];
+    char SegmentName[16];
+    support::ulittle64_t Address;
+    support::ulittle64_t Size;
+    support::ulittle32_t Offset;
+    support::ulittle32_t Align;
+    support::ulittle32_t RelocationTableOffset;
+    support::ulittle32_t NumRelocationTableEntries;
+    support::ulittle32_t Flags;
+    support::ulittle32_t Reserved1;
+    support::ulittle32_t Reserved2;
+    support::ulittle32_t Reserved3;
+  };
+
+  struct RelocationEntry {
+    support::ulittle32_t Word0;
+    support::ulittle32_t Word1;
+  };
+
+  struct SymbolTableEntry {
+    support::ulittle32_t StringIndex;
+    uint8_t Type;
+    uint8_t SectionIndex;
+    support::ulittle16_t Flags;
+    support::ulittle32_t Value;
+  };
+
+  struct Symbol64TableEntry {
+    support::ulittle32_t StringIndex;
+    uint8_t Type;
+    uint8_t SectionIndex;
+    support::ulittle16_t Flags;
+    support::ulittle64_t Value;
+  };
+
+  struct SymtabLoadCommand {
+    support::ulittle32_t Type;
+    support::ulittle32_t Size;
+    support::ulittle32_t SymbolTableOffset;
+    support::ulittle32_t NumSymbolTableEntries;
+    support::ulittle32_t StringTableOffset;
+    support::ulittle32_t StringTableSize;
+  };
+
+  struct SegmentLoadCommand {
+    support::ulittle32_t Type;
+    support::ulittle32_t Size;
+    char Name[16];
+    support::ulittle32_t VMAddress;
+    support::ulittle32_t VMSize;
+    support::ulittle32_t FileOffset;
+    support::ulittle32_t FileSize;
+    support::ulittle32_t MaxVMProtection;
+    support::ulittle32_t InitialVMProtection;
+    support::ulittle32_t NumSections;
+    support::ulittle32_t Flags;
+  };
+
+  struct Segment64LoadCommand {
+    support::ulittle32_t Type;
+    support::ulittle32_t Size;
+    char Name[16];
+    support::ulittle64_t VMAddress;
+    support::ulittle64_t VMSize;
+    support::ulittle64_t FileOffset;
+    support::ulittle64_t FileSize;
+    support::ulittle32_t MaxVMProtection;
+    support::ulittle32_t InitialVMProtection;
+    support::ulittle32_t NumSections;
+    support::ulittle32_t Flags;
+  };
+}
 
 typedef MachOObject::LoadCommandInfo LoadCommandInfo;
 
@@ -47,7 +138,12 @@ public:
   // In a MachO file, sections have a segment name. This is used in the .o
   // files. They have a single segment, but this field specifies which segment
   // a section should be put in in the final object.
-  error_code getSectionFinalSegmentName(DataRefImpl Sec, StringRef &Res) const;
+  StringRef getSectionFinalSegmentName(DataRefImpl Sec) const;
+
+  // Names are stored as 16 bytes. These returns the raw 16 bytes without
+  // interpreting them as a C string.
+  ArrayRef<char> getSectionRawName(DataRefImpl Sec) const;
+  ArrayRef<char>getSectionRawFinalSegmentName(DataRefImpl Sec) const;
 
   MachOObject *getObject() { return MachOObj.get(); }
 
@@ -110,25 +206,39 @@ protected:
 
 private:
   OwningPtr<MachOObject> MachOObj;
-  mutable uint32_t RegisteredStringTable;
   typedef SmallVector<DataRefImpl, 1> SectionList;
   SectionList Sections;
 
 
   void moveToNextSection(DataRefImpl &DRI) const;
-  void getSymbolTableEntry(DataRefImpl DRI,
-                           InMemoryStruct<macho::SymbolTableEntry> &Res) const;
-  void getSymbol64TableEntry(DataRefImpl DRI,
-                          InMemoryStruct<macho::Symbol64TableEntry> &Res) const;
+
+  const MachOFormat::SymbolTableEntry *
+  getSymbolTableEntry(DataRefImpl DRI) const;
+
+  const MachOFormat::SymbolTableEntry *
+  getSymbolTableEntry(DataRefImpl DRI,
+                     const MachOFormat::SymtabLoadCommand *SymtabLoadCmd) const;
+
+  const MachOFormat::Symbol64TableEntry *
+  getSymbol64TableEntry(DataRefImpl DRI) const;
+
+  const MachOFormat::Symbol64TableEntry *
+  getSymbol64TableEntry(DataRefImpl DRI,
+                     const MachOFormat::SymtabLoadCommand *SymtabLoadCmd) const;
+
   void moveToNextSymbol(DataRefImpl &DRI) const;
-  void getSection(DataRefImpl DRI, InMemoryStruct<macho::Section> &Res) const;
-  void getSection64(DataRefImpl DRI,
-                    InMemoryStruct<macho::Section64> &Res) const;
-  void getRelocation(DataRefImpl Rel,
-                     InMemoryStruct<macho::RelocationEntry> &Res) const;
+  const MachOFormat::Section *getSection(DataRefImpl DRI) const;
+  const MachOFormat::Section64 *getSection64(DataRefImpl DRI) const;
+  const MachOFormat::RelocationEntry *getRelocation(DataRefImpl Rel) const;
+  const MachOFormat::SymtabLoadCommand *
+    getSymtabLoadCommand(LoadCommandInfo LCI) const;
+  const MachOFormat::SegmentLoadCommand *
+    getSegmentLoadCommand(LoadCommandInfo LCI) const;
+  const MachOFormat::Segment64LoadCommand *
+    getSegment64LoadCommand(LoadCommandInfo LCI) const;
   std::size_t getSectionIndex(DataRefImpl Sec) const;
 
-  void printRelocationTargetName(InMemoryStruct<macho::RelocationEntry>& RE,
+  void printRelocationTargetName(const MachOFormat::RelocationEntry *RE,
                                  raw_string_ostream &fmt) const;
 };
 

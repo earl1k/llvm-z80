@@ -15,6 +15,7 @@
 #define MipsSEISELLOWERING_H
 
 #include "MipsISelLowering.h"
+#include "MipsRegisterInfo.h"
 
 namespace llvm {
   class MipsSETargetLowering : public MipsTargetLowering  {
@@ -23,8 +24,20 @@ namespace llvm {
 
     virtual bool allowsUnalignedMemoryAccesses(EVT VT, bool *Fast) const;
 
+    virtual SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const;
+
+    virtual SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+
     virtual MachineBasicBlock *
     EmitInstrWithCustomInserter(MachineInstr *MI, MachineBasicBlock *MBB) const;
+
+    virtual const TargetRegisterClass *getRepRegClassFor(MVT VT) const {
+      if (VT == MVT::Untyped)
+        return Subtarget->hasDSP() ? &Mips::ACRegsDSPRegClass :
+                                     &Mips::ACRegsRegClass;
+
+      return TargetLowering::getRepRegClassFor(VT);
+    }
 
   private:
     virtual bool
@@ -37,6 +50,9 @@ namespace llvm {
                 std::deque< std::pair<unsigned, SDValue> > &RegsToPass,
                 bool IsPICCall, bool GlobalOrExternal, bool InternalLinkage,
                 CallLoweringInfo &CLI, SDValue Callee, SDValue Chain) const;
+
+    SDValue lowerMulDiv(SDValue Op, unsigned NewOpc, bool HasLo, bool HasHi,
+                        SelectionDAG &DAG) const;
 
     MachineBasicBlock *emitBPOSGE32(MachineInstr *MI,
                                     MachineBasicBlock *BB) const;
