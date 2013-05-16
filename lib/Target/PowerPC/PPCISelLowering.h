@@ -146,6 +146,10 @@ namespace llvm {
       /// an optional input flag argument.
       COND_BRANCH,
 
+      /// CHAIN = BDNZ CHAIN, DESTBB - These are used to create counter-based
+      /// loops.
+      BDNZ, BDZ,
+
       /// F8RC = FADDRTZ F8RC, F8RC - This is an FADD done with rounding
       /// towards zero.  Used only as part of the long double-to-int
       /// conversion sequence.
@@ -175,61 +179,61 @@ namespace llvm {
 
       /// G8RC = ADDIS_GOT_TPREL_HA %X2, Symbol - Used by the initial-exec
       /// TLS model, produces an ADDIS8 instruction that adds the GOT
-      /// base to sym@got@tprel@ha.
+      /// base to sym\@got\@tprel\@ha.
       ADDIS_GOT_TPREL_HA,
 
       /// G8RC = LD_GOT_TPREL_L Symbol, G8RReg - Used by the initial-exec
       /// TLS model, produces a LD instruction with base register G8RReg
-      /// and offset sym@got@tprel@l.  This completes the addition that
+      /// and offset sym\@got\@tprel\@l.  This completes the addition that
       /// finds the offset of "sym" relative to the thread pointer.
       LD_GOT_TPREL_L,
 
       /// G8RC = ADD_TLS G8RReg, Symbol - Used by the initial-exec TLS
       /// model, produces an ADD instruction that adds the contents of
       /// G8RReg to the thread pointer.  Symbol contains a relocation
-      /// sym@tls which is to be replaced by the thread pointer and
+      /// sym\@tls which is to be replaced by the thread pointer and
       /// identifies to the linker that the instruction is part of a
       /// TLS sequence.
       ADD_TLS,
 
       /// G8RC = ADDIS_TLSGD_HA %X2, Symbol - For the general-dynamic TLS
       /// model, produces an ADDIS8 instruction that adds the GOT base
-      /// register to sym@got@tlsgd@ha.
+      /// register to sym\@got\@tlsgd\@ha.
       ADDIS_TLSGD_HA,
 
       /// G8RC = ADDI_TLSGD_L G8RReg, Symbol - For the general-dynamic TLS
       /// model, produces an ADDI8 instruction that adds G8RReg to
-      /// sym@got@tlsgd@l.
+      /// sym\@got\@tlsgd\@l.
       ADDI_TLSGD_L,
 
       /// G8RC = GET_TLS_ADDR %X3, Symbol - For the general-dynamic TLS
-      /// model, produces a call to __tls_get_addr(sym@tlsgd).
+      /// model, produces a call to __tls_get_addr(sym\@tlsgd).
       GET_TLS_ADDR,
 
       /// G8RC = ADDIS_TLSLD_HA %X2, Symbol - For the local-dynamic TLS
       /// model, produces an ADDIS8 instruction that adds the GOT base
-      /// register to sym@got@tlsld@ha.
+      /// register to sym\@got\@tlsld\@ha.
       ADDIS_TLSLD_HA,
 
       /// G8RC = ADDI_TLSLD_L G8RReg, Symbol - For the local-dynamic TLS
       /// model, produces an ADDI8 instruction that adds G8RReg to
-      /// sym@got@tlsld@l.
+      /// sym\@got\@tlsld\@l.
       ADDI_TLSLD_L,
 
       /// G8RC = GET_TLSLD_ADDR %X3, Symbol - For the local-dynamic TLS
-      /// model, produces a call to __tls_get_addr(sym@tlsld).
+      /// model, produces a call to __tls_get_addr(sym\@tlsld).
       GET_TLSLD_ADDR,
 
       /// G8RC = ADDIS_DTPREL_HA %X3, Symbol, Chain - For the
       /// local-dynamic TLS model, produces an ADDIS8 instruction
-      /// that adds X3 to sym@dtprel@ha.  The Chain operand is needed 
+      /// that adds X3 to sym\@dtprel\@ha.  The Chain operand is needed
       /// to tie this in place following a copy to %X3 from the result
       /// of a GET_TLSLD_ADDR.
       ADDIS_DTPREL_HA,
 
       /// G8RC = ADDI_DTPREL_L G8RReg, Symbol - For the local-dynamic TLS
       /// model, produces an ADDI8 instruction that adds G8RReg to
-      /// sym@got@dtprel@l.
+      /// sym\@got\@dtprel\@l.
       ADDI_DTPREL_L,
 
       /// VRRC = VADD_SPLAT Elt, EltSize - Temporary node to be expanded
@@ -237,6 +241,10 @@ namespace llvm {
       /// operations on splats.  This is necessary to avoid losing these
       /// optimizations due to constant folding.
       VADD_SPLAT,
+
+      /// CHAIN = SC CHAIN, Imm128 - System call.  The 7-bit unsigned
+      /// operand identifies the operating system entry point.
+      SC,
 
       /// CHAIN = STBRX CHAIN, GPRC, Ptr, Type - This is a
       /// byte-swapping store instruction.  It byte-swaps the low "Type" bits of
@@ -266,16 +274,16 @@ namespace llvm {
 
       /// G8RC = ADDIS_TOC_HA %X2, Symbol - For medium and large code model,
       /// produces an ADDIS8 instruction that adds the TOC base register to
-      /// sym@toc@ha.
+      /// sym\@toc\@ha.
       ADDIS_TOC_HA,
 
       /// G8RC = LD_TOC_L Symbol, G8RReg - For medium and large code model,
       /// produces a LD instruction with base register G8RReg and offset
-      /// sym@toc@l.  Preceded by an ADDIS_TOC_HA to form a full 32-bit offset.
+      /// sym\@toc\@l. Preceded by an ADDIS_TOC_HA to form a full 32-bit offset.
       LD_TOC_L,
 
       /// G8RC = ADDI_TOC_L G8RReg, Symbol - For medium code model, produces
-      /// an ADDI8 instruction that adds G8RReg to sym@toc@l.
+      /// an ADDI8 instruction that adds G8RReg to sym\@toc\@l.
       /// Preceded by an ADDIS_TOC_HA to form a full 32-bit offset.
       ADDI_TOC_L
     };
@@ -436,15 +444,6 @@ namespace llvm {
     /// by AM is legal for this target, for a load/store of the specified type.
     virtual bool isLegalAddressingMode(const AddrMode &AM, Type *Ty)const;
 
-    /// isLegalAddressImmediate - Return true if the integer value can be used
-    /// as the offset of the target addressing mode for load / store of the
-    /// given type.
-    virtual bool isLegalAddressImmediate(int64_t V, Type *Ty) const;
-
-    /// isLegalAddressImmediate - Return true if the GlobalValue can be used as
-    /// the offset of the target addressing mode.
-    virtual bool isLegalAddressImmediate(GlobalValue *GV) const;
-
     virtual bool isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const;
 
     /// getOptimalMemOpType - Returns the target specific optimal type for load
@@ -459,7 +458,7 @@ namespace llvm {
     /// It returns EVT::Other if the type should be determined using generic
     /// target-independent logic.
     virtual EVT
-    getOptimalMemOpType(uint64_t Size, unsigned DstAlign, unsigned SrcAlign, 
+    getOptimalMemOpType(uint64_t Size, unsigned DstAlign, unsigned SrcAlign,
                         bool IsMemset, bool ZeroMemset, bool MemcpyStrSrc,
                         MachineFunction &MF) const;
 

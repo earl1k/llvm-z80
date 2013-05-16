@@ -75,6 +75,12 @@ ARMBaseRegisterInfo::getCallPreservedMask(CallingConv::ID) const {
 }
 
 const uint32_t*
+ARMBaseRegisterInfo::getThisReturnPreservedMask(CallingConv::ID) const {
+  return (STI.isTargetIOS() && !STI.isAAPCS_ABI())
+    ? CSR_iOS_ThisReturn_RegMask : CSR_AAPCS_ThisReturn_RegMask;
+}
+
+const uint32_t*
 ARMBaseRegisterInfo::getNoPreservedMask() const {
   return CSR_NoRegs_RegMask;
 }
@@ -88,6 +94,7 @@ getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(ARM::SP);
   Reserved.set(ARM::PC);
   Reserved.set(ARM::FPSCR);
+  Reserved.set(ARM::APSR_NZCV);
   if (TFI->hasFP(MF))
     Reserved.set(FramePtr);
   if (hasBasePointer(MF))

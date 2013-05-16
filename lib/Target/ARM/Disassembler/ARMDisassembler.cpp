@@ -156,6 +156,9 @@ static DecodeStatus DecodeGPRRegisterClass(MCInst &Inst, unsigned RegNo,
 static DecodeStatus DecodeGPRnopcRegisterClass(MCInst &Inst,
                                                unsigned RegNo, uint64_t Address,
                                                const void *Decoder);
+static DecodeStatus DecodeGPRwithAPSRRegisterClass(MCInst &Inst,
+                                               unsigned RegNo, uint64_t Address,
+                                               const void *Decoder);
 static DecodeStatus DecodetGPRRegisterClass(MCInst &Inst, unsigned RegNo,
                                    uint64_t Address, const void *Decoder);
 static DecodeStatus DecodetcGPRRegisterClass(MCInst &Inst, unsigned RegNo,
@@ -308,6 +311,8 @@ static DecodeStatus DecodeVCVTD(MCInst &Inst, unsigned Insn,
                                 uint64_t Address, const void *Decoder);
 static DecodeStatus DecodeVCVTQ(MCInst &Inst, unsigned Insn,
                                 uint64_t Address, const void *Decoder);
+static DecodeStatus DecodeImm0_4(MCInst &Inst, unsigned Insn, uint64_t Address,
+                                 const void *Decoder);
 
 
 static DecodeStatus DecodeThumbAddSpecialReg(MCInst &Inst, uint16_t Insn,
@@ -915,6 +920,21 @@ DecodeGPRnopcRegisterClass(MCInst &Inst, unsigned RegNo,
 
   Check(S, DecodeGPRRegisterClass(Inst, RegNo, Address, Decoder));
 
+  return S;
+}
+
+static DecodeStatus
+DecodeGPRwithAPSRRegisterClass(MCInst &Inst, unsigned RegNo,
+                               uint64_t Address, const void *Decoder) {
+  DecodeStatus S = MCDisassembler::Success;
+
+  if (RegNo == 15)
+  {
+    Inst.addOperand(MCOperand::CreateReg(ARM::APSR_NZCV));
+    return MCDisassembler::Success;
+  }
+
+  Check(S, DecodeGPRRegisterClass(Inst, RegNo, Address, Decoder));
   return S;
 }
 
@@ -1951,10 +1971,12 @@ static DecodeStatus DecodeT2CPSInstruction(MCInst &Inst, unsigned Insn,
     Inst.addOperand(MCOperand::CreateImm(mode));
     if (iflags) S = MCDisassembler::SoftFail;
   } else {
-    // imod == '00' && M == '0' --> UNPREDICTABLE
-    Inst.setOpcode(ARM::t2CPS1p);
-    Inst.addOperand(MCOperand::CreateImm(mode));
-    S = MCDisassembler::SoftFail;
+    // imod == '00' && M == '0' --> this is a HINT instruction
+    int imm = fieldFromInstruction(Insn, 0, 8);
+    // HINT are defined only for immediate in [0..4]
+    if(imm > 4) return MCDisassembler::Fail;
+    Inst.setOpcode(ARM::t2HINT);
+    Inst.addOperand(MCOperand::CreateImm(imm));
   }
 
   return S;
@@ -1996,9 +2018,10 @@ static DecodeStatus DecodeArmMOVTWInstruction(MCInst &Inst, unsigned Insn,
   imm |= (fieldFromInstruction(Insn, 16, 4) << 12);
 
   if (Inst.getOpcode() == ARM::MOVTi16)
-    if (!Check(S, DecoderGPRRegisterClass(Inst, Rd, Address, Decoder)))
+    if (!Check(S, DecodeGPRnopcRegisterClass(Inst, Rd, Address, Decoder)))
       return MCDisassembler::Fail;
-  if (!Check(S, DecoderGPRRegisterClass(Inst, Rd, Address, Decoder)))
+
+  if (!Check(S, DecodeGPRnopcRegisterClass(Inst, Rd, Address, Decoder)))
     return MCDisassembler::Fail;
 
   if (!tryAddingSymbolicOperand(Address, imm, false, 4, Inst, Decoder))
@@ -3570,7 +3593,7 @@ static DecodeStatus DecodeDoubleRegStore(MCInst &Inst, unsigned Insn,
   unsigned Rn = fieldFromInstruction(Insn, 16, 4);
   unsigned pred = fieldFromInstruction(Insn, 28, 4);
 
-  if (!Check(S, DecoderGPRRegisterClass(Inst, Rd, Address, Decoder)))
+  if (!Check(S, DecodeGPRnopcRegisterClass(Inst, Rd, Address, Decoder)))
     return MCDisassembler::Fail;
 
   if ((Rt & 1) || Rt == 0xE || Rn == 0xF) return MCDisassembler::Fail;
@@ -4494,6 +4517,15 @@ static DecodeStatus DecodeVCVTQ(MCInst &Inst, unsigned Insn,
   Inst.addOperand(MCOperand::CreateImm(64 - imm));
 
   return S;
+}
+
+static DecodeStatus DecodeImm0_4(MCInst &Inst, unsigned Insn, uint64_t Address,
+                                 const void *Decoder)
+{
+  unsigned Imm = fieldFromInstruction(Insn, 0, 3);
+  if (Imm > 4) return MCDisassembler::Fail;
+  Inst.addOperand(MCOperand::CreateImm(Imm));
+  return MCDisassembler::Success;
 }
 
 static DecodeStatus DecodeLDR(MCInst &Inst, unsigned Val,

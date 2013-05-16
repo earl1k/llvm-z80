@@ -457,7 +457,7 @@ SDNode *PPCDAGToDAGISel::SelectBitfieldInsert(SDNode *N) {
       SH &= 31;
       SDValue Ops[] = { Op0, Op1, getI32Imm(SH), getI32Imm(MB),
                           getI32Imm(ME) };
-      return CurDAG->getMachineNode(PPC::RLWIMI, dl, MVT::i32, Ops, 5);
+      return CurDAG->getMachineNode(PPC::RLWIMI, dl, MVT::i32, Ops);
     }
   }
   return 0;
@@ -780,7 +780,7 @@ SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
       }
       case ISD::SETGT: {
         SDValue Ops[] = { Op, getI32Imm(1), getI32Imm(31), getI32Imm(31) };
-        Op = SDValue(CurDAG->getMachineNode(PPC::RLWINM, dl, MVT::i32, Ops, 4),
+        Op = SDValue(CurDAG->getMachineNode(PPC::RLWINM, dl, MVT::i32, Ops),
                      0);
         return CurDAG->SelectNodeTo(N, PPC::XORI, MVT::i32, Op,
                                     getI32Imm(1));
@@ -873,7 +873,7 @@ SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
 
   // Get the specified bit.
   SDValue Tmp =
-    SDValue(CurDAG->getMachineNode(PPC::RLWINM, dl, MVT::i32, Ops, 4), 0);
+    SDValue(CurDAG->getMachineNode(PPC::RLWINM, dl, MVT::i32, Ops), 0);
   if (Inv) {
     assert(OtherCondIdx == -1 && "Can't have split plus negation");
     return CurDAG->SelectNodeTo(N, PPC::XORI, MVT::i32, Tmp, getI32Imm(1));
@@ -885,7 +885,7 @@ SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
   // Get the other bit of the comparison.
   Ops[1] = getI32Imm((32-(3-OtherCondIdx)) & 31);
   SDValue OtherCond =
-    SDValue(CurDAG->getMachineNode(PPC::RLWINM, dl, MVT::i32, Ops, 4), 0);
+    SDValue(CurDAG->getMachineNode(PPC::RLWINM, dl, MVT::i32, Ops), 0);
 
   return CurDAG->SelectNodeTo(N, PPC::OR, MVT::i32, Tmp, OtherCond);
 }
@@ -1079,7 +1079,7 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
       SDValue Ops[] = { Offset, Base, Chain };
       return CurDAG->getMachineNode(Opcode, dl, LD->getValueType(0),
                                     PPCLowering.getPointerTy(),
-                                    MVT::Other, Ops, 3);
+                                    MVT::Other, Ops);
     } else {
       unsigned Opcode;
       bool isSExt = LD->getExtensionType() == ISD::SEXTLOAD;
@@ -1114,7 +1114,7 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
       SDValue Ops[] = { Base, Offset, Chain };
       return CurDAG->getMachineNode(Opcode, dl, LD->getValueType(0),
                                     PPCLowering.getPointerTy(),
-                                    MVT::Other, Ops, 3);
+                                    MVT::Other, Ops);
     }
   }
 
@@ -1163,7 +1163,7 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
         SDValue Ops[] = { N->getOperand(0).getOperand(0),
                             N->getOperand(0).getOperand(1),
                             getI32Imm(0), getI32Imm(MB),getI32Imm(ME) };
-        return CurDAG->getMachineNode(PPC::RLWIMI, dl, MVT::i32, Ops, 5);
+        return CurDAG->getMachineNode(PPC::RLWIMI, dl, MVT::i32, Ops);
       }
     }
 
@@ -1241,6 +1241,15 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
     SDValue Ops[] = { CCReg, N->getOperand(2), N->getOperand(3),
                         getI32Imm(BROpc) };
     return CurDAG->SelectNodeTo(N, SelectCCOp, N->getValueType(0), Ops, 4);
+  }
+  case PPCISD::BDNZ:
+  case PPCISD::BDZ: {
+    bool IsPPC64 = PPCSubTarget.isPPC64();
+    SDValue Ops[] = { N->getOperand(1), N->getOperand(0) };
+    return CurDAG->SelectNodeTo(N, N->getOpcode() == PPCISD::BDNZ ?
+                                   (IsPPC64 ? PPC::BDNZ8 : PPC::BDNZ) :
+                                   (IsPPC64 ? PPC::BDZ8 : PPC::BDZ),
+                                MVT::Other, Ops, 2);
   }
   case PPCISD::COND_BRANCH: {
     // Op #0 is the Chain.

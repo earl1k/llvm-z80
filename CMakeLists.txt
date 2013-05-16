@@ -11,7 +11,7 @@ set(CMAKE_MODULE_PATH
   )
 
 set(LLVM_VERSION_MAJOR 3)
-set(LLVM_VERSION_MINOR 3)
+set(LLVM_VERSION_MINOR 4)
 
 set(PACKAGE_VERSION "${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}svn")
 
@@ -84,21 +84,17 @@ set(LLVM_ALL_TARGETS
   NVPTX
   PowerPC
   Sparc
+  SystemZ
   X86
   XCore
   Z80
   )
 
 # List of targets with JIT support:
-set(LLVM_TARGETS_WITH_JIT X86 PowerPC ARM Mips)
+set(LLVM_TARGETS_WITH_JIT X86 PowerPC ARM Mips SystemZ)
 
-if( MSVC )
-  set(LLVM_TARGETS_TO_BUILD X86
+set(LLVM_TARGETS_TO_BUILD "all"
     CACHE STRING "Semicolon-separated list of targets to build, or \"all\".")
-else( MSVC )
-  set(LLVM_TARGETS_TO_BUILD "all"
-    CACHE STRING "Semicolon-separated list of targets to build, or \"all\".")
-endif( MSVC )
 
 set(LLVM_EXPERIMENTAL_TARGETS_TO_BUILD ""
   CACHE STRING "Semicolon-separated list of experimental targets to build.")
@@ -129,6 +125,8 @@ set(LLVM_TARGET_ARCH "host"
   CACHE STRING "Set target to use for LLVM JIT or use \"host\" for automatic detection.")
 
 option(LLVM_ENABLE_THREADS "Use threads if available." ON)
+
+option(LLVM_ENABLE_ZLIB "Use zlib for compression/decompression if available." ON)
 
 if( LLVM_TARGETS_TO_BUILD STREQUAL "all" )
   set( LLVM_TARGETS_TO_BUILD ${LLVM_ALL_TARGETS} )

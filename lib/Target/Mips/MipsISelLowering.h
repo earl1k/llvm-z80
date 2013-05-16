@@ -143,6 +143,15 @@ namespace llvm {
       MSUB_DSP,
       MSUBU_DSP,
 
+      // DSP shift nodes.
+      SHLL_DSP,
+      SHRA_DSP,
+      SHRL_DSP,
+
+      // DSP setcc and select_cc nodes.
+      SETCC_DSP,
+      SELECT_CC_DSP,
+
       // Load/Store Left/Right nodes.
       LWL = ISD::FIRST_TARGET_MEMORY_OPCODE,
       LWR,
@@ -231,7 +240,14 @@ namespace llvm {
     /// arguments and inquire about calling convention information.
     class MipsCC {
     public:
-      MipsCC(CallingConv::ID CallConv, bool IsO32, CCState &Info);
+      enum SpecialCallingConvType {
+        Mips16RetHelperConv, NoSpecialCallingConv
+      };
+
+      MipsCC(
+        CallingConv::ID CallConv, bool IsO32, CCState &Info,
+        SpecialCallingConvType SpecialCallingConv = NoSpecialCallingConv);
+
 
       void analyzeCallOperands(const SmallVectorImpl<ISD::OutputArg> &Outs,
                                bool IsVarArg, bool IsSoftFloat,
@@ -304,15 +320,18 @@ namespace llvm {
       CCState &CCInfo;
       CallingConv::ID CallConv;
       bool IsO32;
+      SpecialCallingConvType SpecialCallingConv;
       SmallVector<ByValArgInfo, 2> ByValArgs;
     };
-
+  protected:
     // Subtarget Info
     const MipsSubtarget *Subtarget;
 
     bool HasMips64, IsN64, IsO32;
 
   private:
+
+    MipsCC::SpecialCallingConvType getSpecialCallingConv(SDValue Callee) const;
     // Lower Operand helpers
     SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
                             CallingConv::ID CallConv, bool isVarArg,
@@ -338,15 +357,12 @@ namespace llvm {
     SDValue lowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerEH_RETURN(SDValue Op, SelectionDAG &DAG) const;
-    SDValue lowerMEMBARRIER(SDValue Op, SelectionDAG& DAG) const;
     SDValue lowerATOMIC_FENCE(SDValue Op, SelectionDAG& DAG) const;
     SDValue lowerShiftLeftParts(SDValue Op, SelectionDAG& DAG) const;
     SDValue lowerShiftRightParts(SDValue Op, SelectionDAG& DAG,
                                  bool IsSRA) const;
     SDValue lowerLOAD(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerSTORE(SDValue Op, SelectionDAG &DAG) const;
-    SDValue lowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
-    SDValue lowerINTRINSIC_W_CHAIN(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerADD(SDValue Op, SelectionDAG &DAG) const;
 
     /// isEligibleForTailCallOptimization - Check whether the call is eligible

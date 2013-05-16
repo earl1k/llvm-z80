@@ -524,6 +524,35 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
       }
     }
 
+    // B * (uitofp i1 C) -> select C, B, 0
+    if (I.hasNoNaNs() && I.hasNoInfs() && I.hasNoSignedZeros()) {
+      Value *LHS = Op0, *RHS = Op1;
+      Value *B, *C;
+      if (!match(RHS, m_UIToFp(m_Value(C))))
+        std::swap(LHS, RHS);
+
+      if (match(RHS, m_UIToFp(m_Value(C))) && C->getType()->isIntegerTy(1)) {
+        B = LHS;
+        Value *Zero = ConstantFP::getNegativeZero(B->getType());
+        return SelectInst::Create(C, B, Zero);
+      }
+    }
+
+    // A * (1 - uitofp i1 C) -> select C, 0, A
+    if (I.hasNoNaNs() && I.hasNoInfs() && I.hasNoSignedZeros()) {
+      Value *LHS = Op0, *RHS = Op1;
+      Value *A, *C;
+      if (!match(RHS, m_FSub(m_FPOne(), m_UIToFp(m_Value(C)))))
+        std::swap(LHS, RHS);
+
+      if (match(RHS, m_FSub(m_FPOne(), m_UIToFp(m_Value(C)))) &&
+          C->getType()->isIntegerTy(1)) {
+        A = LHS;
+        Value *Zero = ConstantFP::getNegativeZero(A->getType());
+        return SelectInst::Create(C, Zero, A);
+      }
+    }
+
     if (!isa<Constant>(Op1))
       std::swap(Opnd0, Opnd1);
     else
@@ -817,7 +846,7 @@ Instruction *InstCombiner::visitSDiv(BinaryOperator &I) {
 /// FP value and:
 ///    1) 1/C is exact, or
 ///    2) reciprocal is allowed.
-/// If the convertion was successful, the simplified expression "X * 1/C" is
+/// If the conversion was successful, the simplified expression "X * 1/C" is
 /// returned; otherwise, NULL is returned.
 ///
 static Instruction *CvtFDivConstToReciprocal(Value *Dividend,
@@ -998,36 +1027,18 @@ Instruction *InstCombiner::visitURem(BinaryOperator &I) {
   if (Instruction *common = commonIRemTransforms(I))
     return common;
 
-  // X urem C^2 -> X and C-1
-  { const APInt *C;
-    if (match(Op1, m_Power2(C)))
-      return BinaryOperator::CreateAnd(Op0,
-                                       ConstantInt::get(I.getType(), *C-1));
-  }
-
-  // Turn A % (C << N), where C is 2^k, into A & ((C << N)-1)
-  if (match(Op1, m_Shl(m_Power2(), m_Value()))) {
-    Constant *N1 = Constant::getAllOnesValue(I.getType());
-    Value *Add = Builder->CreateAdd(Op1, N1);
-    return BinaryOperator::CreateAnd(Op0, Add);
-  }
-
-  // urem X, (select Cond, 2^C1, 2^C2) -->
-  //    select Cond, (and X, C1-1), (and X, C2-1)
-  // when C1&C2 are powers of two.
-  { Value *Cond; const APInt *C1, *C2;
-    if (match(Op1, m_Select(m_Value(Cond), m_Power2(C1), m_Power2(C2)))) {
-      Value *TrueAnd = Builder->CreateAnd(Op0, *C1-1, Op1->getName()+".t");
-      Value *FalseAnd = Builder->CreateAnd(Op0, *C2-1, Op1->getName()+".f");
-      return SelectInst::Create(Cond, TrueAnd, FalseAnd);
-    }
-  }
-
   // (zext A) urem (zext B) --> zext (A urem B)
   if (ZExtInst *ZOp0 = dyn_cast<ZExtInst>(Op0))
     if (Value *ZOp1 = dyn_castZExtVal(Op1, ZOp0->getSrcTy()))
       return new ZExtInst(Builder->CreateURem(ZOp0->getOperand(0), ZOp1),
                           I.getType());
+
+  // X urem Y -> X and Y-1, where Y is a power of 2,
+  if (isKnownToBeAPowerOfTwo(Op1, /*OrZero*/true)) {
+    Constant *N1 = Constant::getAllOnesValue(I.getType());
+    Value *Add = Builder->CreateAdd(Op1, N1);
+    return BinaryOperator::CreateAnd(Op0, Add);
+  }
 
   return 0;
 }

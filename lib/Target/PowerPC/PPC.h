@@ -30,7 +30,8 @@ namespace llvm {
   class AsmPrinter;
   class MCInst;
 
-  FunctionPass *createPPCCTRLoops();
+  FunctionPass *createPPCCTRLoops(PPCTargetMachine &TM);
+  FunctionPass *createPPCEarlyReturnPass();
   FunctionPass *createPPCBranchSelectionPass();
   FunctionPass *createPPCISelDag(PPCTargetMachine &TM);
   FunctionPass *createPPCJITCodeEmitterPass(PPCTargetMachine &TM,
@@ -40,7 +41,7 @@ namespace llvm {
 
   /// \brief Creates an PPC-specific Target Transformation Info pass.
   ImmutablePass *createPPCTargetTransformInfoPass(const PPCTargetMachine *TM);
-  
+
   namespace PPCII {
     
   /// Target Operand Flag enum.

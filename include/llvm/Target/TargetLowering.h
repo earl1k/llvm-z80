@@ -810,13 +810,6 @@ public:
     return PrefLoopAlignment;
   }
 
-  /// getShouldFoldAtomicFences - return whether the combiner should fold
-  /// fence MEMBARRIER instructions into the atomic intrinsic instructions.
-  ///
-  bool getShouldFoldAtomicFences() const {
-    return ShouldFoldAtomicFences;
-  }
-
   /// getInsertFencesFor - return whether the DAG builder should automatically
   /// insert fences and reduce ordering for atomics.
   ///
@@ -1101,12 +1094,6 @@ protected:
     MinStackArgumentAlignment = Align;
   }
 
-  /// setShouldFoldAtomicFences - Set if the target's implementation of the
-  /// atomic operation intrinsics includes locking. Default is false.
-  void setShouldFoldAtomicFences(bool fold) {
-    ShouldFoldAtomicFences = fold;
-  }
-
   /// setInsertFencesForAtomic - Set if the DAG builder should
   /// automatically insert fences and reduce the order of atomic memory
   /// operations to Monotonic.
@@ -1364,11 +1351,6 @@ private:
   ///
   unsigned PrefLoopAlignment;
 
-  /// ShouldFoldAtomicFences - Whether fencing MEMBARRIER instructions should
-  /// be folded into the enclosed atomic intrinsic instruction by the
-  /// combiner.
-  bool ShouldFoldAtomicFences;
-
   /// InsertFencesForAtomic - Whether the DAG builder should automatically
   /// insert fences and reduce ordering for atomics.  (This will be set for
   /// for most architectures with weak memory ordering.)
@@ -1523,6 +1505,7 @@ public:
       // or until the element integer type is too big. If a legal type was not
       // found, fallback to the usual mechanism of widening/splitting the
       // vector.
+      EVT OldEltVT = EltVT;
       while (1) {
         // Increase the bitwidth of the element to the next pow-of-two
         // (which is greater than 8 bits).
@@ -1541,6 +1524,10 @@ public:
           return LegalizeKind(TypePromoteInteger,
                               EVT::getVectorVT(Context, EltVT, NumElts));
       }
+
+      // Reset the type to the unexpanded type if we did not find a legal vector
+      // type with a promoted vector element type.
+      EltVT = OldEltVT;
     }
 
     // Try to widen the vector until a legal type is found.
@@ -1905,16 +1892,18 @@ public:
   struct ArgListEntry {
     SDValue Node;
     Type* Ty;
-    bool isSExt  : 1;
-    bool isZExt  : 1;
-    bool isInReg : 1;
-    bool isSRet  : 1;
-    bool isNest  : 1;
-    bool isByVal : 1;
+    bool isSExt     : 1;
+    bool isZExt     : 1;
+    bool isInReg    : 1;
+    bool isSRet     : 1;
+    bool isNest     : 1;
+    bool isByVal    : 1;
+    bool isReturned : 1;
     uint16_t Alignment;
 
     ArgListEntry() : isSExt(false), isZExt(false), isInReg(false),
-      isSRet(false), isNest(false), isByVal(false), Alignment(0) { }
+      isSRet(false), isNest(false), isByVal(false), isReturned(false),
+      Alignment(0) { }
   };
   typedef std::vector<ArgListEntry> ArgListTy;
 

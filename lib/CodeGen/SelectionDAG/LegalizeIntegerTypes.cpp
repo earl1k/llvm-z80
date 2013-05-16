@@ -521,9 +521,20 @@ SDValue DAGTypeLegalizer::PromoteIntRes_SETCC(SDNode *N) {
   assert(SVT.isVector() == N->getOperand(0).getValueType().isVector() &&
          "Vector compare must return a vector result!");
 
+  SDValue LHS = N->getOperand(0);
+  SDValue RHS = N->getOperand(1);
+  if (LHS.getValueType() != RHS.getValueType()) {
+    if (getTypeAction(LHS.getValueType()) == TargetLowering::TypePromoteInteger &&
+        !LHS.getValueType().isVector())
+      LHS = GetPromotedInteger(LHS);
+    if (getTypeAction(RHS.getValueType()) == TargetLowering::TypePromoteInteger &&
+        !RHS.getValueType().isVector())
+      RHS = GetPromotedInteger(RHS);
+  }
+
   // Get the SETCC result using the canonical SETCC type.
-  SDValue SetCC = DAG.getNode(N->getOpcode(), dl, SVT, N->getOperand(0),
-                              N->getOperand(1), N->getOperand(2));
+  SDValue SetCC = DAG.getNode(N->getOpcode(), dl, SVT, LHS, RHS,
+                              N->getOperand(2));
 
   assert(NVT.bitsLE(SVT) && "Integer type overpromoted?");
   // Convert to the expected type.
@@ -777,7 +788,6 @@ bool DAGTypeLegalizer::PromoteIntegerOperand(SDNode *N, unsigned OpNo) {
                           Res = PromoteIntOp_CONVERT_RNDSAT(N); break;
   case ISD::INSERT_VECTOR_ELT:
                           Res = PromoteIntOp_INSERT_VECTOR_ELT(N, OpNo);break;
-  case ISD::MEMBARRIER:   Res = PromoteIntOp_MEMBARRIER(N); break;
   case ISD::SCALAR_TO_VECTOR:
                           Res = PromoteIntOp_SCALAR_TO_VECTOR(N); break;
   case ISD::VSELECT:
@@ -959,17 +969,6 @@ SDValue DAGTypeLegalizer::PromoteIntOp_INSERT_VECTOR_ELT(SDNode *N,
   SDValue Idx = ZExtPromotedInteger(N->getOperand(2));
   return SDValue(DAG.UpdateNodeOperands(N, N->getOperand(0),
                                 N->getOperand(1), Idx), 0);
-}
-
-SDValue DAGTypeLegalizer::PromoteIntOp_MEMBARRIER(SDNode *N) {
-  SDValue NewOps[6];
-  DebugLoc dl = N->getDebugLoc();
-  NewOps[0] = N->getOperand(0);
-  for (unsigned i = 1; i < array_lengthof(NewOps); ++i) {
-    SDValue Flag = GetPromotedInteger(N->getOperand(i));
-    NewOps[i] = DAG.getZeroExtendInReg(Flag, dl, MVT::i1);
-  }
-  return SDValue(DAG.UpdateNodeOperands(N, NewOps, array_lengthof(NewOps)), 0);
 }
 
 SDValue DAGTypeLegalizer::PromoteIntOp_SCALAR_TO_VECTOR(SDNode *N) {

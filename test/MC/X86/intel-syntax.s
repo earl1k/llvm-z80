@@ -283,5 +283,45 @@ _main:
     mov [((-2) * ((8 + 4) - 4)) + eax + ebx*4], ecx
 // CHECK: movl %ecx, -16(%eax,%ebx,4)
     mov [eax + ((-2) * ((8 + 4) - 4)) + ebx*4], ecx
+// CHECK: movl %ecx, 96(%eax,%ebx,4)
+    mov [eax + ((-2) * ((8 + 4) * -4)) + ebx*4], ecx
+// CHECK: movl %ecx, -8(%eax,%ebx,4)
+    mov [eax][-8][ebx*4], ecx
+// CHECK: movl %ecx, -2(%eax,%ebx,4)
+    mov [eax][16/-8][ebx*4], ecx
+// CHECK: movl %ecx, -2(%eax,%ebx,4)
+    mov [eax][(16)/-8][ebx*4], ecx
 
+// CHECK: setb %al
+    setc al
+// CHECK: sete %al
+    setz al
+// CHECK: setbe %al
+    setna al
+// CHECK: setae %al
+    setnb al
+// CHECK: setae %al
+    setnc al
+// CHECK: setle %al
+    setng al
+// CHECK: setge %al
+    setnl al
+// CHECK: setne %al
+    setnz al
+// CHECK: setp %al
+    setpe al
+// CHECK: setnp %al
+    setpo al
+// CHECK: setb %al
+    setnae al
+// CHECK: seta %al
+    setnbe al
+// CHECK: setl %al
+    setnge al
+// CHECK: setg %al
+    setnle al
+// CHECK: jne _foo
+    jnz _foo
+// CHECK: outb %al, $4
+    out 4, al
     ret
