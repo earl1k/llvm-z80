@@ -28,7 +28,9 @@ Z80TargetMachine::Z80TargetMachine(const Target &T, StringRef TT, StringRef CPU,
   DL("e-p:16:8:8-i8:8:8-i16:8:8-n8:16"),
   FrameLowering(*this), InstrInfo(*this), TSInfo(*this),
   Subtarget(TT, CPU, FS), TLInfo(*this)
-{}
+{
+  initAsmInfo();
+}
 
 namespace {
   class Z80PassConfig : public TargetPassConfig {

@@ -15,6 +15,6 @@
 #include "llvm/ADT/StringRef.h"
 using namespace llvm;
 
-Z80MCAsmInfo::Z80MCAsmInfo(const Target &T, StringRef TT)
+Z80MCAsmInfo::Z80MCAsmInfo(StringRef TT)
 {
 }

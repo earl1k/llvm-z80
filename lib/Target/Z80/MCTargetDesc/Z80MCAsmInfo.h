@@ -22,7 +22,7 @@ namespace llvm {
 
   class Z80MCAsmInfo : public MCAsmInfo {
   public:
-    explicit Z80MCAsmInfo(const Target &T, StringRef TT);
+    explicit Z80MCAsmInfo(StringRef TT);
   }; // end class Z80MCAsmInfo
 } // end namespace llvm
 
