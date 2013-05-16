@@ -627,9 +627,13 @@ SDValue Z80TargetLowering::EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &Z80CC,
   case ISD::SETUGE:
     TCC = Z80::COND_NC;
     break;
-  case ISD::SETGT:
+  case ISD::SETLE:
+    std::swap(LHS, RHS);
+  case ISD::SETGE:
     TCC = Z80::COND_P;
     break;
+  case ISD::SETGT:
+    std::swap(LHS, RHS);
   case ISD::SETLT:
     TCC = Z80::COND_M;
     break;
