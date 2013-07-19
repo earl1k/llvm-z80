@@ -119,13 +119,11 @@ void XCoreFrameLowering::emitPrologue(MachineFunction &MF) const {
   bool saveLR = XFI->getUsesLR();
   // Do we need to allocate space on the stack?
   if (FrameSize) {
-    bool LRSavedOnEntry = false;
     int Opcode;
     if (saveLR && (MFI->getObjectOffset(XFI->getLRSpillSlot()) == 0)) {
       Opcode = (isU6) ? XCore::ENTSP_u6 : XCore::ENTSP_lu6;
       MBB.addLiveIn(XCore::LR);
       saveLR = false;
-      LRSavedOnEntry = true;
     } else {
       Opcode = (isU6) ? XCore::EXTSP_u6 : XCore::EXTSP_lu6;
     }
@@ -225,7 +223,9 @@ void XCoreFrameLowering::emitEpilogue(MachineFunction &MF,
       assert(MBBI->getOpcode() == XCore::RETSP_u6
         || MBBI->getOpcode() == XCore::RETSP_lu6);
       int Opcode = (isU6) ? XCore::RETSP_u6 : XCore::RETSP_lu6;
-      BuildMI(MBB, MBBI, dl, TII.get(Opcode)).addImm(FrameSize);
+      MachineInstrBuilder MIB  = BuildMI(MBB, MBBI, dl, TII.get(Opcode)).addImm(FrameSize);
+      for (unsigned i = 3, e = MBBI->getNumOperands(); i < e; ++i)
+        MIB->addOperand(MBBI->getOperand(i)); // copy any variadic operands
       MBB.erase(MBBI);
     } else {
       int Opcode = (isU6) ? XCore::LDAWSP_ru6 : XCore::LDAWSP_lru6;

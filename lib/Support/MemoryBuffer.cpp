@@ -33,8 +33,7 @@
 #include <unistd.h>
 #else
 #include <io.h>
-// Simplistic definitinos of these macros to allow files to be read with
-// MapInFilePages.
+// Simplistic definitinos of these macros for use in getOpenFile.
 #ifndef S_ISREG
 #define S_ISREG(x) (1)
 #endif
@@ -42,7 +41,6 @@
 #define S_ISBLK(x) (0)
 #endif
 #endif
-#include <fcntl.h>
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -174,14 +172,6 @@ error_code MemoryBuffer::getFileOrSTDIN(StringRef Filename,
   return getFile(Filename, result, FileSize);
 }
 
-error_code MemoryBuffer::getFileOrSTDIN(const char *Filename,
-                                        OwningPtr<MemoryBuffer> &result,
-                                        int64_t FileSize) {
-  if (strcmp(Filename, "-") == 0)
-    return getSTDIN(result);
-  return getFile(Filename, result, FileSize);
-}
-
 //===----------------------------------------------------------------------===//
 // MemoryBuffer::getFile implementation.
 //===----------------------------------------------------------------------===//
@@ -262,24 +252,10 @@ error_code MemoryBuffer::getFile(const char *Filename,
                                  OwningPtr<MemoryBuffer> &result,
                                  int64_t FileSize,
                                  bool RequiresNullTerminator) {
-  // FIXME: Review if this check is unnecessary on windows as well.
-#ifdef LLVM_ON_WIN32
-  // First check that the "file" is not a directory
-  bool is_dir = false;
-  error_code err = sys::fs::is_directory(Filename, is_dir);
-  if (err)
-    return err;
-  if (is_dir)
-    return make_error_code(errc::is_a_directory);
-#endif
-
-  int OpenFlags = O_RDONLY;
-#ifdef O_BINARY
-  OpenFlags |= O_BINARY;  // Open input file in binary mode on win32.
-#endif
-  int FD = ::open(Filename, OpenFlags);
-  if (FD == -1)
-    return error_code(errno, posix_category());
+  int FD;
+  error_code EC = sys::fs::openFileForRead(Filename, FD);
+  if (EC)
+    return EC;
 
   error_code ret = getOpenFile(FD, Filename, result, FileSize, FileSize,
                                0, RequiresNullTerminator);
@@ -307,12 +283,11 @@ static bool shouldUseMmap(int FD,
   // FIXME: this chunk of code is duplicated, but it avoids a fstat when
   // RequiresNullTerminator = false and MapSize != -1.
   if (FileSize == size_t(-1)) {
-    struct stat FileInfo;
-    // TODO: This should use fstat64 when available.
-    if (fstat(FD, &FileInfo) == -1) {
-      return error_code(errno, posix_category());
-    }
-    FileSize = FileInfo.st_size;
+    sys::fs::file_status Status;
+    error_code EC = sys::fs::status(FD, Status);
+    if (EC)
+      return EC;
+    FileSize = Status.getSize();
   }
 
   // If we need a null terminator and the end of the map is inside the file,
@@ -342,20 +317,20 @@ error_code MemoryBuffer::getOpenFile(int FD, const char *Filename,
     // If we don't know the file size, use fstat to find out.  fstat on an open
     // file descriptor is cheaper than stat on a random path.
     if (FileSize == uint64_t(-1)) {
-      struct stat FileInfo;
-      // TODO: This should use fstat64 when available.
-      if (fstat(FD, &FileInfo) == -1) {
-        return error_code(errno, posix_category());
-      }
+      sys::fs::file_status Status;
+      error_code EC = sys::fs::status(FD, Status);
+      if (EC)
+        return EC;
 
       // If this not a file or a block device (e.g. it's a named pipe
       // or character device), we can't trust the size. Create the memory
       // buffer by copying off the stream.
-      if (!S_ISREG(FileInfo.st_mode) && !S_ISBLK(FileInfo.st_mode)) {
+      sys::fs::file_type Type = Status.type();
+      if (Type != sys::fs::file_type::regular_file &&
+          Type != sys::fs::file_type::block_file)
         return getMemoryBufferForStream(FD, Filename, result);
-      }
 
-      FileSize = FileInfo.st_size;
+      FileSize = Status.getSize();
     }
     MapSize = FileSize;
   }
@@ -420,7 +395,7 @@ error_code MemoryBuffer::getSTDIN(OwningPtr<MemoryBuffer> &result) {
   //
   // FIXME: That isn't necessarily true, we should try to mmap stdin and
   // fallback if it fails.
-  sys::Program::ChangeStdinToBinary();
+  sys::ChangeStdinToBinary();
 
   return getMemoryBufferForStream(0, "<stdin>", result);
 }

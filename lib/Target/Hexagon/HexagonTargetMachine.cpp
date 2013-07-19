@@ -126,7 +126,7 @@ TargetPassConfig *HexagonTargetMachine::createPassConfig(PassManagerBase &PM) {
 }
 
 bool HexagonPassConfig::addInstSelector() {
-  const HexagonTargetMachine &TM = getHexagonTargetMachine();
+  HexagonTargetMachine &TM = getHexagonTargetMachine();
   bool NoOpt = (getOptLevel() == CodeGenOpt::None);
 
   if (!NoOpt)
@@ -159,8 +159,8 @@ bool HexagonPassConfig::addPostRegAlloc() {
 
 bool HexagonPassConfig::addPreSched2() {
   const HexagonTargetMachine &TM = getHexagonTargetMachine();
-  HexagonTargetObjectFile &TLOF =
-    (HexagonTargetObjectFile&)(getTargetLowering()->getObjFileLowering());
+  const HexagonTargetObjectFile &TLOF =
+    (const HexagonTargetObjectFile &)getTargetLowering()->getObjFileLowering();
 
   addPass(createHexagonCopyToCombine());
   if (getOptLevel() != CodeGenOpt::None)

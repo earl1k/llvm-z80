@@ -49,10 +49,6 @@ protected:
 class IRBuilderBase {
   DebugLoc CurDbgLocation;
 protected:
-  /// Save the current debug location here while we are suppressing
-  /// line table entries.
-  llvm::DebugLoc SavedDbgLocation;
-
   BasicBlock *BB;
   BasicBlock::iterator InsertPt;
   LLVMContext &Context;
@@ -71,6 +67,7 @@ public:
   /// inserted into a block.
   void ClearInsertionPoint() {
     BB = 0;
+    InsertPt = 0;
   }
 
   BasicBlock *GetInsertBlock() const { return BB; }
@@ -89,6 +86,7 @@ public:
   void SetInsertPoint(Instruction *I) {
     BB = I->getParent();
     InsertPt = I;
+    assert(I != BB->end() && "Can't read debug loc from end()");
     SetCurrentDebugLocation(I->getDebugLoc());
   }
 
@@ -115,23 +113,6 @@ public:
   /// \brief Set location information used by debugging information.
   void SetCurrentDebugLocation(const DebugLoc &L) {
     CurDbgLocation = L;
-  }
-
-  /// \brief Temporarily suppress DebugLocations from being attached
-  /// to emitted instructions, until the next call to
-  /// SetCurrentDebugLocation() or EnableDebugLocations().  Use this
-  /// if you want an instruction to be counted towards the prologue or
-  /// if there is no useful source location.
-  void DisableDebugLocations() {
-    llvm::DebugLoc Empty;
-    SavedDbgLocation = getCurrentDebugLocation();
-    SetCurrentDebugLocation(Empty);
-  }
-
-  /// \brief Restore the previously saved DebugLocation.
-  void EnableDebugLocations() {
-    assert(CurDbgLocation.isUnknown());
-    SetCurrentDebugLocation(SavedDbgLocation);
   }
 
   /// \brief Get location information used by debugging information.

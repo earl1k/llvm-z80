@@ -389,8 +389,11 @@ struct BreakpointPrinter : public ModulePass {
       for (unsigned i = 0, e = NMD->getNumOperands(); i != e; ++i) {
         std::string Name;
         DISubprogram SP(NMD->getOperand(i));
-        if (SP.Verify())
-          getContextName(SP.getContext(), Name);
+        assert((!SP || SP.isSubprogram()) &&
+          "A MDNode in llvm.dbg.sp should be null or a DISubprogram.");
+        if (!SP)
+          continue;
+        getContextName(SP.getContext(), Name);
         Name = Name + SP.getDisplayName().str();
         if (!Name.empty() && Processed.insert(Name)) {
           Out << Name << "\n";
@@ -445,7 +448,6 @@ static void AddOptimizationPasses(PassManagerBase &MPM,FunctionPassManager &FPM,
   }
   Builder.DisableUnitAtATime = !UnitAtATime;
   Builder.DisableUnrollLoops = OptLevel == 0;
-  Builder.DisableSimplifyLibCalls = DisableSimplifyLibCalls;
   
   Builder.populateFunctionPassManager(FPM);
   Builder.populateModulePassManager(MPM);
@@ -465,7 +467,6 @@ static void AddStandardCompilePasses(PassManagerBase &PM) {
   if (!DisableInline)
     Builder.Inliner = createFunctionInliningPass();
   Builder.OptLevel = 3;
-  Builder.DisableSimplifyLibCalls = DisableSimplifyLibCalls;
   Builder.populateModulePassManager(PM);
 }
 
@@ -615,7 +616,7 @@ int main(int argc, char **argv) {
 
     std::string ErrorInfo;
     Out.reset(new tool_output_file(OutputFilename.c_str(), ErrorInfo,
-                                   raw_fd_ostream::F_Binary));
+                                   sys::fs::F_Binary));
     if (!ErrorInfo.empty()) {
       errs() << ErrorInfo << '\n';
       return 1;
@@ -678,7 +679,7 @@ int main(int argc, char **argv) {
 
       std::string ErrorInfo;
       Out.reset(new tool_output_file(OutputFilename.c_str(), ErrorInfo,
-                                     raw_fd_ostream::F_Binary));
+                                     sys::fs::F_Binary));
       if (!ErrorInfo.empty()) {
         errs() << ErrorInfo << '\n';
         return 1;

@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "SystemZTargetMachine.h"
+#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -89,6 +90,37 @@ struct SystemZAddressingMode {
       errs() << " + ADJDYNALLOC";
     errs() << '\n';
   }
+};
+
+// Return a mask with Count low bits set.
+static uint64_t allOnes(unsigned int Count) {
+  return Count == 0 ? 0 : (uint64_t(1) << (Count - 1) << 1) - 1;
+}
+
+// Represents operands 2 to 5 of the ROTATE AND ... SELECTED BITS operation
+// given by Opcode.  The operands are: Input (R2), Start (I3), End (I4) and
+// Rotate (I5).  The combined operand value is effectively:
+//
+//   (or (rotl Input, Rotate), ~Mask)
+//
+// for RNSBG and:
+//
+//   (and (rotl Input, Rotate), Mask)
+//
+// otherwise.  The value has BitSize bits.
+struct RxSBGOperands {
+  RxSBGOperands(unsigned Op, SDValue N)
+    : Opcode(Op), BitSize(N.getValueType().getSizeInBits()),
+      Mask(allOnes(BitSize)), Input(N), Start(64 - BitSize), End(63),
+      Rotate(0) {}
+
+  unsigned Opcode;
+  unsigned BitSize;
+  uint64_t Mask;
+  SDValue Input;
+  unsigned Start;
+  unsigned End;
+  unsigned Rotate;
 };
 
 class SystemZDAGToDAGISel : public SelectionDAGISel {
@@ -199,6 +231,29 @@ class SystemZDAGToDAGISel : public SelectionDAGISel {
                          Addr, Base, Disp, Index);
   }
 
+  // Check whether (or Op (and X InsertMask)) is effectively an insertion
+  // of X into bits InsertMask of some Y != Op.  Return true if so and
+  // set Op to that Y.
+  bool detectOrAndInsertion(SDValue &Op, uint64_t InsertMask);
+
+  // Try to fold some of RxSBG.Input into other fields of RxSBG.
+  // Return true on success.
+  bool expandRxSBG(RxSBGOperands &RxSBG);
+
+  // Return an undefined i64 value.
+  SDValue getUNDEF64(SDLoc DL);
+
+  // Convert N to VT, if it isn't already.
+  SDValue convertTo(SDLoc DL, EVT VT, SDValue N);
+
+  // Try to implement AND or shift node N using RISBG with the zero flag set.
+  // Return the selected node on success, otherwise return null.
+  SDNode *tryRISBGZero(SDNode *N);
+
+  // Try to use RISBG or Opcode to implement OR or XOR node N.
+  // Return the selected node on success, otherwise return null.
+  SDNode *tryRxSBG(SDNode *N, unsigned Opcode);
+
   // If Op0 is null, then Node is a constant that can be loaded using:
   //
   //   (Opcode UpperVal LowerVal)
@@ -208,6 +263,8 @@ class SystemZDAGToDAGISel : public SelectionDAGISel {
   //   (Opcode (Opcode Op0 UpperVal) LowerVal)
   SDNode *splitLargeImmediate(unsigned Opcode, SDNode *Node, SDValue Op0,
                               uint64_t UpperVal, uint64_t LowerVal);
+
+  bool storeLoadCanUseMVC(SDNode *N) const;
 
 public:
   SystemZDAGToDAGISel(SystemZTargetMachine &TM, CodeGenOpt::Level OptLevel)
@@ -474,7 +531,7 @@ void SystemZDAGToDAGISel::getAddressOperands(const SystemZAddressingMode &AM,
     // Truncate values from i64 to i32, for shifts.
     assert(VT == MVT::i32 && Base.getValueType() == MVT::i64 &&
            "Unexpected truncation");
-    DebugLoc DL = Base.getDebugLoc();
+    SDLoc DL(Base);
     SDValue Trunc = CurDAG->getNode(ISD::TRUNCATE, DL, VT, Base);
     insertDAGNode(CurDAG, Base.getNode(), Trunc);
     Base = Trunc;
@@ -518,11 +575,332 @@ bool SystemZDAGToDAGISel::selectBDXAddr(SystemZAddressingMode::AddrForm Form,
   return true;
 }
 
+bool SystemZDAGToDAGISel::detectOrAndInsertion(SDValue &Op,
+                                               uint64_t InsertMask) {
+  // We're only interested in cases where the insertion is into some operand
+  // of Op, rather than into Op itself.  The only useful case is an AND.
+  if (Op.getOpcode() != ISD::AND)
+    return false;
+
+  // We need a constant mask.
+  ConstantSDNode *MaskNode =
+    dyn_cast<ConstantSDNode>(Op.getOperand(1).getNode());
+  if (!MaskNode)
+    return false;
+
+  // It's not an insertion of Op.getOperand(0) if the two masks overlap.
+  uint64_t AndMask = MaskNode->getZExtValue();
+  if (InsertMask & AndMask)
+    return false;
+
+  // It's only an insertion if all bits are covered or are known to be zero.
+  // The inner check covers all cases but is more expensive.
+  uint64_t Used = allOnes(Op.getValueType().getSizeInBits());
+  if (Used != (AndMask | InsertMask)) {
+    APInt KnownZero, KnownOne;
+    CurDAG->ComputeMaskedBits(Op.getOperand(0), KnownZero, KnownOne);
+    if (Used != (AndMask | InsertMask | KnownZero.getZExtValue()))
+      return false;
+  }
+
+  Op = Op.getOperand(0);
+  return true;
+}
+
+// Return true if Mask matches the regexp 0*1+0*, given that zero masks
+// have already been filtered out.  Store the first set bit in LSB and
+// the number of set bits in Length if so.
+static bool isStringOfOnes(uint64_t Mask, unsigned &LSB, unsigned &Length) {
+  unsigned First = findFirstSet(Mask);
+  uint64_t Top = (Mask >> First) + 1;
+  if ((Top & -Top) == Top) {
+    LSB = First;
+    Length = findFirstSet(Top);
+    return true;
+  }
+  return false;
+}
+
+// Try to update RxSBG so that only the bits of RxSBG.Input in Mask are used.
+// Return true on success.
+static bool refineRxSBGMask(RxSBGOperands &RxSBG, uint64_t Mask) {
+  if (RxSBG.Rotate != 0)
+    Mask = (Mask << RxSBG.Rotate) | (Mask >> (64 - RxSBG.Rotate));
+  Mask &= RxSBG.Mask;
+
+  // Reject trivial all-zero masks.
+  if (Mask == 0)
+    return false;
+
+  // Handle the 1+0+ or 0+1+0* cases.  Start then specifies the index of
+  // the msb and End specifies the index of the lsb.
+  unsigned LSB, Length;
+  if (isStringOfOnes(Mask, LSB, Length)) {
+    RxSBG.Mask = Mask;
+    RxSBG.Start = 63 - (LSB + Length - 1);
+    RxSBG.End = 63 - LSB;
+    return true;
+  }
+
+  // Handle the wrap-around 1+0+1+ cases.  Start then specifies the msb
+  // of the low 1s and End specifies the lsb of the high 1s.
+  if (isStringOfOnes(Mask ^ allOnes(RxSBG.BitSize), LSB, Length)) {
+    assert(LSB > 0 && "Bottom bit must be set");
+    assert(LSB + Length < RxSBG.BitSize && "Top bit must be set");
+    RxSBG.Mask = Mask;
+    RxSBG.Start = 63 - (LSB - 1);
+    RxSBG.End = 63 - (LSB + Length);
+    return true;
+  }
+
+  return false;
+}
+
+// RxSBG.Input is a shift of Count bits in the direction given by IsLeft.
+// Return true if the result depends on the signs or zeros that are
+// shifted in.
+static bool shiftedInBitsMatter(RxSBGOperands &RxSBG, uint64_t Count,
+                                bool IsLeft) {
+  // Work out which bits of the shift result are zeros or sign copies.
+  uint64_t ShiftedIn = allOnes(Count);
+  if (!IsLeft)
+    ShiftedIn <<= RxSBG.BitSize - Count;
+
+  // Rotate that mask in the same way as RxSBG.Input is rotated.
+  if (RxSBG.Rotate != 0)
+    ShiftedIn = ((ShiftedIn << RxSBG.Rotate) |
+                 (ShiftedIn >> (64 - RxSBG.Rotate)));
+
+  // Fail if any of the zero or sign bits are used.
+  return (ShiftedIn & RxSBG.Mask) != 0;
+}
+
+bool SystemZDAGToDAGISel::expandRxSBG(RxSBGOperands &RxSBG) {
+  SDValue N = RxSBG.Input;
+  unsigned Opcode = N.getOpcode();
+  switch (Opcode) {
+  case ISD::AND: {
+    if (RxSBG.Opcode == SystemZ::RNSBG)
+      return false;
+
+    ConstantSDNode *MaskNode =
+      dyn_cast<ConstantSDNode>(N.getOperand(1).getNode());
+    if (!MaskNode)
+      return false;
+
+    SDValue Input = N.getOperand(0);
+    uint64_t Mask = MaskNode->getZExtValue();
+    if (!refineRxSBGMask(RxSBG, Mask)) {
+      // If some bits of Input are already known zeros, those bits will have
+      // been removed from the mask.  See if adding them back in makes the
+      // mask suitable.
+      APInt KnownZero, KnownOne;
+      CurDAG->ComputeMaskedBits(Input, KnownZero, KnownOne);
+      Mask |= KnownZero.getZExtValue();
+      if (!refineRxSBGMask(RxSBG, Mask))
+        return false;
+    }
+    RxSBG.Input = Input;
+    return true;
+  }
+
+  case ISD::OR: {
+    if (RxSBG.Opcode != SystemZ::RNSBG)
+      return false;
+
+    ConstantSDNode *MaskNode =
+      dyn_cast<ConstantSDNode>(N.getOperand(1).getNode());
+    if (!MaskNode)
+      return false;
+
+    SDValue Input = N.getOperand(0);
+    uint64_t Mask = ~MaskNode->getZExtValue();
+    if (!refineRxSBGMask(RxSBG, Mask)) {
+      // If some bits of Input are already known ones, those bits will have
+      // been removed from the mask.  See if adding them back in makes the
+      // mask suitable.
+      APInt KnownZero, KnownOne;
+      CurDAG->ComputeMaskedBits(Input, KnownZero, KnownOne);
+      Mask &= ~KnownOne.getZExtValue();
+      if (!refineRxSBGMask(RxSBG, Mask))
+        return false;
+    }
+    RxSBG.Input = Input;
+    return true;
+  }
+
+  case ISD::ROTL: {
+    // Any 64-bit rotate left can be merged into the RxSBG.
+    if (RxSBG.BitSize != 64)
+      return false;
+    ConstantSDNode *CountNode
+      = dyn_cast<ConstantSDNode>(N.getOperand(1).getNode());
+    if (!CountNode)
+      return false;
+
+    RxSBG.Rotate = (RxSBG.Rotate + CountNode->getZExtValue()) & 63;
+    RxSBG.Input = N.getOperand(0);
+    return true;
+  }
+      
+  case ISD::SHL: {
+    ConstantSDNode *CountNode =
+      dyn_cast<ConstantSDNode>(N.getOperand(1).getNode());
+    if (!CountNode)
+      return false;
+
+    uint64_t Count = CountNode->getZExtValue();
+    if (Count < 1 || Count >= RxSBG.BitSize)
+      return false;
+
+    if (RxSBG.Opcode == SystemZ::RNSBG) {
+      // Treat (shl X, count) as (rotl X, size-count) as long as the bottom
+      // count bits from RxSBG.Input are ignored.
+      if (shiftedInBitsMatter(RxSBG, Count, true))
+        return false;
+    } else {
+      // Treat (shl X, count) as (and (rotl X, count), ~0<<count).
+      if (!refineRxSBGMask(RxSBG, allOnes(RxSBG.BitSize - Count) << Count))
+        return false;
+    }
+
+    RxSBG.Rotate = (RxSBG.Rotate + Count) & 63;
+    RxSBG.Input = N.getOperand(0);
+    return true;
+  }
+
+  case ISD::SRL:
+  case ISD::SRA: {
+    ConstantSDNode *CountNode =
+      dyn_cast<ConstantSDNode>(N.getOperand(1).getNode());
+    if (!CountNode)
+      return false;
+
+    uint64_t Count = CountNode->getZExtValue();
+    if (Count < 1 || Count >= RxSBG.BitSize)
+      return false;
+
+    if (RxSBG.Opcode == SystemZ::RNSBG || Opcode == ISD::SRA) {
+      // Treat (srl|sra X, count) as (rotl X, size-count) as long as the top
+      // count bits from RxSBG.Input are ignored.
+      if (shiftedInBitsMatter(RxSBG, Count, false))
+        return false;
+    } else {
+      // Treat (srl X, count), mask) as (and (rotl X, size-count), ~0>>count),
+      // which is similar to SLL above.
+      if (!refineRxSBGMask(RxSBG, allOnes(RxSBG.BitSize - Count)))
+        return false;
+    }
+
+    RxSBG.Rotate = (RxSBG.Rotate - Count) & 63;
+    RxSBG.Input = N.getOperand(0);
+    return true;
+  }
+  default:
+    return false;
+  }
+}
+
+SDValue SystemZDAGToDAGISel::getUNDEF64(SDLoc DL) {
+  SDNode *N = CurDAG->getMachineNode(TargetOpcode::IMPLICIT_DEF, DL, MVT::i64);
+  return SDValue(N, 0);
+}
+
+SDValue SystemZDAGToDAGISel::convertTo(SDLoc DL, EVT VT, SDValue N) {
+  if (N.getValueType() == MVT::i32 && VT == MVT::i64) {
+    SDValue Index = CurDAG->getTargetConstant(SystemZ::subreg_32bit, MVT::i64);
+    SDNode *Insert = CurDAG->getMachineNode(TargetOpcode::INSERT_SUBREG,
+                                            DL, VT, getUNDEF64(DL), N, Index);
+    return SDValue(Insert, 0);
+  }
+  if (N.getValueType() == MVT::i64 && VT == MVT::i32) {
+    SDValue Index = CurDAG->getTargetConstant(SystemZ::subreg_32bit, MVT::i64);
+    SDNode *Extract = CurDAG->getMachineNode(TargetOpcode::EXTRACT_SUBREG,
+                                             DL, VT, N, Index);
+    return SDValue(Extract, 0);
+  }
+  assert(N.getValueType() == VT && "Unexpected value types");
+  return N;
+}
+
+SDNode *SystemZDAGToDAGISel::tryRISBGZero(SDNode *N) {
+  RxSBGOperands RISBG(SystemZ::RISBG, SDValue(N, 0));
+  unsigned Count = 0;
+  while (expandRxSBG(RISBG))
+    Count += 1;
+  // Prefer to use normal shift instructions over RISBG, since they can handle
+  // all cases and are sometimes shorter.  Prefer to use RISBG for ANDs though,
+  // since it is effectively a three-operand instruction in this case,
+  // and since it can handle some masks that AND IMMEDIATE can't.
+  if (Count < (N->getOpcode() == ISD::AND ? 1U : 2U))
+    return 0;
+
+  // Prefer register extensions like LLC over RISBG.
+  if (RISBG.Rotate == 0 &&
+      (RISBG.Start == 32 || RISBG.Start == 48 || RISBG.Start == 56) &&
+      RISBG.End == 63)
+    return 0;
+
+  EVT VT = N->getValueType(0);
+  SDValue Ops[5] = {
+    getUNDEF64(SDLoc(N)),
+    convertTo(SDLoc(N), MVT::i64, RISBG.Input),
+    CurDAG->getTargetConstant(RISBG.Start, MVT::i32),
+    CurDAG->getTargetConstant(RISBG.End | 128, MVT::i32),
+    CurDAG->getTargetConstant(RISBG.Rotate, MVT::i32)
+  };
+  N = CurDAG->getMachineNode(SystemZ::RISBG, SDLoc(N), MVT::i64, Ops);
+  return convertTo(SDLoc(N), VT, SDValue(N, 0)).getNode();
+}
+
+SDNode *SystemZDAGToDAGISel::tryRxSBG(SDNode *N, unsigned Opcode) {
+  // Try treating each operand of N as the second operand of the RxSBG
+  // and see which goes deepest.
+  RxSBGOperands RxSBG[] = {
+    RxSBGOperands(Opcode, N->getOperand(0)),
+    RxSBGOperands(Opcode, N->getOperand(1))
+  };
+  unsigned Count[] = { 0, 0 };
+  for (unsigned I = 0; I < 2; ++I)
+    while (expandRxSBG(RxSBG[I]))
+      Count[I] += 1;
+
+  // Do nothing if neither operand is suitable.
+  if (Count[0] == 0 && Count[1] == 0)
+    return 0;
+
+  // Pick the deepest second operand.
+  unsigned I = Count[0] > Count[1] ? 0 : 1;
+  SDValue Op0 = N->getOperand(I ^ 1);
+
+  // Prefer IC for character insertions from memory.
+  if (Opcode == SystemZ::ROSBG && (RxSBG[I].Mask & 0xff) == 0)
+    if (LoadSDNode *Load = dyn_cast<LoadSDNode>(Op0.getNode()))
+      if (Load->getMemoryVT() == MVT::i8)
+        return 0;
+
+  // See whether we can avoid an AND in the first operand by converting
+  // ROSBG to RISBG.
+  if (Opcode == SystemZ::ROSBG && detectOrAndInsertion(Op0, RxSBG[I].Mask))
+    Opcode = SystemZ::RISBG;
+           
+  EVT VT = N->getValueType(0);
+  SDValue Ops[5] = {
+    convertTo(SDLoc(N), MVT::i64, Op0),
+    convertTo(SDLoc(N), MVT::i64, RxSBG[I].Input),
+    CurDAG->getTargetConstant(RxSBG[I].Start, MVT::i32),
+    CurDAG->getTargetConstant(RxSBG[I].End, MVT::i32),
+    CurDAG->getTargetConstant(RxSBG[I].Rotate, MVT::i32)
+  };
+  N = CurDAG->getMachineNode(Opcode, SDLoc(N), MVT::i64, Ops);
+  return convertTo(SDLoc(N), VT, SDValue(N, 0)).getNode();
+}
+
 SDNode *SystemZDAGToDAGISel::splitLargeImmediate(unsigned Opcode, SDNode *Node,
                                                  SDValue Op0, uint64_t UpperVal,
                                                  uint64_t LowerVal) {
   EVT VT = Node->getValueType(0);
-  DebugLoc DL = Node->getDebugLoc();
+  SDLoc DL(Node);
   SDValue Upper = CurDAG->getConstant(UpperVal, VT);
   if (Op0.getNode())
     Upper = CurDAG->getNode(Opcode, DL, VT, Op0, Upper);
@@ -531,6 +909,49 @@ SDNode *SystemZDAGToDAGISel::splitLargeImmediate(unsigned Opcode, SDNode *Node,
   SDValue Lower = CurDAG->getConstant(LowerVal, VT);
   SDValue Or = CurDAG->getNode(Opcode, DL, VT, Upper, Lower);
   return Or.getNode();
+}
+
+// N is a (store (load ...), ...) pattern.  Return true if it can use MVC.
+bool SystemZDAGToDAGISel::storeLoadCanUseMVC(SDNode *N) const {
+  StoreSDNode *Store = cast<StoreSDNode>(N);
+  LoadSDNode *Load = cast<LoadSDNode>(Store->getValue().getNode());
+
+  // MVC is logically a bytewise copy, so can't be used for volatile accesses.
+  if (Load->isVolatile() || Store->isVolatile())
+    return false;
+
+  // Prefer not to use MVC if either address can use ... RELATIVE LONG
+  // instructions.
+  assert(Load->getMemoryVT() == Store->getMemoryVT() &&
+         "Should already have checked that the types match");
+  uint64_t Size = Load->getMemoryVT().getStoreSize();
+  if (Size > 1 && Size <= 8) {
+    // Prefer LHRL, LRL and LGRL.
+    if (Load->getBasePtr().getOpcode() == SystemZISD::PCREL_WRAPPER)
+      return false;
+    // Prefer STHRL, STRL and STGRL.
+    if (Store->getBasePtr().getOpcode() == SystemZISD::PCREL_WRAPPER)
+      return false;
+  }
+
+  // There's no chance of overlap if the load is invariant.
+  if (Load->isInvariant())
+    return true;
+
+  // If both operands are aligned, they must be equal or not overlap.
+  if (Load->getAlignment() >= Size && Store->getAlignment() >= Size)
+    return true;
+
+  // Otherwise we need to check whether there's an alias.
+  const Value *V1 = Load->getSrcValue();
+  const Value *V2 = Store->getSrcValue();
+  if (!V1 || !V2)
+    return false;
+
+  int64_t End1 = Load->getSrcValueOffset() + Size;
+  int64_t End2 = Store->getSrcValueOffset() + Size;
+  return !AA->alias(AliasAnalysis::Location(V1, End1, Load->getTBAAInfo()),
+                    AliasAnalysis::Location(V2, End2, Store->getTBAAInfo()));
 }
 
 SDNode *SystemZDAGToDAGISel::Select(SDNode *Node) {
@@ -544,18 +965,38 @@ SDNode *SystemZDAGToDAGISel::Select(SDNode *Node) {
   }
 
   unsigned Opcode = Node->getOpcode();
+  SDNode *ResNode = 0;
   switch (Opcode) {
   case ISD::OR:
+    if (Node->getOperand(1).getOpcode() != ISD::Constant)
+      ResNode = tryRxSBG(Node, SystemZ::ROSBG);
+    goto or_xor;
+
   case ISD::XOR:
+    if (Node->getOperand(1).getOpcode() != ISD::Constant)
+      ResNode = tryRxSBG(Node, SystemZ::RXSBG);
+    // Fall through.
+  or_xor:
     // If this is a 64-bit operation in which both 32-bit halves are nonzero,
     // split the operation into two.
-    if (Node->getValueType(0) == MVT::i64)
+    if (!ResNode && Node->getValueType(0) == MVT::i64)
       if (ConstantSDNode *Op1 = dyn_cast<ConstantSDNode>(Node->getOperand(1))) {
         uint64_t Val = Op1->getZExtValue();
         if (!SystemZ::isImmLF(Val) && !SystemZ::isImmHF(Val))
           Node = splitLargeImmediate(Opcode, Node, Node->getOperand(0),
                                      Val - uint32_t(Val), uint32_t(Val));
       }
+    break;
+
+  case ISD::AND:
+    if (Node->getOperand(1).getOpcode() != ISD::Constant)
+      ResNode = tryRxSBG(Node, SystemZ::RNSBG);
+    // Fall through.
+  case ISD::ROTL:
+  case ISD::SHL:
+  case ISD::SRL:
+    if (!ResNode)
+      ResNode = tryRISBGZero(Node);
     break;
 
   case ISD::Constant:
@@ -585,7 +1026,8 @@ SDNode *SystemZDAGToDAGISel::Select(SDNode *Node) {
   }
 
   // Select the default instruction
-  SDNode *ResNode = SelectCode(Node);
+  if (!ResNode)
+    ResNode = SelectCode(Node);
 
   DEBUG(errs() << "=> ";
         if (ResNode == NULL || ResNode == Node)

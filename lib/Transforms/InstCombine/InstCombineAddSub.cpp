@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "InstCombine.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
@@ -488,7 +489,7 @@ Value *FAddCombine::performFactorization(Instruction *I) {
                       createFSub(AddSub0, AddSub1);
   if (ConstantFP *CFP = dyn_cast<ConstantFP>(NewAddSub)) {
     const APFloat &F = CFP->getValueAPF();
-    if (!F.isNormal() || F.isDenormal())
+    if (!F.isNormal())
       return 0;
   }
 
@@ -659,7 +660,7 @@ Value *FAddCombine::simplifyFAdd(AddendVect& Addends, unsigned InstrQuota) {
     }
   }
 
-  assert((NextTmpIdx <= sizeof(TmpResult)/sizeof(TmpResult[0]) + 1) &&
+  assert((NextTmpIdx <= array_lengthof(TmpResult) + 1) &&
          "out-of-bound access");
 
   if (ConstAdd)
@@ -876,7 +877,7 @@ static inline Value *dyn_castFoldableMul(Value *V, ConstantInt *&CST) {
       uint32_t BitWidth = cast<IntegerType>(V->getType())->getBitWidth();
       uint32_t CSTVal = CST->getLimitedValue(BitWidth);
       CST = ConstantInt::get(V->getType()->getContext(),
-                             APInt(BitWidth, 1).shl(CSTVal));
+                             APInt::getOneBitSet(BitWidth, CSTVal));
       return I->getOperand(0);
     }
   return 0;

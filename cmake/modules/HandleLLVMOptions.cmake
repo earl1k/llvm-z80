@@ -17,9 +17,9 @@ if( LLVM_ENABLE_ASSERTIONS )
   if( NOT MSVC )
     add_definitions( -D_DEBUG )
   endif()
-  # On Release builds cmake automatically defines NDEBUG, so we
+  # On non-Debug builds cmake automatically defines NDEBUG, so we
   # explicitly undefine it:
-  if( uppercase_CMAKE_BUILD_TYPE STREQUAL "RELEASE" )
+  if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
     add_definitions( -UNDEBUG )
     # Also remove /D NDEBUG to avoid MSVC warnings about conflicting defines.
     string (REGEX REPLACE "(^| )[/-]D *NDEBUG($| )" " "
@@ -266,3 +266,10 @@ endif()
 add_llvm_definitions( -D__STDC_CONSTANT_MACROS )
 add_llvm_definitions( -D__STDC_FORMAT_MACROS )
 add_llvm_definitions( -D__STDC_LIMIT_MACROS )
+
+# clang doesn't print colored diagnostics when invoked from Ninja
+if (UNIX AND
+    CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
+    CMAKE_GENERATOR STREQUAL "Ninja")
+  append("-fcolor-diagnostics" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+endif()

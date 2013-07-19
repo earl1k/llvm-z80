@@ -86,8 +86,41 @@ def COND_NULL : PatLeaf <
 // Load/Store Pattern Fragments
 //===----------------------------------------------------------------------===//
 
+def az_extload : PatFrag<(ops node:$ptr), (unindexedload node:$ptr), [{
+  LoadSDNode *L = cast<LoadSDNode>(N);
+  return L->getExtensionType() == ISD::ZEXTLOAD ||
+         L->getExtensionType() == ISD::EXTLOAD;
+}]>;
+
 def zextloadi8_global : PatFrag<(ops node:$ptr), (zextloadi8 node:$ptr), [{
     return isGlobalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def zextloadi8_constant : PatFrag<(ops node:$ptr), (zextloadi8 node:$ptr), [{
+    return isGlobalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def az_extloadi32 : PatFrag<(ops node:$ptr), (az_extload node:$ptr), [{
+  return cast<LoadSDNode>(N)->getMemoryVT() == MVT::i32;
+}]>;
+
+def az_extloadi32_global : PatFrag<(ops node:$ptr),
+                                   (az_extloadi32 node:$ptr), [{
+  return isGlobalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def az_extloadi32_constant : PatFrag<(ops node:$ptr),
+                                     (az_extloadi32 node:$ptr), [{
+  return isConstantLoad(dyn_cast<LoadSDNode>(N), -1);
+}]>;
+
+def local_load : PatFrag<(ops node:$ptr), (load node:$ptr), [{
+    return isLocalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def local_store : PatFrag<(ops node:$val, node:$ptr),
+                             (store node:$val, node:$ptr), [{
+    return isLocalStore(dyn_cast<StoreSDNode>(N));
 }]>;
 
 class Constants {
@@ -293,6 +326,12 @@ def bfemask : PatLeaf <(imm), [{return isMask_32(N->getZExtValue());}],
 class BFEPattern <Instruction BFE> : Pat <
   (and (srl i32:$x, legalshift32:$y), bfemask:$z),
   (BFE $x, $y, $z)
+>;
+
+// rotr pattern
+class ROTRPattern <Instruction BIT_ALIGN> : Pat <
+  (rotr i32:$src0, i32:$src1),
+  (BIT_ALIGN $src0, $src0, $src1)
 >;
 
 include "R600Instructions.td"

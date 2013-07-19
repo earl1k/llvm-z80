@@ -21,14 +21,20 @@ def LO32 : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(N->getZExtValue() & 0xffffffff, MVT::i32);
 }]>;
 
+def LO32f : SDNodeXForm<fpimm, [{
+  APInt V = N->getValueAPF().bitcastToAPInt().trunc(32);
+  return CurDAG->getTargetConstantFP(APFloat(APFloat::IEEEsingle, V), MVT::f32);
+}]>;
+
 // Transformation function, extract the upper 32bit of a 64bit immediate
 def HI32 : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(N->getZExtValue() >> 32, MVT::i32);
 }]>;
 
-def SIbuffer_store : SDNode<"AMDGPUISD::BUFFER_STORE",
-                           SDTypeProfile<0, 3, [SDTCisPtrTy<1>, SDTCisInt<2>]>,
-                           [SDNPHasChain, SDNPMayStore]>;
+def HI32f : SDNodeXForm<fpimm, [{
+  APInt V = N->getValueAPF().bitcastToAPInt().lshr(32).trunc(32);
+  return CurDAG->getTargetConstantFP(APFloat(APFloat::IEEEsingle, V), MVT::f32);
+}]>;
 
 def IMM8bitDWORD : ImmLeaf <
   i32, [{
@@ -39,13 +45,17 @@ def IMM8bitDWORD : ImmLeaf <
   }]>
 >;
 
-def IMM12bit : ImmLeaf <
-  i16,
-  [{return isUInt<12>(Imm);}]
+def as_i16imm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(N->getSExtValue(), MVT::i16);
+}]>;
+
+def IMM12bit : PatLeaf <(imm),
+  [{return isUInt<12>(N->getZExtValue());}]
 >;
 
 class InlineImm <ValueType vt> : PatLeaf <(vt imm), [{
-  return ((const SITargetLowering &)TLI).analyzeImmediate(N) == 0;
+  return
+    (*(const SITargetLowering *)getTargetLowering()).analyzeImmediate(N) == 0;
 }]>;
 
 //===----------------------------------------------------------------------===//
@@ -163,8 +173,8 @@ multiclass VOP1_Helper <bits<8> op, RegisterClass drc, RegisterClass src,
          i32imm:$omod, i32imm:$neg),
     opName#"_e64 $dst, $src0, $abs, $clamp, $omod, $neg", []
   >, VOP <opName> {
-    let SRC1 = SIOperand.ZERO;
-    let SRC2 = SIOperand.ZERO;
+    let src1 = SIOperand.ZERO;
+    let src2 = SIOperand.ZERO;
   }
 }
 
@@ -189,7 +199,7 @@ multiclass VOP2_Helper <bits<6> op, RegisterClass vrc, RegisterClass arc,
          i32imm:$omod, i32imm:$neg),
     opName#"_e64 $dst, $src0, $src1, $abs, $clamp, $omod, $neg", []
   >, VOP <opName>, VOP2_REV<revOp#"_e64", !eq(revOp, opName)> {
-    let SRC2 = SIOperand.ZERO;
+    let src2 = SIOperand.ZERO;
   }
 }
 
@@ -217,11 +227,11 @@ multiclass VOP2b_32 <bits<6> op, string opName, list<dag> pattern,
          i32imm:$omod, i32imm:$neg),
     opName#"_e64 $dst, $src0, $src1, $abs, $clamp, $omod, $neg", []
   >, VOP <opName>, VOP2_REV<revOp#"_e64", !eq(revOp, opName)> {
-    let SRC2 = SIOperand.ZERO;
+    let src2 = SIOperand.ZERO;
     /* the VOP2 variant puts the carry out into VCC, the VOP3 variant
        can write it into any SGPR. We currently don't use the carry out,
        so for now hardcode it to VCC as well */
-    let SDST = SIOperand.VCC;
+    let sdst = SIOperand.VCC;
   }
 }
 
@@ -244,7 +254,7 @@ multiclass VOPC_Helper <bits<8> op, RegisterClass vrc, RegisterClass arc,
       [(set SReg_64:$dst, (i1 (setcc (vt arc:$src0), arc:$src1, cond)))]
     )
   >, VOP <opName> {
-    let SRC2 = SIOperand.ZERO;
+    let src2 = SIOperand.ZERO;
   }
 }
 
@@ -263,6 +273,19 @@ class VOP3_32 <bits<9> op, string opName, list<dag> pattern> : VOP3 <
   opName#" $dst, $src0, $src1, $src2, $abs, $clamp, $omod, $neg", pattern
 >, VOP <opName>;
 
+class VOP3_64_Shift <bits <9> op, string opName, list<dag> pattern> : VOP3 <
+  op, (outs VReg_64:$dst),
+  (ins VSrc_64:$src0, VSrc_32:$src1),
+  opName#" $dst, $src0, $src1", pattern
+>, VOP <opName> {
+
+  let src2 = SIOperand.ZERO;
+  let abs = 0;
+  let clamp = 0;
+  let omod = 0;
+  let neg = 0;
+}
+
 class VOP3_64 <bits<9> op, string opName, list<dag> pattern> : VOP3 <
   op, (outs VReg_64:$dst),
   (ins VSrc_64:$src0, VSrc_64:$src1, VSrc_64:$src2,
@@ -273,6 +296,29 @@ class VOP3_64 <bits<9> op, string opName, list<dag> pattern> : VOP3 <
 //===----------------------------------------------------------------------===//
 // Vector I/O classes
 //===----------------------------------------------------------------------===//
+
+class DS_Load_Helper <bits<8> op, string asm, RegisterClass regClass> : DS <
+  op,
+  (outs regClass:$vdst),
+  (ins i1imm:$gds, VReg_32:$addr, VReg_32:$data0, VReg_32:$data1,
+       i8imm:$offset0, i8imm:$offset1),
+  asm#" $vdst, $gds, $addr, $data0, $data1, $offset0, $offset1, [M0]",
+  []> {
+  let mayLoad = 1;
+  let mayStore = 0;
+}
+
+class DS_Store_Helper <bits<8> op, string asm, RegisterClass regClass> : DS <
+  op,
+  (outs),
+  (ins i1imm:$gds, VReg_32:$addr, VReg_32:$data0, VReg_32:$data1,
+       i8imm:$offset0, i8imm:$offset1),
+  asm#" $gds, $addr, $data0, $data1, $offset0, $offset1, [M0]",
+  []> {
+  let mayStore = 1;
+  let mayLoad = 0;
+  let vdst = 0;
+}
 
 class MTBUF_Store_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBUF <
   op,
@@ -287,31 +333,41 @@ class MTBUF_Store_Helper <bits<3> op, string asm, RegisterClass regClass> : MTBU
   let mayLoad = 0;
 }
 
-class MUBUF_Load_Helper <bits<7> op, string asm, RegisterClass regClass> : MUBUF <
-  op,
-  (outs regClass:$vdata),
-  (ins i16imm:$offset, i1imm:$offen, i1imm:$idxen, i1imm:$glc, i1imm:$addr64,
-       i1imm:$lds, VReg_32:$vaddr, SReg_128:$srsrc, i1imm:$slc,
-       i1imm:$tfe, SSrc_32:$soffset),
-  asm#" $vdata, $offset, $offen, $idxen, $glc, $addr64, "
-     #"$lds, $vaddr, $srsrc, $slc, $tfe, $soffset",
-  []> {
-  let mayLoad = 1;
-  let mayStore = 0;
+multiclass MUBUF_Load_Helper <bits<7> op, string asm, RegisterClass regClass> {
+
+  let glc = 0, lds = 0, slc = 0, tfe = 0, soffset = 128 /* ZERO */,
+                                          mayLoad = 1 in {
+
+  let offen = 1, idxen = 0, addr64 = 0, offset = 0 in {
+    def _OFFEN  : MUBUF <op, (outs regClass:$vdata),
+                         (ins SReg_128:$srsrc, VReg_32:$vaddr),
+                         asm#" $vdata, $srsrc + $vaddr", []>;
+  }
+
+  let offen = 0, idxen = 1, addr64 = 0 in {
+    def _IDXEN  : MUBUF <op, (outs regClass:$vdata),
+                         (ins SReg_128:$srsrc, VReg_32:$vaddr, i16imm:$offset),
+                         asm#" $vdata, $srsrc[$vaddr] + $offset", []>;
+  }
+
+  let offen = 0, idxen = 0, addr64 = 1 in {
+    def _ADDR64 : MUBUF <op, (outs regClass:$vdata),
+                         (ins SReg_128:$srsrc, VReg_64:$vaddr, i16imm:$offset),
+                         asm#" $vdata, $srsrc + $vaddr + $offset", []>;
+  }
+  }
 }
 
 class MUBUF_Store_Helper <bits<7> op, string name, RegisterClass vdataClass,
                          ValueType VT> :
-    MUBUF <op, (outs), (ins vdataClass:$vdata, SReg_128:$srsrc, VReg_64:$vaddr),
-          name#" $vdata, $srsrc + $vaddr",
-          [(SIbuffer_store (VT vdataClass:$vdata), (i128 SReg_128:$srsrc),
-                                                    (i64 VReg_64:$vaddr))]> {
+    MUBUF <op, (outs), (ins vdataClass:$vdata, SReg_128:$srsrc, VReg_64:$vaddr, i16imm:$offset),
+          name#" $vdata, $srsrc + $vaddr + $offset",
+         []> {
 
   let mayLoad = 0;
   let mayStore = 1;
 
   // Encoding
-  let offset = 0;
   let offen = 0;
   let idxen = 0;
   let glc = 0;

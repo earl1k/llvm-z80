@@ -33,6 +33,22 @@
 
 using namespace llvm;
 
+// This variable is intentionally defined differently in the statically-compiled
+// program from the IR input to the JIT to assert that the JIT doesn't use its
+// definition.  Note that this variable must be defined even on platforms where
+// JIT tests are disabled as it is referenced from the .def file.
+extern "C" int32_t JITTest_AvailableExternallyGlobal;
+int32_t JITTest_AvailableExternallyGlobal LLVM_ATTRIBUTE_USED = 42;
+
+// This function is intentionally defined differently in the statically-compiled
+// program from the IR input to the JIT to assert that the JIT doesn't use its
+// definition.  Note that this function must be defined even on platforms where
+// JIT tests are disabled as it is referenced from the .def file.
+extern "C" int32_t JITTest_AvailableExternallyFunction() LLVM_ATTRIBUTE_USED;
+extern "C" int32_t JITTest_AvailableExternallyFunction() {
+  return 42;
+}
+
 namespace {
 
 // Tests on ARM, PowerPC and SystemZ disabled as we're running the old jit
@@ -127,7 +143,7 @@ public:
                                        unsigned SectionID) {
     return Base->allocateCodeSection(Size, Alignment, SectionID);
   }
-  virtual bool applyPermissions(std::string *ErrMsg) { return false; }
+  virtual bool finalizeMemory(std::string *ErrMsg) { return false; }
   virtual uint8_t *allocateSpace(intptr_t Size, unsigned Alignment) {
     return Base->allocateSpace(Size, Alignment);
   }
@@ -527,14 +543,6 @@ TEST_F(JITTest, FunctionIsRecompiledAndRelinked) {
 }
 #endif  // !defined(__arm__)
 
-}  // anonymous namespace
-// This variable is intentionally defined differently in the statically-compiled
-// program from the IR input to the JIT to assert that the JIT doesn't use its
-// definition.
-extern "C" int32_t JITTest_AvailableExternallyGlobal;
-int32_t JITTest_AvailableExternallyGlobal LLVM_ATTRIBUTE_USED = 42;
-namespace {
-
 TEST_F(JITTest, AvailableExternallyGlobalIsntEmitted) {
   TheJIT->DisableLazyCompilation(true);
   LoadAssembly("@JITTest_AvailableExternallyGlobal = "
@@ -551,15 +559,6 @@ TEST_F(JITTest, AvailableExternallyGlobalIsntEmitted) {
   EXPECT_EQ(42, loader()) << "func should return 42 from the external global,"
                           << " not 7 from the IR version.";
 }
-}  // anonymous namespace
-// This function is intentionally defined differently in the statically-compiled
-// program from the IR input to the JIT to assert that the JIT doesn't use its
-// definition.
-extern "C" int32_t JITTest_AvailableExternallyFunction() LLVM_ATTRIBUTE_USED;
-extern "C" int32_t JITTest_AvailableExternallyFunction() {
-  return 42;
-}
-namespace {
 
 TEST_F(JITTest, AvailableExternallyFunctionIsntCompiled) {
   TheJIT->DisableLazyCompilation(true);

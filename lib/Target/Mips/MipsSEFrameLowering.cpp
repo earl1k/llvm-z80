@@ -49,16 +49,12 @@ private:
                      unsigned Src, unsigned RegSize);
 
   MachineFunction &MF;
-  const MipsSEInstrInfo &TII;
-  const MipsRegisterInfo &RegInfo;
   MachineRegisterInfo &MRI;
 };
 }
 
 ExpandPseudo::ExpandPseudo(MachineFunction &MF_)
-  : MF(MF_),
-    TII(*static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo())),
-    RegInfo(TII.getRegisterInfo()), MRI(MF.getRegInfo()) {}
+  : MF(MF_), MRI(MF.getRegInfo()) {}
 
 bool ExpandPseudo::expand() {
   bool Expanded = false;
@@ -119,6 +115,11 @@ void ExpandPseudo::expandLoadCCond(MachineBasicBlock &MBB, Iter I) {
 
   assert(I->getOperand(0).isReg() && I->getOperand(1).isFI());
 
+  const MipsSEInstrInfo &TII =
+    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
+  const MipsRegisterInfo &RegInfo =
+    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
+
   const TargetRegisterClass *RC = RegInfo.intRegClass(4);
   unsigned VR = MRI.createVirtualRegister(RC);
   unsigned Dst = I->getOperand(0).getReg(), FI = I->getOperand(1).getIndex();
@@ -133,6 +134,11 @@ void ExpandPseudo::expandStoreCCond(MachineBasicBlock &MBB, Iter I) {
   //  store $vr, FI
 
   assert(I->getOperand(0).isReg() && I->getOperand(1).isFI());
+
+  const MipsSEInstrInfo &TII =
+    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
+  const MipsRegisterInfo &RegInfo =
+    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
 
   const TargetRegisterClass *RC = RegInfo.intRegClass(4);
   unsigned VR = MRI.createVirtualRegister(RC);
@@ -151,6 +157,11 @@ void ExpandPseudo::expandLoadACC(MachineBasicBlock &MBB, Iter I,
   //  copy hi, $vr1
 
   assert(I->getOperand(0).isReg() && I->getOperand(1).isFI());
+
+  const MipsSEInstrInfo &TII =
+    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
+  const MipsRegisterInfo &RegInfo =
+    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
 
   const TargetRegisterClass *RC = RegInfo.intRegClass(RegSize);
   unsigned VR0 = MRI.createVirtualRegister(RC);
@@ -175,6 +186,11 @@ void ExpandPseudo::expandStoreACC(MachineBasicBlock &MBB, Iter I,
   //  store $vr1, FI + 4
 
   assert(I->getOperand(0).isReg() && I->getOperand(1).isFI());
+
+  const MipsSEInstrInfo &TII =
+    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
+  const MipsRegisterInfo &RegInfo =
+    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
 
   const TargetRegisterClass *RC = RegInfo.intRegClass(RegSize);
   unsigned VR0 = MRI.createVirtualRegister(RC);
@@ -210,6 +226,11 @@ bool ExpandPseudo::expandCopyACC(MachineBasicBlock &MBB, Iter I, unsigned Dst,
   //  copy $vr1, src_hi
   //  copy dst_hi, $vr1
 
+  const MipsSEInstrInfo &TII =
+    *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
+  const MipsRegisterInfo &RegInfo =
+    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
+
   const TargetRegisterClass *RC = RegInfo.intRegClass(RegSize);
   unsigned VR0 = MRI.createVirtualRegister(RC);
   unsigned VR1 = MRI.createVirtualRegister(RC);
@@ -244,10 +265,12 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
   MachineBasicBlock &MBB   = MF.front();
   MachineFrameInfo *MFI    = MF.getFrameInfo();
   MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
-  const MipsRegisterInfo *RegInfo =
-    static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
+
   const MipsSEInstrInfo &TII =
     *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
+  const MipsRegisterInfo &RegInfo =
+    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
+
   MachineBasicBlock::iterator MBBI = MBB.begin();
   DebugLoc dl = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
   unsigned SP = STI.isABI_N64() ? Mips::SP_64 : Mips::SP;
@@ -262,6 +285,7 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
   if (StackSize == 0 && !MFI->adjustsStack()) return;
 
   MachineModuleInfo &MMI = MF.getMMI();
+  const MCRegisterInfo *MRI = MMI.getContext().getRegisterInfo();
   MachineLocation DstML, SrcML;
 
   // Adjust stack.
@@ -271,9 +295,8 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
   MCSymbol *AdjustSPLabel = MMI.getContext().CreateTempSymbol();
   BuildMI(MBB, MBBI, dl,
           TII.get(TargetOpcode::PROLOG_LABEL)).addSym(AdjustSPLabel);
-  DstML = MachineLocation(MachineLocation::VirtualFP);
-  SrcML = MachineLocation(MachineLocation::VirtualFP, -StackSize);
-  MMI.addFrameMove(AdjustSPLabel, DstML, SrcML);
+  MMI.addFrameInst(
+      MCCFIInstruction::createDefCfaOffset(AdjustSPLabel, -StackSize));
 
   const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
 
@@ -297,21 +320,22 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
       // If Reg is a double precision register, emit two cfa_offsets,
       // one for each of the paired single precision registers.
       if (Mips::AFGR64RegClass.contains(Reg)) {
-        MachineLocation DstML0(MachineLocation::VirtualFP, Offset);
-        MachineLocation DstML1(MachineLocation::VirtualFP, Offset + 4);
-        MachineLocation SrcML0(RegInfo->getSubReg(Reg, Mips::sub_fpeven));
-        MachineLocation SrcML1(RegInfo->getSubReg(Reg, Mips::sub_fpodd));
+        unsigned Reg0 =
+            MRI->getDwarfRegNum(RegInfo.getSubReg(Reg, Mips::sub_fpeven), true);
+        unsigned Reg1 =
+            MRI->getDwarfRegNum(RegInfo.getSubReg(Reg, Mips::sub_fpodd), true);
 
         if (!STI.isLittle())
-          std::swap(SrcML0, SrcML1);
+          std::swap(Reg0, Reg1);
 
-        MMI.addFrameMove(CSLabel, DstML0, SrcML0);
-        MMI.addFrameMove(CSLabel, DstML1, SrcML1);
+        MMI.addFrameInst(
+            MCCFIInstruction::createOffset(CSLabel, Reg0, Offset));
+        MMI.addFrameInst(
+            MCCFIInstruction::createOffset(CSLabel, Reg1, Offset + 4));
       } else {
         // Reg is either in CPURegs or FGR32.
-        DstML = MachineLocation(MachineLocation::VirtualFP, Offset);
-        SrcML = MachineLocation(Reg);
-        MMI.addFrameMove(CSLabel, DstML, SrcML);
+        MMI.addFrameInst(MCCFIInstruction::createOffset(
+            CSLabel, MRI->getDwarfRegNum(Reg, 1), Offset));
       }
     }
   }
@@ -325,7 +349,7 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
       if (!MBB.isLiveIn(ehDataReg(I)))
         MBB.addLiveIn(ehDataReg(I));
       TII.storeRegToStackSlot(MBB, MBBI, ehDataReg(I), false,
-                              MipsFI->getEhDataRegFI(I), RC, RegInfo);
+                              MipsFI->getEhDataRegFI(I), RC, &RegInfo);
     }
 
     // Emit .cfi_offset directives for eh data registers.
@@ -334,9 +358,8 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
             TII.get(TargetOpcode::PROLOG_LABEL)).addSym(CSLabel2);
     for (int I = 0; I < 4; ++I) {
       int64_t Offset = MFI->getObjectOffset(MipsFI->getEhDataRegFI(I));
-      DstML = MachineLocation(MachineLocation::VirtualFP, Offset);
-      SrcML = MachineLocation(ehDataReg(I));
-      MMI.addFrameMove(CSLabel2, DstML, SrcML);
+      unsigned Reg = MRI->getDwarfRegNum(ehDataReg(I), true);
+      MMI.addFrameInst(MCCFIInstruction::createOffset(CSLabel2, Reg, Offset));
     }
   }
 
@@ -349,9 +372,8 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF) const {
     MCSymbol *SetFPLabel = MMI.getContext().CreateTempSymbol();
     BuildMI(MBB, MBBI, dl,
             TII.get(TargetOpcode::PROLOG_LABEL)).addSym(SetFPLabel);
-    DstML = MachineLocation(FP);
-    SrcML = MachineLocation(MachineLocation::VirtualFP);
-    MMI.addFrameMove(SetFPLabel, DstML, SrcML);
+    MMI.addFrameInst(MCCFIInstruction::createDefCfaRegister(
+        SetFPLabel, MRI->getDwarfRegNum(FP, true)));
   }
 }
 
@@ -360,10 +382,12 @@ void MipsSEFrameLowering::emitEpilogue(MachineFunction &MF,
   MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
   MachineFrameInfo *MFI            = MF.getFrameInfo();
   MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
-  const MipsRegisterInfo *RegInfo =
-    static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
+
   const MipsSEInstrInfo &TII =
     *static_cast<const MipsSEInstrInfo*>(MF.getTarget().getInstrInfo());
+  const MipsRegisterInfo &RegInfo =
+    *static_cast<const MipsRegisterInfo*>(MF.getTarget().getRegisterInfo());
+
   DebugLoc dl = MBBI->getDebugLoc();
   unsigned SP = STI.isABI_N64() ? Mips::SP_64 : Mips::SP;
   unsigned FP = STI.isABI_N64() ? Mips::FP_64 : Mips::FP;
@@ -394,7 +418,7 @@ void MipsSEFrameLowering::emitEpilogue(MachineFunction &MF,
     // Insert instructions that restore eh data registers.
     for (int J = 0; J < 4; ++J) {
       TII.loadRegFromStackSlot(MBB, I, ehDataReg(J), MipsFI->getEhDataRegFI(J),
-                               RC, RegInfo);
+                               RC, &RegInfo);
     }
   }
 

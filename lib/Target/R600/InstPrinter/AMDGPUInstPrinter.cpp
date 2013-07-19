@@ -10,8 +10,8 @@
 
 #include "AMDGPUInstPrinter.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
-#include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCInst.h"
 
 using namespace llvm;
 
@@ -102,7 +102,7 @@ void AMDGPUInstPrinter::printLiteral(const MCInst *MI, unsigned OpNo,
 
 void AMDGPUInstPrinter::printLast(const MCInst *MI, unsigned OpNo,
                                   raw_ostream &O) {
-  printIfSet(MI, OpNo, O.indent(20 - O.GetNumBytesInBuffer()), "*", " ");
+  printIfSet(MI, OpNo, O.indent(25 - O.GetNumBytesInBuffer()), "*", " ");
 }
 
 void AMDGPUInstPrinter::printNeg(const MCInst *MI, unsigned OpNo,
@@ -178,13 +178,13 @@ void AMDGPUInstPrinter::printBankSwizzle(const MCInst *MI, unsigned OpNo,
   int BankSwizzle = MI->getOperand(OpNo).getImm();
   switch (BankSwizzle) {
   case 1:
-    O << "BS:VEC_021";
+    O << "BS:VEC_021/SCL_122";
     break;
   case 2:
-    O << "BS:VEC_120";
+    O << "BS:VEC_120/SCL_212";
     break;
   case 3:
-    O << "BS:VEC_102";
+    O << "BS:VEC_102/SCL_221";
     break;
   case 4:
     O << "BS:VEC_201";
@@ -196,6 +196,51 @@ void AMDGPUInstPrinter::printBankSwizzle(const MCInst *MI, unsigned OpNo,
     break;
   }
   return;
+}
+
+void AMDGPUInstPrinter::printRSel(const MCInst *MI, unsigned OpNo,
+                                  raw_ostream &O) {
+  unsigned Sel = MI->getOperand(OpNo).getImm();
+  switch (Sel) {
+  case 0:
+    O << "X";
+    break;
+  case 1:
+    O << "Y";
+    break;
+  case 2:
+    O << "Z";
+    break;
+  case 3:
+    O << "W";
+    break;
+  case 4:
+    O << "0";
+    break;
+  case 5:
+    O << "1";
+    break;
+  case 7:
+    O << "_";
+    break;
+  default:
+    break;
+  }
+}
+
+void AMDGPUInstPrinter::printCT(const MCInst *MI, unsigned OpNo,
+                                  raw_ostream &O) {
+  unsigned CT = MI->getOperand(OpNo).getImm();
+  switch (CT) {
+  case 0:
+    O << "U";
+    break;
+  case 1:
+    O << "N";
+    break;
+  default:
+    break;
+  }
 }
 
 void AMDGPUInstPrinter::printKCache(const MCInst *MI, unsigned OpNo,

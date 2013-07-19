@@ -47,7 +47,7 @@ cl::desc("Disable compare instruction optimization"), cl::Hidden);
 
 PPCInstrInfo::PPCInstrInfo(PPCTargetMachine &tm)
   : PPCGenInstrInfo(PPC::ADJCALLSTACKDOWN, PPC::ADJCALLSTACKUP),
-    TM(tm), RI(*TM.getSubtargetImpl(), *this) {}
+    TM(tm), RI(*TM.getSubtargetImpl()) {}
 
 /// CreateTargetHazardRecognizer - Return the hazard recognizer to use for
 /// this target when scheduling the DAG.
@@ -74,10 +74,9 @@ ScheduleHazardRecognizer *PPCInstrInfo::CreateTargetPostRAHazardRecognizer(
   // Most subtargets use a PPC970 recognizer.
   if (Directive != PPC::DIR_440 && Directive != PPC::DIR_A2 &&
       Directive != PPC::DIR_E500mc && Directive != PPC::DIR_E5500) {
-    const TargetInstrInfo *TII = TM.getInstrInfo();
-    assert(TII && "No InstrInfo?");
+    assert(TM.getInstrInfo() && "No InstrInfo?");
 
-    return new PPCHazardRecognizer970(*TII);
+    return new PPCHazardRecognizer970(TM);
   }
 
   return new PPCScoreboardHazardRecognizer(II, DAG);
@@ -449,7 +448,9 @@ bool PPCInstrInfo::canInsertSelect(const MachineBasicBlock &MBB,
 
   // isel is for regular integer GPRs only.
   if (!PPC::GPRCRegClass.hasSubClassEq(RC) &&
-      !PPC::G8RCRegClass.hasSubClassEq(RC))
+      !PPC::GPRC_NOR0RegClass.hasSubClassEq(RC) &&
+      !PPC::G8RCRegClass.hasSubClassEq(RC) &&
+      !PPC::G8RC_NOX0RegClass.hasSubClassEq(RC))
     return false;
 
   // FIXME: These numbers are for the A2, how well they work for other cores is
@@ -479,12 +480,15 @@ void PPCInstrInfo::insertSelect(MachineBasicBlock &MBB,
   const TargetRegisterClass *RC =
     RI.getCommonSubClass(MRI.getRegClass(TrueReg), MRI.getRegClass(FalseReg));
   assert(RC && "TrueReg and FalseReg must have overlapping register classes");
-  assert((PPC::GPRCRegClass.hasSubClassEq(RC) ||
-          PPC::G8RCRegClass.hasSubClassEq(RC)) &&
+
+  bool Is64Bit = PPC::G8RCRegClass.hasSubClassEq(RC) ||
+                 PPC::G8RC_NOX0RegClass.hasSubClassEq(RC);
+  assert((Is64Bit ||
+          PPC::GPRCRegClass.hasSubClassEq(RC) ||
+          PPC::GPRC_NOR0RegClass.hasSubClassEq(RC)) &&
          "isel is for regular integer GPRs only");
 
-  unsigned OpCode =
-    PPC::GPRCRegClass.hasSubClassEq(RC) ? PPC::ISEL : PPC::ISEL8;
+  unsigned OpCode = Is64Bit ? PPC::ISEL8 : PPC::ISEL;
   unsigned SelectPred = Cond[0].getImm();
 
   unsigned SubIdx;
@@ -790,16 +794,6 @@ PPCInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                             MFI.getObjectSize(FrameIdx),
                             MFI.getObjectAlignment(FrameIdx));
   NewMIs.back()->addMemOperand(MF, MMO);
-}
-
-MachineInstr*
-PPCInstrInfo::emitFrameIndexDebugValue(MachineFunction &MF,
-                                       int FrameIx, uint64_t Offset,
-                                       const MDNode *MDPtr,
-                                       DebugLoc DL) const {
-  MachineInstrBuilder MIB = BuildMI(MF, DL, get(PPC::DBG_VALUE));
-  addFrameReference(MIB, FrameIx, 0, false).addImm(Offset).addMetadata(MDPtr);
-  return &*MIB;
 }
 
 bool PPCInstrInfo::

@@ -106,6 +106,7 @@ const char *Triple::getVendorTypeName(VendorType Kind) {
   case BGQ: return "bgq";
   case Freescale: return "fsl";
   case IBM: return "ibm";
+  case NVIDIA: return "nvidia";
   }
 
   llvm_unreachable("Invalid VendorType!");
@@ -137,6 +138,8 @@ const char *Triple::getOSTypeName(OSType Kind) {
   case CNK: return "cnk";
   case Bitrig: return "bitrig";
   case AIX: return "aix";
+  case CUDA: return "cuda";
+  case NVCL: return "nvcl";
   }
 
   llvm_unreachable("Invalid OSType");
@@ -265,6 +268,7 @@ static Triple::VendorType parseVendor(StringRef VendorName) {
     .Case("bgq", Triple::BGQ)
     .Case("fsl", Triple::Freescale)
     .Case("ibm", Triple::IBM)
+    .Case("nvidia", Triple::NVIDIA)
     .Default(Triple::UnknownVendor);
 }
 
@@ -292,6 +296,8 @@ static Triple::OSType parseOS(StringRef OSName) {
     .StartsWith("cnk", Triple::CNK)
     .StartsWith("bitrig", Triple::Bitrig)
     .StartsWith("aix", Triple::AIX)
+    .StartsWith("cuda", Triple::CUDA)
+    .StartsWith("nvcl", Triple::NVCL)
     .Default(Triple::UnknownOS);
 }
 

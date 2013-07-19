@@ -33,6 +33,7 @@
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
@@ -43,9 +44,17 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
+#include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Target/TargetLibraryInfo.h"
 #include "PPCTargetMachine.h"
 #include "PPC.h"
+
+#ifndef NDEBUG
+#include "llvm/CodeGen/MachineDominators.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#endif
 
 #include <algorithm>
 #include <vector>
@@ -60,6 +69,9 @@ STATISTIC(NumCTRLoops, "Number of loops converted to CTR loops");
 
 namespace llvm {
   void initializePPCCTRLoopsPass(PassRegistry&);
+#ifndef NDEBUG
+  void initializePPCCTRLoopsVerifyPass(PassRegistry&);
+#endif
 }
 
 namespace {
@@ -90,13 +102,9 @@ namespace {
     }
 
   private:
-    // FIXME: Copied from LoopSimplify.
-    BasicBlock *InsertPreheaderForLoop(Loop *L);
-    void PlaceSplitBlockCarefully(BasicBlock *NewBB,
-                                  SmallVectorImpl<BasicBlock*> &SplitPreds,
-                                  Loop *L);
-
+    bool mightUseCTR(const Triple &TT, BasicBlock *BB);
     bool convertToCTRLoop(Loop *L);
+
   private:
     PPCTargetMachine *TM;
     LoopInfo *LI;
@@ -110,6 +118,29 @@ namespace {
 #ifndef NDEBUG
   int PPCCTRLoops::Counter = 0;
 #endif
+
+#ifndef NDEBUG
+  struct PPCCTRLoopsVerify : public MachineFunctionPass {
+  public:
+    static char ID;
+
+    PPCCTRLoopsVerify() : MachineFunctionPass(ID) {
+      initializePPCCTRLoopsVerifyPass(*PassRegistry::getPassRegistry());
+    }
+
+    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+      AU.addRequired<MachineDominatorTree>();
+      MachineFunctionPass::getAnalysisUsage(AU);
+    }
+
+    virtual bool runOnMachineFunction(MachineFunction &MF);
+
+  private:
+    MachineDominatorTree *MDT;
+  };
+
+  char PPCCTRLoopsVerify::ID = 0;
+#endif // NDEBUG
 } // end anonymous namespace
 
 INITIALIZE_PASS_BEGIN(PPCCTRLoops, "ppc-ctr-loops", "PowerPC CTR Loops",
@@ -123,6 +154,18 @@ INITIALIZE_PASS_END(PPCCTRLoops, "ppc-ctr-loops", "PowerPC CTR Loops",
 FunctionPass *llvm::createPPCCTRLoops(PPCTargetMachine &TM) {
   return new PPCCTRLoops(TM);
 }
+
+#ifndef NDEBUG
+INITIALIZE_PASS_BEGIN(PPCCTRLoopsVerify, "ppc-ctr-loops-verify",
+                      "PowerPC CTR Loops Verify", false, false)
+INITIALIZE_PASS_DEPENDENCY(MachineDominatorTree)
+INITIALIZE_PASS_END(PPCCTRLoopsVerify, "ppc-ctr-loops-verify",
+                    "PowerPC CTR Loops Verify", false, false)
+
+FunctionPass *llvm::createPPCCTRLoopsVerify() {
+  return new PPCCTRLoopsVerify();
+}
+#endif // NDEBUG
 
 bool PPCCTRLoops::runOnFunction(Function &F) {
   LI = &getAnalysis<LoopInfo>();
@@ -141,6 +184,189 @@ bool PPCCTRLoops::runOnFunction(Function &F) {
   }
 
   return MadeChange;
+}
+
+bool PPCCTRLoops::mightUseCTR(const Triple &TT, BasicBlock *BB) {
+  for (BasicBlock::iterator J = BB->begin(), JE = BB->end();
+       J != JE; ++J) {
+    if (CallInst *CI = dyn_cast<CallInst>(J)) {
+      if (InlineAsm *IA = dyn_cast<InlineAsm>(CI->getCalledValue())) {
+        // Inline ASM is okay, unless it clobbers the ctr register.
+        InlineAsm::ConstraintInfoVector CIV = IA->ParseConstraints();
+        for (unsigned i = 0, ie = CIV.size(); i < ie; ++i) {
+          InlineAsm::ConstraintInfo &C = CIV[i];
+          if (C.Type != InlineAsm::isInput)
+            for (unsigned j = 0, je = C.Codes.size(); j < je; ++j)
+              if (StringRef(C.Codes[j]).equals_lower("{ctr}"))
+                return true;
+        }
+
+        continue;
+      }
+
+      if (!TM)
+        return true;
+      const TargetLowering *TLI = TM->getTargetLowering();
+
+      if (Function *F = CI->getCalledFunction()) {
+        // Most intrinsics don't become function calls, but some might.
+        // sin, cos, exp and log are always calls.
+        unsigned Opcode;
+        if (F->getIntrinsicID() != Intrinsic::not_intrinsic) {
+          switch (F->getIntrinsicID()) {
+          default: continue;
+
+// VisualStudio defines setjmp as _setjmp
+#if defined(_MSC_VER) && defined(setjmp) && \
+                       !defined(setjmp_undefined_for_msvc)
+#  pragma push_macro("setjmp")
+#  undef setjmp
+#  define setjmp_undefined_for_msvc
+#endif
+
+          case Intrinsic::setjmp:
+
+#if defined(_MSC_VER) && defined(setjmp_undefined_for_msvc)
+ // let's return it to _setjmp state
+#  pragma pop_macro("setjmp")
+#  undef setjmp_undefined_for_msvc
+#endif
+
+          case Intrinsic::longjmp:
+
+          // Exclude eh_sjlj_setjmp; we don't need to exclude eh_sjlj_longjmp
+          // because, although it does clobber the counter register, the
+          // control can't then return to inside the loop unless there is also
+          // an eh_sjlj_setjmp.
+          case Intrinsic::eh_sjlj_setjmp:
+
+          case Intrinsic::memcpy:
+          case Intrinsic::memmove:
+          case Intrinsic::memset:
+          case Intrinsic::powi:
+          case Intrinsic::log:
+          case Intrinsic::log2:
+          case Intrinsic::log10:
+          case Intrinsic::exp:
+          case Intrinsic::exp2:
+          case Intrinsic::pow:
+          case Intrinsic::sin:
+          case Intrinsic::cos:
+            return true;
+          case Intrinsic::sqrt:      Opcode = ISD::FSQRT;      break;
+          case Intrinsic::floor:     Opcode = ISD::FFLOOR;     break;
+          case Intrinsic::ceil:      Opcode = ISD::FCEIL;      break;
+          case Intrinsic::trunc:     Opcode = ISD::FTRUNC;     break;
+          case Intrinsic::rint:      Opcode = ISD::FRINT;      break;
+          case Intrinsic::nearbyint: Opcode = ISD::FNEARBYINT; break;
+          }
+        }
+
+        // PowerPC does not use [US]DIVREM or other library calls for
+        // operations on regular types which are not otherwise library calls
+        // (i.e. soft float or atomics). If adapting for targets that do,
+        // additional care is required here.
+
+        LibFunc::Func Func;
+        if (!F->hasLocalLinkage() && F->hasName() && LibInfo &&
+            LibInfo->getLibFunc(F->getName(), Func) &&
+            LibInfo->hasOptimizedCodeGen(Func)) {
+          // Non-read-only functions are never treated as intrinsics.
+          if (!CI->onlyReadsMemory())
+            return true;
+
+          // Conversion happens only for FP calls.
+          if (!CI->getArgOperand(0)->getType()->isFloatingPointTy())
+            return true;
+
+          switch (Func) {
+          default: return true;
+          case LibFunc::copysign:
+          case LibFunc::copysignf:
+          case LibFunc::copysignl:
+            continue; // ISD::FCOPYSIGN is never a library call.
+          case LibFunc::fabs:
+          case LibFunc::fabsf:
+          case LibFunc::fabsl:
+            continue; // ISD::FABS is never a library call.
+          case LibFunc::sqrt:
+          case LibFunc::sqrtf:
+          case LibFunc::sqrtl:
+            Opcode = ISD::FSQRT; break;
+          case LibFunc::floor:
+          case LibFunc::floorf:
+          case LibFunc::floorl:
+            Opcode = ISD::FFLOOR; break;
+          case LibFunc::nearbyint:
+          case LibFunc::nearbyintf:
+          case LibFunc::nearbyintl:
+            Opcode = ISD::FNEARBYINT; break;
+          case LibFunc::ceil:
+          case LibFunc::ceilf:
+          case LibFunc::ceill:
+            Opcode = ISD::FCEIL; break;
+          case LibFunc::rint:
+          case LibFunc::rintf:
+          case LibFunc::rintl:
+            Opcode = ISD::FRINT; break;
+          case LibFunc::trunc:
+          case LibFunc::truncf:
+          case LibFunc::truncl:
+            Opcode = ISD::FTRUNC; break;
+          }
+
+          MVT VTy =
+            TLI->getSimpleValueType(CI->getArgOperand(0)->getType(), true);
+          if (VTy == MVT::Other)
+            return true;
+          
+          if (TLI->isOperationLegalOrCustom(Opcode, VTy))
+            continue;
+          else if (VTy.isVector() &&
+                   TLI->isOperationLegalOrCustom(Opcode, VTy.getScalarType()))
+            continue;
+
+          return true;
+        }
+      }
+
+      return true;
+    } else if (isa<BinaryOperator>(J) &&
+               J->getType()->getScalarType()->isPPC_FP128Ty()) {
+      // Most operations on ppc_f128 values become calls.
+      return true;
+    } else if (isa<UIToFPInst>(J) || isa<SIToFPInst>(J) ||
+               isa<FPToUIInst>(J) || isa<FPToSIInst>(J)) {
+      CastInst *CI = cast<CastInst>(J);
+      if (CI->getSrcTy()->getScalarType()->isPPC_FP128Ty() ||
+          CI->getDestTy()->getScalarType()->isPPC_FP128Ty() ||
+          (TT.isArch32Bit() &&
+           (CI->getSrcTy()->getScalarType()->isIntegerTy(64) ||
+            CI->getDestTy()->getScalarType()->isIntegerTy(64))
+          ))
+        return true;
+    } else if (TT.isArch32Bit() &&
+               J->getType()->getScalarType()->isIntegerTy(64) &&
+               (J->getOpcode() == Instruction::UDiv ||
+                J->getOpcode() == Instruction::SDiv ||
+                J->getOpcode() == Instruction::URem ||
+                J->getOpcode() == Instruction::SRem)) {
+      return true;
+    } else if (isa<IndirectBrInst>(J) || isa<InvokeInst>(J)) {
+      // On PowerPC, indirect jumps use the counter register.
+      return true;
+    } else if (SwitchInst *SI = dyn_cast<SwitchInst>(J)) {
+      if (!TM)
+        return true;
+      const TargetLowering *TLI = TM->getTargetLowering();
+
+      if (TLI->supportJumpTables() &&
+          SI->getNumCases()+1 >= (unsigned) TLI->getMinimumJumpTableEntries())
+        return true;
+    }
+  }
+
+  return false;
 }
 
 bool PPCCTRLoops::convertToCTRLoop(Loop *L) {
@@ -173,154 +399,9 @@ bool PPCCTRLoops::convertToCTRLoop(Loop *L) {
   // We don't want to spill/restore the counter register, and so we don't
   // want to use the counter register if the loop contains calls.
   for (Loop::block_iterator I = L->block_begin(), IE = L->block_end();
-       I != IE; ++I) {
-    for (BasicBlock::iterator J = (*I)->begin(), JE = (*I)->end();
-         J != JE; ++J) {
-      if (CallInst *CI = dyn_cast<CallInst>(J)) {
-        if (!TM)
-          return MadeChange;
-        const TargetLowering *TLI = TM->getTargetLowering();
-
-        if (Function *F = CI->getCalledFunction()) {
-          // Most intrinsics don't become function calls, but some might.
-          // sin, cos, exp and log are always calls.
-          unsigned Opcode;
-          if (F->getIntrinsicID() != Intrinsic::not_intrinsic) {
-            switch (F->getIntrinsicID()) {
-            default: continue;
-
-// VisualStudio defines setjmp as _setjmp
-#if defined(_MSC_VER) && defined(setjmp) && \
-                         !defined(setjmp_undefined_for_msvc)
-#  pragma push_macro("setjmp")
-#  undef setjmp
-#  define setjmp_undefined_for_msvc
-#endif
-
-            case Intrinsic::setjmp:
-
-#if defined(_MSC_VER) && defined(setjmp_undefined_for_msvc)
-   // let's return it to _setjmp state
-#  pragma pop_macro("setjmp")
-#  undef setjmp_undefined_for_msvc
-#endif
-
-            case Intrinsic::longjmp:
-            case Intrinsic::memcpy:
-            case Intrinsic::memmove:
-            case Intrinsic::memset:
-            case Intrinsic::powi:
-            case Intrinsic::log:
-            case Intrinsic::log2:
-            case Intrinsic::log10:
-            case Intrinsic::exp:
-            case Intrinsic::exp2:
-            case Intrinsic::pow:
-            case Intrinsic::sin:
-            case Intrinsic::cos:
-              return MadeChange;
-            case Intrinsic::sqrt:      Opcode = ISD::FSQRT;      break;
-            case Intrinsic::floor:     Opcode = ISD::FFLOOR;     break;
-            case Intrinsic::ceil:      Opcode = ISD::FCEIL;      break;
-            case Intrinsic::trunc:     Opcode = ISD::FTRUNC;     break;
-            case Intrinsic::rint:      Opcode = ISD::FRINT;      break;
-            case Intrinsic::nearbyint: Opcode = ISD::FNEARBYINT; break;
-            }
-          }
-
-          // PowerPC does not use [US]DIVREM or other library calls for
-          // operations on regular types which are not otherwise library calls
-          // (i.e. soft float or atomics). If adapting for targets that do,
-          // additional care is required here.
-
-          LibFunc::Func Func;
-          if (!F->hasLocalLinkage() && F->hasName() && LibInfo &&
-              LibInfo->getLibFunc(F->getName(), Func) &&
-              LibInfo->hasOptimizedCodeGen(Func)) {
-            // Non-read-only functions are never treated as intrinsics.
-            if (!CI->onlyReadsMemory())
-              return MadeChange;
-
-            // Conversion happens only for FP calls.
-            if (!CI->getArgOperand(0)->getType()->isFloatingPointTy())
-              return MadeChange;
-
-            switch (Func) {
-            default: return MadeChange;
-            case LibFunc::copysign:
-            case LibFunc::copysignf:
-            case LibFunc::copysignl:
-              continue; // ISD::FCOPYSIGN is never a library call.
-            case LibFunc::fabs:
-            case LibFunc::fabsf:
-            case LibFunc::fabsl:
-              continue; // ISD::FABS is never a library call.
-            case LibFunc::sqrt:
-            case LibFunc::sqrtf:
-            case LibFunc::sqrtl:
-              Opcode = ISD::FSQRT; break;
-            case LibFunc::floor:
-            case LibFunc::floorf:
-            case LibFunc::floorl:
-              Opcode = ISD::FFLOOR; break;
-            case LibFunc::nearbyint:
-            case LibFunc::nearbyintf:
-            case LibFunc::nearbyintl:
-              Opcode = ISD::FNEARBYINT; break;
-            case LibFunc::ceil:
-            case LibFunc::ceilf:
-            case LibFunc::ceill:
-              Opcode = ISD::FCEIL; break;
-            case LibFunc::rint:
-            case LibFunc::rintf:
-            case LibFunc::rintl:
-              Opcode = ISD::FRINT; break;
-            case LibFunc::trunc:
-            case LibFunc::truncf:
-            case LibFunc::truncl:
-              Opcode = ISD::FTRUNC; break;
-            }
-
-            MVT VTy =
-              TLI->getSimpleValueType(CI->getArgOperand(0)->getType(), true);
-            if (VTy == MVT::Other)
-              return MadeChange;
-            
-            if (TLI->isOperationLegalOrCustom(Opcode, VTy))
-              continue;
-            else if (VTy.isVector() &&
-                     TLI->isOperationLegalOrCustom(Opcode, VTy.getScalarType()))
-              continue;
-
-            return MadeChange;
-          }
-        }
-
-        return MadeChange;
-      } else if (isa<BinaryOperator>(J) &&
-                 J->getType()->getScalarType()->isPPC_FP128Ty()) {
-        // Most operations on ppc_f128 values become calls.
-        return MadeChange;
-      } else if (isa<UIToFPInst>(J) || isa<SIToFPInst>(J) ||
-                 isa<FPToUIInst>(J) || isa<FPToSIInst>(J)) {
-        CastInst *CI = cast<CastInst>(J);
-        if (CI->getSrcTy()->getScalarType()->isPPC_FP128Ty() ||
-            CI->getDestTy()->getScalarType()->isPPC_FP128Ty())
-          return MadeChange;
-      } else if (isa<IndirectBrInst>(J) || isa<InvokeInst>(J)) {
-        // On PowerPC, indirect jumps use the counter register.
-        return MadeChange;
-      } else if (SwitchInst *SI = dyn_cast<SwitchInst>(J)) {
-        if (!TM)
-          return MadeChange;
-        const TargetLowering *TLI = TM->getTargetLowering();
-
-        if (TLI->supportJumpTables() &&
-            SI->getNumCases()+1 >= (unsigned) TLI->getMinimumJumpTableEntries())
-          return MadeChange;
-      }
-    }
-  }
+       I != IE; ++I)
+    if (mightUseCTR(TT, *I))
+      return MadeChange;
 
   SmallVector<BasicBlock*, 4> ExitingBlocks;
   L->getExitingBlocks(ExitingBlocks);
@@ -328,7 +409,7 @@ bool PPCCTRLoops::convertToCTRLoop(Loop *L) {
   BasicBlock *CountedExitBlock = 0;
   const SCEV *ExitCount = 0;
   BranchInst *CountedExitBranch = 0;
-  for (SmallVector<BasicBlock*, 4>::iterator I = ExitingBlocks.begin(),
+  for (SmallVectorImpl<BasicBlock *>::iterator I = ExitingBlocks.begin(),
        IE = ExitingBlocks.end(); I != IE; ++I) {
     const SCEV *EC = SE->getExitCount(L, *I);
     DEBUG(dbgs() << "Exit Count for " << *L << " from block " <<
@@ -339,6 +420,9 @@ bool PPCCTRLoops::convertToCTRLoop(Loop *L) {
       if (ConstEC->getValue()->isZero())
         continue;
     } else if (!SE->isLoopInvariant(EC, L))
+      continue;
+
+    if (SE->getTypeSizeInBits(EC->getType()) > (TT.isArch64Bit() ? 64 : 32))
       continue;
 
     // We now have a loop-invariant count of loop iterations (which is not the
@@ -387,8 +471,13 @@ bool PPCCTRLoops::convertToCTRLoop(Loop *L) {
     return MadeChange;
 
   BasicBlock *Preheader = L->getLoopPreheader();
-  if (!Preheader)
-    Preheader = InsertPreheaderForLoop(L);
+
+  // If we don't have a preheader, then insert one. If we already have a
+  // preheader, then we can use it (except if the preheader contains a use of
+  // the CTR register because some such uses might be reordered by the
+  // selection DAG after the mtctr instruction).
+  if (!Preheader || mightUseCTR(TT, Preheader))
+    Preheader = InsertPreheaderForLoop(L, this);
   if (!Preheader)
     return MadeChange;
 
@@ -436,81 +525,113 @@ bool PPCCTRLoops::convertToCTRLoop(Loop *L) {
   return MadeChange;
 }
 
-// FIXME: Copied from LoopSimplify.
-BasicBlock *PPCCTRLoops::InsertPreheaderForLoop(Loop *L) {
-  BasicBlock *Header = L->getHeader();
-
-  // Compute the set of predecessors of the loop that are not in the loop.
-  SmallVector<BasicBlock*, 8> OutsideBlocks;
-  for (pred_iterator PI = pred_begin(Header), PE = pred_end(Header);
-       PI != PE; ++PI) {
-    BasicBlock *P = *PI;
-    if (!L->contains(P)) {         // Coming in from outside the loop?
-      // If the loop is branched to from an indirect branch, we won't
-      // be able to fully transform the loop, because it prohibits
-      // edge splitting.
-      if (isa<IndirectBrInst>(P->getTerminator())) return 0;
-
-      // Keep track of it.
-      OutsideBlocks.push_back(P);
+#ifndef NDEBUG
+static bool clobbersCTR(const MachineInstr *MI) {
+  for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
+    const MachineOperand &MO = MI->getOperand(i);
+    if (MO.isReg()) {
+      if (MO.isDef() && (MO.getReg() == PPC::CTR || MO.getReg() == PPC::CTR8))
+        return true;
+    } else if (MO.isRegMask()) {
+      if (MO.clobbersPhysReg(PPC::CTR) || MO.clobbersPhysReg(PPC::CTR8))
+        return true;
     }
   }
 
-  // Split out the loop pre-header.
-  BasicBlock *PreheaderBB;
-  if (!Header->isLandingPad()) {
-    PreheaderBB = SplitBlockPredecessors(Header, OutsideBlocks, ".preheader",
-                                         this);
-  } else {
-    SmallVector<BasicBlock*, 2> NewBBs;
-    SplitLandingPadPredecessors(Header, OutsideBlocks, ".preheader",
-                                ".split-lp", this, NewBBs);
-    PreheaderBB = NewBBs[0];
-  }
-
-  PreheaderBB->getTerminator()->setDebugLoc(
-                                      Header->getFirstNonPHI()->getDebugLoc());
-  DEBUG(dbgs() << "Creating pre-header "
-               << PreheaderBB->getName() << "\n");
-
-  // Make sure that NewBB is put someplace intelligent, which doesn't mess up
-  // code layout too horribly.
-  PlaceSplitBlockCarefully(PreheaderBB, OutsideBlocks, L);
-
-  return PreheaderBB;
+  return false;
 }
 
-void PPCCTRLoops::PlaceSplitBlockCarefully(BasicBlock *NewBB,
-                                       SmallVectorImpl<BasicBlock*> &SplitPreds,
-                                            Loop *L) {
-  // Check to see if NewBB is already well placed.
-  Function::iterator BBI = NewBB; --BBI;
-  for (unsigned i = 0, e = SplitPreds.size(); i != e; ++i) {
-    if (&*BBI == SplitPreds[i])
-      return;
-  }
+static bool verifyCTRBranch(MachineBasicBlock *MBB,
+                            MachineBasicBlock::iterator I) {
+  MachineBasicBlock::iterator BI = I;
+  SmallSet<MachineBasicBlock *, 16>   Visited;
+  SmallVector<MachineBasicBlock *, 8> Preds;
+  bool CheckPreds;
 
-  // If it isn't already after an outside block, move it after one.  This is
-  // always good as it makes the uncond branch from the outside block into a
-  // fall-through.
+  if (I == MBB->begin()) {
+    Visited.insert(MBB);
+    goto queue_preds;
+  } else
+    --I;
 
-  // Figure out *which* outside block to put this after.  Prefer an outside
-  // block that neighbors a BB actually in the loop.
-  BasicBlock *FoundBB = 0;
-  for (unsigned i = 0, e = SplitPreds.size(); i != e; ++i) {
-    Function::iterator BBI = SplitPreds[i];
-    if (++BBI != NewBB->getParent()->end() &&
-        L->contains(BBI)) {
-      FoundBB = SplitPreds[i];
+check_block:
+  Visited.insert(MBB);
+  if (I == MBB->end())
+    goto queue_preds;
+
+  CheckPreds = true;
+  for (MachineBasicBlock::iterator IE = MBB->begin();; --I) {
+    unsigned Opc = I->getOpcode();
+    if (Opc == PPC::MTCTRloop || Opc == PPC::MTCTR8loop) {
+      CheckPreds = false;
       break;
     }
+
+    if (I != BI && clobbersCTR(I)) {
+      DEBUG(dbgs() << "BB#" << MBB->getNumber() << " (" <<
+                      MBB->getFullName() << ") instruction " << *I <<
+                      " clobbers CTR, invalidating " << "BB#" <<
+                      BI->getParent()->getNumber() << " (" <<
+                      BI->getParent()->getFullName() << ") instruction " <<
+                      *BI << "\n");
+      return false;
+    }
+
+    if (I == IE)
+      break;
   }
 
-  // If our heuristic for a *good* bb to place this after doesn't find
-  // anything, just pick something.  It's likely better than leaving it within
-  // the loop.
-  if (!FoundBB)
-    FoundBB = SplitPreds[0];
-  NewBB->moveAfter(FoundBB);
+  if (!CheckPreds && Preds.empty())
+    return true;
+
+  if (CheckPreds) {
+queue_preds:
+    if (MachineFunction::iterator(MBB) == MBB->getParent()->begin()) {
+      DEBUG(dbgs() << "Unable to find a MTCTR instruction for BB#" <<
+                      BI->getParent()->getNumber() << " (" <<
+                      BI->getParent()->getFullName() << ") instruction " <<
+                      *BI << "\n");
+      return false;
+    }
+
+    for (MachineBasicBlock::pred_iterator PI = MBB->pred_begin(),
+         PIE = MBB->pred_end(); PI != PIE; ++PI)
+      Preds.push_back(*PI);
+  }
+
+  do {
+    MBB = Preds.pop_back_val();
+    if (!Visited.count(MBB)) {
+      I = MBB->getLastNonDebugInstr();
+      goto check_block;
+    }
+  } while (!Preds.empty());
+
+  return true;
 }
+
+bool PPCCTRLoopsVerify::runOnMachineFunction(MachineFunction &MF) {
+  MDT = &getAnalysis<MachineDominatorTree>();
+
+  // Verify that all bdnz/bdz instructions are dominated by a loop mtctr before
+  // any other instructions that might clobber the ctr register.
+  for (MachineFunction::iterator I = MF.begin(), IE = MF.end();
+       I != IE; ++I) {
+    MachineBasicBlock *MBB = I;
+    if (!MDT->isReachableFromEntry(MBB))
+      continue;
+
+    for (MachineBasicBlock::iterator MII = MBB->getFirstTerminator(),
+      MIIE = MBB->end(); MII != MIIE; ++MII) {
+      unsigned Opc = MII->getOpcode();
+      if (Opc == PPC::BDNZ8 || Opc == PPC::BDNZ ||
+          Opc == PPC::BDZ8  || Opc == PPC::BDZ)
+        if (!verifyCTRBranch(MBB, MII))
+          llvm_unreachable("Invalid PPC CTR loop!");
+    }
+  }
+
+  return false;
+}
+#endif // NDEBUG
 

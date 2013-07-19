@@ -97,6 +97,7 @@ class InstSE<dag outs, dag ins, string asmstr, list<dag> pattern,
   let Predicates = [HasStdEnc];
   string BaseOpcode = opstr;
   string Arch;
+  let MnemonicContainsDot = 1;
 }
 
 // Mips Pseudo Instructions Format
@@ -476,6 +477,61 @@ class RDHWR_FM {
   let Inst{5-0}   = 0x3b;
 }
 
+class TEQ_FM<bits<6> funct> {
+  bits<5> rs;
+  bits<5> rt;
+  bits<10> code_;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0;
+  let Inst{25-21} = rs;
+  let Inst{20-16} = rt;
+  let Inst{15-6}  = code_;
+  let Inst{5-0}   = funct;
+}
+
+//===----------------------------------------------------------------------===//
+//  System calls format <op|code_|funct>
+//===----------------------------------------------------------------------===//
+
+class SYS_FM<bits<6> funct>
+{
+  bits<20> code_;
+  bits<32> Inst;
+  let Inst{31-26} = 0x0;
+  let Inst{25-6} = code_;
+  let Inst{5-0}  = funct;
+}
+
+//===----------------------------------------------------------------------===//
+//  Break instruction format <op|code_1|funct>
+//===----------------------------------------------------------------------===//
+
+class BRK_FM<bits<6> funct>
+{
+  bits<10> code_1;
+  bits<10> code_2;
+  bits<32> Inst;
+  let Inst{31-26} = 0x0;
+  let Inst{25-16} = code_1;
+  let Inst{15-6}  = code_2;
+  let Inst{5-0}   = funct;
+}
+
+//===----------------------------------------------------------------------===//
+//  Exception return format <Cop0|1|0|funct>
+//===----------------------------------------------------------------------===//
+
+class ER_FM<bits<6> funct>
+{
+  bits<32> Inst;
+  let Inst{31-26} = 0x10;
+  let Inst{25}    = 1;
+  let Inst{24-6}  = 0;
+  let Inst{5-0}   = funct;
+}
+
 //===----------------------------------------------------------------------===//
 //
 //  FLOATING POINT INSTRUCTION FORMATS
@@ -635,6 +691,10 @@ class CEQS_FM<bits<5> fmt> {
   let Inst{10-8} = 0; // cc
   let Inst{7-4} = 0x3;
   let Inst{3-0} = cond;
+}
+
+class C_COND_FM<bits<5> fmt, bits<4> c> : CEQS_FM<fmt> {
+  let cond = c;
 }
 
 class CMov_I_F_FM<bits<6> funct, bits<5> fmt> {

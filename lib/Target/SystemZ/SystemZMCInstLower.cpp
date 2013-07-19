@@ -15,15 +15,10 @@
 
 using namespace llvm;
 
-// Where relaxable pairs of reloc-generating instructions exist,
-// we tend to use the longest form by default, since that produces
-// correct assembly in cases where no relaxation is performed.
-// If Opcode is one such instruction, return the opcode for the
-// shortest possible form instead, otherwise return Opcode itself.
+// If Opcode is an interprocedural reference that can be shortened,
+// return the short form, otherwise return 0.
 static unsigned getShortenedInstr(unsigned Opcode) {
   switch (Opcode) {
-  case SystemZ::BRCL:  return SystemZ::BRC;
-  case SystemZ::JG:    return SystemZ::J;
   case SystemZ::BRASL: return SystemZ::BRAS;
   }
   return Opcode;
@@ -62,9 +57,6 @@ MCOperand SystemZMCInstLower::lowerOperand(const MachineOperand &MO) const {
     llvm_unreachable("unknown operand type");
 
   case MachineOperand::MO_Register:
-    // Ignore all implicit register operands.
-    if (MO.isImplicit())
-      return MCOperand();
     return MCOperand::CreateReg(MO.getReg());
 
   case MachineOperand::MO_Immediate:
@@ -109,8 +101,8 @@ void SystemZMCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
   OutMI.setOpcode(Opcode);
   for (unsigned I = 0, E = MI->getNumOperands(); I != E; ++I) {
     const MachineOperand &MO = MI->getOperand(I);
-    MCOperand MCOp = lowerOperand(MO);
-    if (MCOp.isValid())
-      OutMI.addOperand(MCOp);
+    // Ignore all implicit register operands.
+    if (!MO.isReg() || !MO.isImplicit())
+      OutMI.addOperand(lowerOperand(MO));
   }
 }

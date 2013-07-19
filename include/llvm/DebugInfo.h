@@ -63,7 +63,8 @@ namespace llvm {
       FlagObjcClassComplete  = 1 << 9,
       FlagObjectPointer      = 1 << 10,
       FlagVector             = 1 << 11,
-      FlagStaticMember       = 1 << 12
+      FlagStaticMember       = 1 << 12,
+      FlagIndirectVariable   = 1 << 13
     };
   protected:
     const MDNode *DbgNode;
@@ -100,6 +101,20 @@ namespace llvm {
 
     operator MDNode *() const { return const_cast<MDNode*>(DbgNode); }
     MDNode *operator ->() const { return const_cast<MDNode*>(DbgNode); }
+
+    // An explicit operator bool so that we can do testing of DI values
+    // easily.
+    // FIXME: This operator bool isn't actually protecting anything at the
+    // moment due to the conversion operator above making DIDescriptor nodes
+    // implicitly convertable to bool.
+    LLVM_EXPLICIT operator bool() const { return DbgNode != 0; }
+
+    bool operator==(DIDescriptor Other) const {
+      return DbgNode == Other.DbgNode;
+    }
+    bool operator!=(DIDescriptor Other) const {
+      return !operator==(Other);
+    }
 
     unsigned getTag() const {
       return getUnsignedField(0) & ~LLVMDebugVersionMask;
@@ -221,7 +236,7 @@ namespace llvm {
     explicit DIEnumerator(const MDNode *N = 0) : DIDescriptor(N) {}
 
     StringRef getName() const        { return getStringField(1); }
-    uint64_t getEnumValue() const      { return getUInt64Field(2); }
+    int64_t getEnumValue() const      { return getInt64Field(2); }
     bool Verify() const;
   };
 
@@ -285,7 +300,7 @@ namespace llvm {
       return (getFlags() & FlagStaticMember) != 0;
     }
     bool isValid() const {
-      return DbgNode && (isBasicType() || isDerivedType() || isCompositeType());
+      return DbgNode && isType();
     }
 
     /// isUnsignedDIType - Return true if type encoding is unsigned.
@@ -427,19 +442,6 @@ namespace llvm {
     unsigned getLineNumber() const      { return getUnsignedField(6); }
     DICompositeType getType() const { return getFieldAs<DICompositeType>(7); }
 
-    /// getReturnTypeName - Subprogram return types are encoded either as
-    /// DIType or as DICompositeType.
-    StringRef getReturnTypeName() const {
-      DICompositeType DCT(getFieldAs<DICompositeType>(7));
-      if (DCT.Verify()) {
-        DIArray A = DCT.getTypeArray();
-        DIType T(A.getElement(0));
-        return T.getName();
-      }
-      DIType T(getFieldAs<DIType>(7));
-      return T.getName();
-    }
-
     /// isLocalToUnit - Return true if this subprogram is local to the current
     /// compile unit, like 'static' in C.
     unsigned isLocalToUnit() const     { return getUnsignedField(8); }
@@ -480,11 +482,6 @@ namespace llvm {
 
     unsigned isOptimized() const;
 
-    /// getScopeLineNumber - Get the beginning of the scope of the
-    /// function, not necessarily where the name of the program
-    /// starts.
-    unsigned getScopeLineNumber() const { return getUnsignedField(19); }
-
     /// Verify - Verify that a subprogram descriptor is well formed.
     bool Verify() const;
 
@@ -500,6 +497,11 @@ namespace llvm {
     }
     MDNode *getVariablesNodes() const;
     DIArray getVariables() const;
+
+    /// getScopeLineNumber - Get the beginning of the scope of the
+    /// function, not necessarily where the name of the program
+    /// starts.
+    unsigned getScopeLineNumber() const { return getUnsignedField(19); }
   };
 
   /// DIGlobalVariable - This is a wrapper for a global variable.
@@ -564,6 +566,11 @@ namespace llvm {
 
     bool isObjectPointer() const {
       return (getUnsignedField(6) & FlagObjectPointer) != 0;
+    }
+
+    /// \brief Return true if this variable is represented as a pointer.
+    bool isIndirect() const {
+      return (getUnsignedField(6) & FlagIndirectVariable) != 0;
     }
 
     /// getInlinedAt - If this variable is inlined then return inline location.
@@ -661,22 +668,22 @@ namespace llvm {
     StringRef getObjCPropertySetterName() const {
       return getStringField(5);
     }
-    bool isReadOnlyObjCProperty() {
+    bool isReadOnlyObjCProperty() const {
       return (getUnsignedField(6) & dwarf::DW_APPLE_PROPERTY_readonly) != 0;
     }
-    bool isReadWriteObjCProperty() {
+    bool isReadWriteObjCProperty() const {
       return (getUnsignedField(6) & dwarf::DW_APPLE_PROPERTY_readwrite) != 0;
     }
-    bool isAssignObjCProperty() {
+    bool isAssignObjCProperty() const {
       return (getUnsignedField(6) & dwarf::DW_APPLE_PROPERTY_assign) != 0;
     }
-    bool isRetainObjCProperty() {
+    bool isRetainObjCProperty() const {
       return (getUnsignedField(6) & dwarf::DW_APPLE_PROPERTY_retain) != 0;
     }
-    bool isCopyObjCProperty() {
+    bool isCopyObjCProperty() const {
       return (getUnsignedField(6) & dwarf::DW_APPLE_PROPERTY_copy) != 0;
     }
-    bool isNonAtomicObjCProperty() {
+    bool isNonAtomicObjCProperty() const {
       return (getUnsignedField(6) & dwarf::DW_APPLE_PROPERTY_nonatomic) != 0;
     }
 
@@ -695,6 +702,7 @@ namespace llvm {
     DIScope getContext() const { return getFieldAs<DIScope>(1); }
     DIDescriptor getEntity() const { return getFieldAs<DIDescriptor>(2); }
     unsigned getLineNumber() const { return getUnsignedField(3); }
+    StringRef getName() const { return getStringField(4); }
     bool Verify() const;
   };
 
@@ -761,7 +769,7 @@ namespace llvm {
     bool addType(DIType DT);
 
   public:
-    typedef SmallVector<MDNode *, 8>::const_iterator iterator;
+    typedef SmallVectorImpl<MDNode *>::const_iterator iterator;
     iterator compile_unit_begin()    const { return CUs.begin(); }
     iterator compile_unit_end()      const { return CUs.end(); }
     iterator subprogram_begin()      const { return SPs.begin(); }

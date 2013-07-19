@@ -56,20 +56,6 @@ and conditional returns.
 
 --
 
-We don't use the combined COMPARE AND BRANCH instructions.  Using them
-would require a change to the way we handle out-of-range branches.
-At the moment, we start with 32-bit forms like BRCL and shorten them
-to forms like BRC where possible, but COMPARE AND BRANCH does not have
-a 32-bit form.
-
---
-
-We should probably model just CC, not the PSW as a whole.  Strictly
-speaking, every instruction changes the PSW since the PSW contains the
-current instruction address.
-
---
-
 We don't use the condition code results of anything except comparisons.
 
 Implementing this may need something more finely grained than the z_cmp
@@ -129,11 +115,6 @@ We don't use the halfword forms of LOAD REVERSED and STORE REVERSED
 
 We could take advantage of the various ... UNDER MASK instructions,
 such as ICM and STCM.
-
---
-
-We could make more use of the ROTATE AND ... SELECTED BITS instructions.
-At the moment we only use RISBG, and only then for subword atomic operations.
 
 --
 

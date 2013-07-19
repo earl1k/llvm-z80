@@ -200,9 +200,7 @@ static unsigned inBytes(unsigned Bits) {
 }
 
 void DataLayout::parseSpecifier(StringRef Desc) {
-
   while (!Desc.empty()) {
-
     // Split at '-'.
     std::pair<StringRef, StringRef> Split = split(Desc, '-');
     Desc = Split.second;
@@ -482,7 +480,7 @@ std::string DataLayout::getStringRepresentation() const {
     addrSpaces.push_back(pib->first);
   }
   std::sort(addrSpaces.begin(), addrSpaces.end());
-  for (SmallVector<unsigned, 8>::iterator asb = addrSpaces.begin(),
+  for (SmallVectorImpl<unsigned>::iterator asb = addrSpaces.begin(),
       ase = addrSpaces.end(); asb != ase; ++asb) {
     const PointerAlignElem &PI = Pointers.find(*asb)->second;
     OS << "-p";
@@ -582,7 +580,6 @@ unsigned DataLayout::getABIIntegerTypeAlignment(unsigned BitWidth) const {
   return getAlignmentInfo(INTEGER_ALIGN, BitWidth, true, 0);
 }
 
-
 unsigned DataLayout::getCallFrameTypeAlignment(Type *Ty) const {
   for (unsigned i = 0, e = Alignments.size(); i != e; ++i)
     if (Alignments[i].AlignType == STACK_ALIGN)
@@ -601,16 +598,11 @@ unsigned DataLayout::getPreferredTypeAlignmentShift(Type *Ty) const {
   return Log2_32(Align);
 }
 
-/// getIntPtrType - Return an integer type with size at least as big as that
-/// of a pointer in the given address space.
 IntegerType *DataLayout::getIntPtrType(LLVMContext &C,
                                        unsigned AddressSpace) const {
   return IntegerType::get(C, getPointerSizeInBits(AddressSpace));
 }
 
-/// getIntPtrType - Return an integer (vector of integer) type with size at
-/// least as big as that of a pointer of the given pointer (vector of pointer)
-/// type.
 Type *DataLayout::getIntPtrType(Type *Ty) const {
   assert(Ty->isPtrOrPtrVectorTy() &&
          "Expected a pointer or pointer vector type.");

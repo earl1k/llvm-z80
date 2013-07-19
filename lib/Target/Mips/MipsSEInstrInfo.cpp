@@ -32,7 +32,7 @@ static cl::opt<bool> NoDPLoadStore("mno-ldc1-sdc1", cl::init(false),
 MipsSEInstrInfo::MipsSEInstrInfo(MipsTargetMachine &tm)
   : MipsInstrInfo(tm,
                   tm.getRelocationModel() == Reloc::PIC_ ? Mips::B : Mips::J),
-    RI(*tm.getSubtargetImpl(), *this),
+    RI(*tm.getSubtargetImpl()),
     IsN64(tm.getSubtarget<MipsSubtarget>().isABI_N64()) {}
 
 const MipsRegisterInfo &MipsSEInstrInfo::getRegisterInfo() const {
@@ -141,8 +141,6 @@ void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     Opc = Mips::FMOV_D32;
   else if (Mips::FGR64RegClass.contains(DestReg, SrcReg))
     Opc = Mips::FMOV_D64;
-  else if (Mips::CCRRegClass.contains(DestReg, SrcReg))
-    Opc = Mips::MOVCCRToCCR;
   else if (Mips::CPU64RegsRegClass.contains(DestReg)) { // Copy to CPU64 Reg.
     if (Mips::CPU64RegsRegClass.contains(SrcReg))
       Opc = Mips::OR64, ZeroReg = Mips::ZERO_64;
@@ -252,6 +250,21 @@ bool MipsSEInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
     return false;
   case Mips::RetRA:
     expandRetRA(MBB, MI, Mips::RET);
+    break;
+  case Mips::PseudoCVT_S_W:
+    expandCvtFPInt(MBB, MI, Mips::CVT_S_W, Mips::MTC1, false);
+    break;
+  case Mips::PseudoCVT_D32_W:
+    expandCvtFPInt(MBB, MI, Mips::CVT_D32_W, Mips::MTC1, false);
+    break;
+  case Mips::PseudoCVT_S_L:
+    expandCvtFPInt(MBB, MI, Mips::CVT_S_L, Mips::DMTC1, true);
+    break;
+  case Mips::PseudoCVT_D64_W:
+    expandCvtFPInt(MBB, MI, Mips::CVT_D64_W, Mips::MTC1, true);
+    break;
+  case Mips::PseudoCVT_D64_L:
+    expandCvtFPInt(MBB, MI, Mips::CVT_D64_L, Mips::DMTC1, true);
     break;
   case Mips::BuildPairF64:
     expandBuildPairF64(MBB, MI);
@@ -372,6 +385,42 @@ void MipsSEInstrInfo::expandRetRA(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator I,
                                 unsigned Opc) const {
   BuildMI(MBB, I, I->getDebugLoc(), get(Opc)).addReg(Mips::RA);
+}
+
+std::pair<bool, bool>
+MipsSEInstrInfo::compareOpndSize(unsigned Opc,
+                                 const MachineFunction &MF) const {
+  const MCInstrDesc &Desc = get(Opc);
+  assert(Desc.NumOperands == 2 && "Unary instruction expected.");
+  const MipsRegisterInfo *RI = &getRegisterInfo();
+  unsigned DstRegSize = getRegClass(Desc, 0, RI, MF)->getSize();
+  unsigned SrcRegSize = getRegClass(Desc, 1, RI, MF)->getSize();
+
+  return std::make_pair(DstRegSize > SrcRegSize, DstRegSize < SrcRegSize);
+}
+
+void MipsSEInstrInfo::expandCvtFPInt(MachineBasicBlock &MBB,
+                                     MachineBasicBlock::iterator I,
+                                     unsigned CvtOpc, unsigned MovOpc,
+                                     bool IsI64) const {
+  const MCInstrDesc &CvtDesc = get(CvtOpc), &MovDesc = get(MovOpc);
+  const MachineOperand &Dst = I->getOperand(0), &Src = I->getOperand(1);
+  unsigned DstReg = Dst.getReg(), SrcReg = Src.getReg(), TmpReg = DstReg;
+  unsigned KillSrc =  getKillRegState(Src.isKill());
+  DebugLoc DL = I->getDebugLoc();
+  unsigned SubIdx = (IsI64 ? Mips::sub_32 : Mips::sub_fpeven);
+  bool DstIsLarger, SrcIsLarger;
+
+  tie(DstIsLarger, SrcIsLarger) = compareOpndSize(CvtOpc, *MBB.getParent());
+
+  if (DstIsLarger)
+    TmpReg = getRegisterInfo().getSubReg(DstReg, SubIdx);
+
+  if (SrcIsLarger)
+    DstReg = getRegisterInfo().getSubReg(DstReg, SubIdx);
+
+  BuildMI(MBB, I, DL, MovDesc, TmpReg).addReg(SrcReg, KillSrc);
+  BuildMI(MBB, I, DL, CvtDesc, DstReg).addReg(TmpReg, RegState::Kill);
 }
 
 void MipsSEInstrInfo::expandExtractElementF64(MachineBasicBlock &MBB,

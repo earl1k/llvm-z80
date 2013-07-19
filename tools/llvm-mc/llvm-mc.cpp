@@ -210,8 +210,8 @@ static tool_output_file *GetOutputStream() {
     OutputFilename = "-";
 
   std::string Err;
-  tool_output_file *Out = new tool_output_file(OutputFilename.c_str(), Err,
-                                               raw_fd_ostream::F_Binary);
+  tool_output_file *Out =
+      new tool_output_file(OutputFilename.c_str(), Err, sys::fs::F_Binary);
   if (!Err.empty()) {
     errs() << Err << '\n';
     delete Out;
@@ -388,7 +388,7 @@ int main(int argc, char **argv) {
   // FIXME: This is not pretty. MCContext has a ptr to MCObjectFileInfo and
   // MCObjectFileInfo needs a MCContext reference in order to initialize itself.
   OwningPtr<MCObjectFileInfo> MOFI(new MCObjectFileInfo());
-  MCContext Ctx(*MAI, *MRI, MOFI.get(), &SrcMgr);
+  MCContext Ctx(MAI.get(), MRI.get(), MOFI.get(), &SrcMgr);
   MOFI->InitMCObjectFileInfo(TripleName, RelocModel, CMModel, Ctx);
 
   if (SaveTempLabels)

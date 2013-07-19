@@ -253,52 +253,18 @@ void MMIAddrLabelMapCallbackPtr::allUsesReplacedWith(Value *V2) {
 MachineModuleInfo::MachineModuleInfo(const MCAsmInfo &MAI,
                                      const MCRegisterInfo &MRI,
                                      const MCObjectFileInfo *MOFI)
-  : ImmutablePass(ID), Context(MAI, MRI, MOFI, 0, false) {
+  : ImmutablePass(ID), Context(&MAI, &MRI, MOFI, 0, false) {
   initializeMachineModuleInfoPass(*PassRegistry::getPassRegistry());
 }
 
 MachineModuleInfo::MachineModuleInfo()
-  : ImmutablePass(ID),
-    Context(*(MCAsmInfo*)0, *(MCRegisterInfo*)0, (MCObjectFileInfo*)0) {
+  : ImmutablePass(ID), Context(0, 0, 0) {
   llvm_unreachable("This MachineModuleInfo constructor should never be called, "
                    "MMI should always be explicitly constructed by "
                    "LLVMTargetMachine");
 }
 
 MachineModuleInfo::~MachineModuleInfo() {
-}
-
-static MCCFIInstruction convertMoveToCFI(const MCRegisterInfo &MRI,
-                                         MCSymbol *Label,
-                                         const MachineLocation &Dst,
-                                         const MachineLocation &Src) {
-  // If advancing cfa.
-  if (Dst.isReg() && Dst.getReg() == MachineLocation::VirtualFP) {
-    if (Src.getReg() == MachineLocation::VirtualFP)
-      return MCCFIInstruction::createDefCfaOffset(Label, Src.getOffset());
-    // Reg + Offset
-    return MCCFIInstruction::createDefCfa(
-        Label, MRI.getDwarfRegNum(Src.getReg(), true), -Src.getOffset());
-  }
-
-  if (Src.isReg() && Src.getReg() == MachineLocation::VirtualFP) {
-    assert(Dst.isReg() && "Machine move not supported yet.");
-    return MCCFIInstruction::createDefCfaRegister(
-        Label, MRI.getDwarfRegNum(Dst.getReg(), true));
-  }
-
-  assert(!Dst.isReg() && "Machine move not supported yet.");
-  return MCCFIInstruction::createOffset(
-      Label, MRI.getDwarfRegNum(Src.getReg(), true), Dst.getOffset());
-}
-
-
-void MachineModuleInfo::addFrameMove(MCSymbol *Label,
-                                     const MachineLocation &Dst,
-                                     const MachineLocation &Src) {
-  MCCFIInstruction I =
-      convertMoveToCFI(Context.getRegisterInfo(), Label, Dst, Src);
-  FrameInstructions.push_back(I);
 }
 
 bool MachineModuleInfo::doInitialization(Module &M) {
