@@ -78,7 +78,7 @@ Z80TargetLowering::Z80TargetLowering(Z80TargetMachine &TM)
 SDValue Z80TargetLowering::LowerFormalArguments(SDValue Chain,
   CallingConv::ID CallConv, bool isVarArg,
   const SmallVectorImpl<ISD::InputArg> &Ins,
-  DebugLoc dl, SelectionDAG &DAG,
+  SDLoc dl, SelectionDAG &DAG,
   SmallVectorImpl<SDValue> &InVals) const
 {
   MachineFunction &MF = DAG.getMachineFunction();
@@ -165,7 +165,7 @@ SDValue Z80TargetLowering::LowerReturn(SDValue Chain,
   CallingConv::ID CallConv, bool isVarArg,
   const SmallVectorImpl<ISD::OutputArg> &Outs,
   const SmallVectorImpl<SDValue> &OutVals,
-  DebugLoc dl, SelectionDAG &DAG) const
+  SDLoc dl, SelectionDAG &DAG) const
 {
   // CCValAssign - represent the assignment of
   // the return value to a location
@@ -207,7 +207,7 @@ SDValue Z80TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   SmallVectorImpl<SDValue> &InVals) const
 {
   SelectionDAG &DAG                     = CLI.DAG;
-  DebugLoc dl                           = CLI.DL;
+  SDLoc dl                              = CLI.DL;
   SmallVector<ISD::OutputArg, 32> &Outs = CLI.Outs;
   SmallVector<SDValue, 32> OutVals      = CLI.OutVals;
   SmallVector<ISD::InputArg, 32> &Ins   = CLI.Ins;
@@ -232,7 +232,7 @@ SDValue Z80TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   unsigned NumBytes = CCInfo.getNextStackOffset();
 
   Chain = DAG.getCALLSEQ_START(Chain, DAG.getConstant(NumBytes,
-    getPointerTy(), true));
+    getPointerTy(), true), dl);
 
   SmallVector<std::pair<unsigned, SDValue>, 4> RegsToPass;
   SmallVector<SDValue, 12> MemOpChains;
@@ -341,7 +341,7 @@ SDValue Z80TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   Chain = DAG.getCALLSEQ_END(Chain,
     DAG.getConstant(NumBytes, getPointerTy(), true),
     DAG.getConstant(0, getPointerTy(), true),
-    Flag);
+    Flag, dl);
 
   Flag = Chain.getValue(1);
 
@@ -353,7 +353,7 @@ SDValue Z80TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 SDValue Z80TargetLowering::LowerCallResult(SDValue Chain, SDValue Flag,
   CallingConv::ID CallConv, bool isVarArg,
   const SmallVectorImpl<ISD::InputArg> &Ins,
-  DebugLoc dl, SelectionDAG &DAG,
+  SDLoc dl, SelectionDAG &DAG,
   SmallVectorImpl<SDValue> &InVals) const
 {
   // Assign locations to each value returned by this call.
@@ -433,7 +433,7 @@ const char *Z80TargetLowering::getTargetNodeName(unsigned Opcode) const
 
 SDValue Z80TargetLowering::LowerZExt(SDValue Op, SelectionDAG &DAG) const
 {
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   SDValue Val = Op.getOperand(0);
   EVT VT      = Op.getValueType();
 
@@ -447,7 +447,7 @@ SDValue Z80TargetLowering::LowerZExt(SDValue Op, SelectionDAG &DAG) const
 
 SDValue Z80TargetLowering::LowerSExt(SDValue Op, SelectionDAG &DAG) const
 {
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   SDValue Val = Op.getOperand(0);
   EVT VT      = Op.getValueType();
   EVT HalfVT  = VT.getHalfSizedIntegerVT(*DAG.getContext());
@@ -469,7 +469,7 @@ SDValue Z80TargetLowering::LowerSExt(SDValue Op, SelectionDAG &DAG) const
 
 SDValue Z80TargetLowering::LowerSUB(SDValue Op, SelectionDAG &DAG) const
 {
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   SDValue Op0 = Op.getOperand(0);
   SDValue Op1 = Op.getOperand(1);
   EVT VT      = Op.getValueType();
@@ -487,9 +487,9 @@ SDValue Z80TargetLowering::LowerSUB(SDValue Op, SelectionDAG &DAG) const
 
 SDValue Z80TargetLowering::LowerShifts(SDValue Op, SelectionDAG &DAG) const
 {
+  SDLoc dl(Op);
   unsigned Opc = Op.getOpcode();
   SDNode *N    = Op.getNode();
-  DebugLoc dl  = Op.getDebugLoc();
   EVT VT       = Op.getValueType();
 
   if(!isa<ConstantSDNode>(N->getOperand(1)))
@@ -565,8 +565,8 @@ SDValue Z80TargetLowering::LowerShifts(SDValue Op, SelectionDAG &DAG) const
 
 SDValue Z80TargetLowering::LowerBinaryOp(SDValue Op, SelectionDAG &DAG) const
 {
+  SDLoc dl(Op);
   unsigned Opc = Op.getOpcode();
-  DebugLoc dl  = Op.getDebugLoc();
   SDValue LHS  = Op.getOperand(0);
   SDValue RHS  = Op.getOperand(1);
   EVT VT       = Op.getValueType();
@@ -599,7 +599,7 @@ SDValue Z80TargetLowering::LowerBinaryOp(SDValue Op, SelectionDAG &DAG) const
 }
 
 SDValue Z80TargetLowering::EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &Z80CC,
-  ISD::CondCode CC, DebugLoc dl, SelectionDAG &DAG) const
+  ISD::CondCode CC, SDLoc dl, SelectionDAG &DAG) const
 {
   EVT VT = LHS.getValueType();
 
@@ -649,7 +649,7 @@ SDValue Z80TargetLowering::EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &Z80CC,
 
 SDValue Z80TargetLowering::LowerSelectCC(SDValue Op, SelectionDAG &DAG) const
 {
-  DebugLoc dl      = Op.getDebugLoc();
+  SDLoc dl(Op);
   EVT VT           = Op.getValueType();
   SDValue LHS      = Op.getOperand(0);
   SDValue RHS      = Op.getOperand(1);
@@ -665,7 +665,7 @@ SDValue Z80TargetLowering::LowerSelectCC(SDValue Op, SelectionDAG &DAG) const
 
 SDValue Z80TargetLowering::LowerBrCC(SDValue Op, SelectionDAG &DAG) const
 {
-  DebugLoc dl      = Op.getDebugLoc();
+  SDLoc dl(Op);
   EVT VT           = Op.getValueType();
   SDValue Chain    = Op.getOperand(0);
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
@@ -681,7 +681,7 @@ SDValue Z80TargetLowering::LowerBrCC(SDValue Op, SelectionDAG &DAG) const
 
 SDValue Z80TargetLowering::LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const
 {
-  DebugLoc dl = Op.getDebugLoc();
+  SDLoc dl(Op);
   EVT VT      = getPointerTy();
 
   const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
@@ -695,8 +695,8 @@ SDValue Z80TargetLowering::LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) con
 
 SDValue Z80TargetLowering::LowerStore(SDValue Op, SelectionDAG &DAG) const
 {
+  SDLoc dl(Op);
   StoreSDNode *ST = dyn_cast<StoreSDNode>(Op);
-  DebugLoc dl     = Op.getDebugLoc();
   SDValue Chain   = ST->getChain();
   SDValue BasePtr = ST->getBasePtr();
   SDValue Value   = ST->getOperand(1);
@@ -738,8 +738,8 @@ SDValue Z80TargetLowering::LowerStore(SDValue Op, SelectionDAG &DAG) const
 
 SDValue Z80TargetLowering::LowerLoad(SDValue Op, SelectionDAG &DAG) const
 {
+  SDLoc dl(Op);
   LoadSDNode *LD  = cast<LoadSDNode>(Op);
-  DebugLoc dl     = LD->getDebugLoc();
   SDValue Chain   = LD->getChain();
   SDValue BasePtr = LD->getBasePtr();
 

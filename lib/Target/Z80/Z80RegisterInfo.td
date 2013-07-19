@@ -18,12 +18,12 @@ class Z80Reg<string n, bits<16> Enc = 0, int Cost = 0>
   let CostPerUse = Cost;
 }
 
-class Z80SubRegIndex : SubRegIndex {
+class Z80SubRegIndex<int size, int offset = 0> : SubRegIndex<size, offset> {
   let Namespace = "Z80";
 }
 
-def subreg_hi : Z80SubRegIndex;
-def subreg_lo : Z80SubRegIndex;
+def subreg_hi : Z80SubRegIndex<8, 8>;
+def subreg_lo : Z80SubRegIndex<8, 0>;
 
 class Z80RegWithSubRegs<string n, bits<16> Enc = 0, list<Register> subregs = [], int Cost = 0>
   : Z80Reg<n, Enc, Cost> {

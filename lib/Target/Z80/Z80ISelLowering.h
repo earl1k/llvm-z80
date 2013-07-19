@@ -72,20 +72,20 @@ namespace llvm {
       LowerCallResult(SDValue Chain, SDValue Flag,
         CallingConv::ID CallConv, bool isVarArg,
         const SmallVectorImpl<ISD::InputArg> &Ins,
-        DebugLoc dl, SelectionDAG &DAG,
+        SDLoc dl, SelectionDAG &DAG,
         SmallVectorImpl<SDValue> &InVals) const;
     virtual SDValue
       LowerFormalArguments(SDValue Chain,
         CallingConv::ID CallConv, bool isVarArg,
         const SmallVectorImpl<ISD::InputArg> &Ins,
-        DebugLoc dl, SelectionDAG &DAG,
+        SDLoc dl, SelectionDAG &DAG,
         SmallVectorImpl<SDValue> &InVals) const;
     virtual SDValue
       LowerReturn(SDValue Chain,
         CallingConv::ID CallConv, bool isVarArg,
         const SmallVectorImpl<ISD::OutputArg> &Outs,
         const SmallVectorImpl<SDValue> &OutVals,
-        DebugLoc dl, SelectionDAG &DAG) const;
+        SDLoc dl, SelectionDAG &DAG) const;
     virtual SDValue
       LowerCall(TargetLowering::CallLoweringInfo &CLI,
         SmallVectorImpl<SDValue> &InVals) const;
@@ -94,7 +94,7 @@ namespace llvm {
     // equivalent, for use with given LLVM condition code and return
     // equivalent Z80 condition code.
     SDValue EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &Z80CC,
-      ISD::CondCode CC, DebugLoc dl, SelectionDAG &DAG) const;
+      ISD::CondCode CC, SDLoc dl, SelectionDAG &DAG) const;
   }; // end class Z80TargetLowering
 } // end namespace llvm
 

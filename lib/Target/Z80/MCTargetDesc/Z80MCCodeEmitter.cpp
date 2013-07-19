@@ -135,7 +135,7 @@ unsigned Z80MCCodeEmitter::getMachineOpValue(const MCInst &MI,
   if (MO.isReg())
   {
     unsigned Reg = MO.getReg();
-    unsigned RegNo = Ctx.getRegisterInfo().getEncodingValue(Reg);
+    unsigned RegNo = Ctx.getRegisterInfo()->getEncodingValue(Reg);
     return RegNo;
   }
   else if (MO.isImm())
