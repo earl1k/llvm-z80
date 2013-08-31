@@ -127,8 +127,8 @@ void Input::endMapping() {
     return;
   for (MapHNode::NameToNode::iterator i = MN->Mapping.begin(),
        End = MN->Mapping.end(); i != End; ++i) {
-    if (!MN->isValidKey(i->first)) {
-      setError(i->second, Twine("unknown key '") + i->first + "'");
+    if (!MN->isValidKey(i->first())) {
+      setError(i->second, Twine("unknown key '") + i->first() + "'");
       break;
     }
   }
@@ -334,6 +334,10 @@ void Input::setError(const Twine &Message) {
   this->setError(CurrentNode, Message);
 }
 
+bool Input::canElideEmptySequence() {
+  return false;
+}
+
 Input::MapHNode::~MapHNode() {
   for (MapHNode::NameToNode::iterator i = Mapping.begin(), End = Mapping.end();
                                                                 i != End; ++i) {
@@ -530,6 +534,19 @@ void Output::scalarString(StringRef &S) {
 }
 
 void Output::setError(const Twine &message) {
+}
+
+bool Output::canElideEmptySequence() {
+  // Normally, with an optional key/value where the value is an empty sequence,
+  // the whole key/value can be not written.  But, that produces wrong yaml
+  // if the key/value is the only thing in the map and the map is used in
+  // a sequence.  This detects if the this sequence is the first key/value
+  // in map that itself is embedded in a sequnce.
+  if (StateStack.size() < 2) 
+    return true;
+  if (StateStack.back() != inMapFirstKey) 
+    return true;
+  return (StateStack[StateStack.size()-2] != inSeq);
 }
 
 void Output::output(StringRef s) {

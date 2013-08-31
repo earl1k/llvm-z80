@@ -136,6 +136,11 @@ UnitAtATime("funit-at-a-time",
             cl::init(true));
 
 static cl::opt<bool>
+DisableLoopUnrolling("disable-loop-unrolling",
+                     cl::desc("Disable loop unrolling in all relevant passes"),
+                     cl::init(false));
+
+static cl::opt<bool>
 DisableSimplifyLibCalls("disable-simplify-libcalls",
                         cl::desc("Disable simplify-libcalls"));
 
@@ -447,8 +452,11 @@ static void AddOptimizationPasses(PassManagerBase &MPM,FunctionPassManager &FPM,
     Builder.Inliner = createAlwaysInlinerPass();
   }
   Builder.DisableUnitAtATime = !UnitAtATime;
-  Builder.DisableUnrollLoops = OptLevel == 0;
+  Builder.DisableUnrollLoops = (DisableLoopUnrolling.getNumOccurrences() > 0) ?
+                               DisableLoopUnrolling : OptLevel == 0;
   
+  Builder.LoopVectorize = OptLevel > 1 && SizeLevel < 2;
+
   Builder.populateFunctionPassManager(FPM);
   Builder.populateModulePassManager(MPM);
 }
@@ -491,7 +499,6 @@ static TargetOptions GetTargetOptions() {
   TargetOptions Options;
   Options.LessPreciseFPMADOption = EnableFPMAD;
   Options.NoFramePointerElim = DisableFPElim;
-  Options.NoFramePointerElimNonLeaf = DisableFPElimNonLeaf;
   Options.AllowFPOpFusion = FuseFPOps;
   Options.UnsafeFPMath = EnableUnsafeFPMath;
   Options.NoInfsFPMath = EnableNoInfsFPMath;
@@ -505,12 +512,10 @@ static TargetOptions GetTargetOptions() {
   Options.GuaranteedTailCallOpt = EnableGuaranteedTailCallOpt;
   Options.DisableTailCalls = DisableTailCalls;
   Options.StackAlignmentOverride = OverrideStackAlignment;
-  Options.RealignStack = EnableRealignStack;
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
   Options.EnableSegmentedStacks = SegmentedStacks;
   Options.UseInitArray = UseInitArray;
-  Options.SSPBufferSize = SSPBufferSize;
   return Options;
 }
 
@@ -669,6 +674,9 @@ int main(int argc, char **argv) {
     FPasses.reset(new FunctionPassManager(M.get()));
     if (TD)
       FPasses->add(new DataLayout(*TD));
+    if (TM.get())
+      TM->addAnalysisPasses(*FPasses);
+
   }
 
   if (PrintBreakpoints) {

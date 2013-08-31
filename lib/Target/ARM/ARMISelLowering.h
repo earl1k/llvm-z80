@@ -186,6 +186,8 @@ namespace llvm {
       // Floating-point max and min:
       FMAX,
       FMIN,
+      VMAXNM,
+      VMINNM,
 
       // Bit-field insert
       BFI,
@@ -297,6 +299,9 @@ namespace llvm {
 
     using TargetLowering::isZExtFree;
     virtual bool isZExtFree(SDValue Val, EVT VT2) const;
+
+    virtual bool allowTruncateForTailCall(Type *Ty1, Type *Ty2) const;
+
 
     /// isLegalAddressingMode - Return true if the addressing mode represented
     /// by AM is legal for this target, for a load/store of the specified type.

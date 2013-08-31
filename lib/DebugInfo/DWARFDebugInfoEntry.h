@@ -20,7 +20,7 @@ class DWARFDebugAranges;
 class DWARFCompileUnit;
 class DWARFContext;
 class DWARFFormValue;
-class DWARFInlinedSubroutineChain;
+struct DWARFDebugInfoEntryInlinedChain;
 
 /// DWARFDebugInfoEntryMinimal - A DIE with only the minimum required data.
 class DWARFDebugInfoEntryMinimal {
@@ -128,6 +128,10 @@ public:
                                         const uint16_t attr,
                                         const char *fail_value) const;
 
+  uint64_t getAttributeValueAsAddress(const DWARFCompileUnit *CU,
+                                      const uint16_t Attr,
+                                      uint64_t FailValue) const;
+
   uint64_t getAttributeValueAsUnsigned(const DWARFCompileUnit *cu,
                                        const uint16_t attr,
                                        uint64_t fail_value) const;
@@ -146,7 +150,8 @@ public:
                        uint64_t &LowPC, uint64_t &HighPC) const;
 
   void buildAddressRangeTable(const DWARFCompileUnit *CU,
-                              DWARFDebugAranges *DebugAranges) const;
+                              DWARFDebugAranges *DebugAranges,
+                              uint32_t CUOffsetInAranges) const;
 
   bool addressRangeContainsAddress(const DWARFCompileUnit *CU,
                                    const uint64_t Address) const;
@@ -162,18 +167,23 @@ public:
   void getCallerFrame(const DWARFCompileUnit *CU, uint32_t &CallFile,
                       uint32_t &CallLine, uint32_t &CallColumn) const;
 
-  /// InlinedChain - represents a chain of inlined_subroutine
-  /// DIEs, (possibly ending with subprogram DIE), all of which are contained
-  /// in some concrete inlined instance tree. Address range for each DIE
-  /// (except the last DIE) in this chain is contained in address
-  /// range for next DIE in the chain.
-  typedef SmallVector<DWARFDebugInfoEntryMinimal, 4> InlinedChain;
-
   /// Get inlined chain for a given address, rooted at the current DIE.
   /// Returns empty chain if address is not contained in address range
   /// of current DIE.
-  InlinedChain getInlinedChainForAddress(const DWARFCompileUnit *CU,
-                                         const uint64_t Address) const;
+  DWARFDebugInfoEntryInlinedChain
+  getInlinedChainForAddress(const DWARFCompileUnit *CU,
+                            const uint64_t Address) const;
+};
+
+/// DWARFDebugInfoEntryInlinedChain - represents a chain of inlined_subroutine
+/// DIEs, (possibly ending with subprogram DIE), all of which are contained
+/// in some concrete inlined instance tree. Address range for each DIE
+/// (except the last DIE) in this chain is contained in address
+/// range for next DIE in the chain.
+struct DWARFDebugInfoEntryInlinedChain {
+  DWARFDebugInfoEntryInlinedChain() : CU(0) {}
+  SmallVector<DWARFDebugInfoEntryMinimal, 4> DIEs;
+  const DWARFCompileUnit *CU;
 };
 
 }

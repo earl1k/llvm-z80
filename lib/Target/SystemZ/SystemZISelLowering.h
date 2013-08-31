@@ -32,6 +32,7 @@ namespace SystemZISD {
     // is the target address.  The arguments start at operand 2.
     // There is an optional glue operand at the end.
     CALL,
+    SIBCALL,
 
     // Wraps a TargetGlobalAddress that should be loaded using PC-relative
     // accesses (LARL).  Operand 0 is the address.
@@ -43,6 +44,10 @@ namespace SystemZISD {
 
     // Likewise unsigned integer comparison.
     UCMP,
+
+    // Test under mask.  The first operand is ANDed with the second operand
+    // and the condition codes are set on the result.
+    TM,
 
     // Branches if a condition is true.  Operand 0 is the chain operand;
     // operand 1 is the 4-bit condition-code mask, with bit N in
@@ -73,12 +78,41 @@ namespace SystemZISD {
     UDIVREM32,
     UDIVREM64,
 
-    // Use MVC to copy bytes from one memory location to another.
-    // The first operand is the target address, the second operand is the
-    // source address, and the third operand is the constant length.
+    // Use a series of MVCs to copy bytes from one memory location to another.
+    // The operands are:
+    // - the target address
+    // - the source address
+    // - the constant length
+    //
     // This isn't a memory opcode because we'd need to attach two
     // MachineMemOperands rather than one.
     MVC,
+
+    // Like MVC, but implemented as a loop that handles X*256 bytes
+    // followed by straight-line code to handle the rest (if any).
+    // The value of X is passed as an additional operand.
+    MVC_LOOP,
+
+    // Use CLC to compare two blocks of memory, with the same comments
+    // as for MVC and MVC_LOOP.
+    CLC,
+    CLC_LOOP,
+
+    // Use an MVST-based sequence to implement stpcpy().
+    STPCPY,
+
+    // Use a CLST-based sequence to implement strcmp().  The two input operands
+    // are the addresses of the strings to compare.
+    STRCMP,
+
+    // Use an SRST-based sequence to search a block of memory.  The first
+    // operand is the end address, the second is the start, and the third
+    // is the character to search for.  CC is set to 1 on success and 2
+    // on failure.
+    SEARCH_STRING,
+
+    // Store the CC value in bits 29 and 28 of an integer.
+    IPM,
 
     // Wrappers around the inner loop of an 8- or 16-bit ATOMIC_SWAP or
     // ATOMIC_LOAD_<op>.
@@ -111,7 +145,12 @@ namespace SystemZISD {
     //            operand into the high bits
     // Operand 4: the negative of operand 2, for rotating the other way
     // Operand 5: the width of the field in bits (8 or 16)
-    ATOMIC_CMP_SWAPW
+    ATOMIC_CMP_SWAPW,
+
+    // Prefetch from the second operand using the 4-bit control code in
+    // the first operand.  The code is 1 for a load prefetch and 2 for
+    // a store prefetch.
+    PREFETCH
   };
 }
 
@@ -126,12 +165,17 @@ public:
   virtual MVT getScalarShiftAmountTy(EVT LHSTy) const LLVM_OVERRIDE {
     return MVT::i32;
   }
-  virtual EVT getSetCCResultType(LLVMContext &, EVT) const {
+  virtual EVT getSetCCResultType(LLVMContext &, EVT) const LLVM_OVERRIDE {
     return MVT::i32;
   }
   virtual bool isFMAFasterThanFMulAndFAdd(EVT VT) const LLVM_OVERRIDE;
-  virtual bool isFPImmLegal(const APFloat &Imm, EVT VT) const;
-  virtual bool allowsUnalignedMemoryAccesses(EVT VT, bool *Fast) const;
+  virtual bool isFPImmLegal(const APFloat &Imm, EVT VT) const LLVM_OVERRIDE;
+  virtual bool isLegalAddressingMode(const AddrMode &AM, Type *Ty) const
+     LLVM_OVERRIDE;
+  virtual bool allowsUnalignedMemoryAccesses(EVT VT, bool *Fast) const
+    LLVM_OVERRIDE;
+  virtual bool isTruncateFree(Type *, Type *) const LLVM_OVERRIDE;
+  virtual bool isTruncateFree(EVT, EVT) const LLVM_OVERRIDE;
   virtual const char *getTargetNodeName(unsigned Opcode) const LLVM_OVERRIDE;
   virtual std::pair<unsigned, const TargetRegisterClass *>
     getRegForInlineAsmConstraint(const std::string &Constraint,
@@ -151,6 +195,8 @@ public:
                                 MachineBasicBlock *BB) const LLVM_OVERRIDE;
   virtual SDValue LowerOperation(SDValue Op,
                                  SelectionDAG &DAG) const LLVM_OVERRIDE;
+  virtual bool allowTruncateForTailCall(Type *, Type *) const LLVM_OVERRIDE;
+  virtual bool mayBeEmittedAsTailCall(CallInst *CI) const LLVM_OVERRIDE;
   virtual SDValue
     LowerFormalArguments(SDValue Chain,
                          CallingConv::ID CallConv, bool isVarArg,
@@ -186,6 +232,7 @@ private:
   SDValue lowerVASTART(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerVACOPY(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerSMUL_LOHI(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerUMUL_LOHI(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSDIVREM(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerUDIVREM(SDValue Op, SelectionDAG &DAG) const;
@@ -196,6 +243,7 @@ private:
   SDValue lowerATOMIC_CMP_SWAP(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSTACKSAVE(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerPREFETCH(SDValue Op, SelectionDAG &DAG) const;
 
   // If the last instruction before MBBI in MBB was some form of COMPARE,
   // try to replace it with a COMPARE AND BRANCH just before MBBI.
@@ -211,7 +259,8 @@ private:
                                 MachineBasicBlock *BB) const;
   MachineBasicBlock *emitCondStore(MachineInstr *MI,
                                    MachineBasicBlock *BB,
-                                   unsigned StoreOpcode, bool Invert) const;
+                                   unsigned StoreOpcode, unsigned STOCOpcode,
+                                   bool Invert) const;
   MachineBasicBlock *emitExt128(MachineInstr *MI,
                                 MachineBasicBlock *MBB,
                                 bool ClearEven, unsigned SubReg) const;
@@ -226,8 +275,12 @@ private:
                                           unsigned BitSize) const;
   MachineBasicBlock *emitAtomicCmpSwapW(MachineInstr *MI,
                                         MachineBasicBlock *BB) const;
-  MachineBasicBlock *emitMVCWrapper(MachineInstr *MI,
-                                    MachineBasicBlock *BB) const;
+  MachineBasicBlock *emitMemMemWrapper(MachineInstr *MI,
+                                       MachineBasicBlock *BB,
+                                       unsigned Opcode) const;
+  MachineBasicBlock *emitStringWrapper(MachineInstr *MI,
+                                       MachineBasicBlock *BB,
+                                       unsigned Opcode) const;
 };
 } // end namespace llvm
 

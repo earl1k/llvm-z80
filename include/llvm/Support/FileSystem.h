@@ -125,8 +125,25 @@ inline perms operator~(perms x) {
   return static_cast<perms>(~static_cast<unsigned short>(x));
 }
 
+class UniqueID {
+  uint64_t Device;
+  uint64_t File;
 
- 
+public:
+  UniqueID() {}
+  UniqueID(uint64_t Device, uint64_t File) : Device(Device), File(File) {}
+  bool operator==(const UniqueID &Other) const {
+    return Device == Other.Device && File == Other.File;
+  }
+  bool operator!=(const UniqueID &Other) const { return !(*this == Other); }
+  bool operator<(const UniqueID &Other) const {
+    return Device < Other.Device ||
+           (Device == Other.Device && File < Other.File);
+  }
+  uint64_t getDevice() const { return Device; }
+  uint64_t getFile() const { return File; }
+};
+
 /// file_status - Represents the result of a call to stat and friends. It has
 ///               a platform specific member to store the result.
 class file_status
@@ -148,7 +165,6 @@ class file_status
   uint32_t FileIndexLow;
   #endif
   friend bool equivalent(file_status A, file_status B);
-  friend error_code getUniqueID(const Twine Path, uint64_t &Result);
   file_type Type;
   perms Perms;
 public:
@@ -176,6 +192,7 @@ public:
   file_type type() const { return Type; }
   perms permissions() const { return Perms; }
   TimeValue getLastModificationTime() const;
+  UniqueID getUniqueID() const;
 
   #if defined(LLVM_ON_UNIX)
   uint32_t getUser() const { return fs_st_uid; }
@@ -664,7 +681,7 @@ file_magic identify_magic(StringRef magic);
 ///          platform specific error_code.
 error_code identify_magic(const Twine &path, file_magic &result);
 
-error_code getUniqueID(const Twine Path, uint64_t &Result);
+error_code getUniqueID(const Twine Path, UniqueID &Result);
 
 /// This class represents a memory mapped file. It is based on
 /// boost::iostreams::mapped_file.
@@ -852,7 +869,7 @@ public:
   }
 
   /// Construct end iterator.
-  directory_iterator() : State(new detail::DirIterState) {}
+  directory_iterator() : State(0) {}
 
   // No operator++ because we need error_code.
   directory_iterator &increment(error_code &ec) {
@@ -864,6 +881,12 @@ public:
   const directory_entry *operator->() const { return &State->CurrentEntry; }
 
   bool operator==(const directory_iterator &RHS) const {
+    if (State == RHS.State)
+      return true;
+    if (RHS.State == 0)
+      return State->CurrentEntry == directory_entry();
+    if (State == 0)
+      return RHS.State->CurrentEntry == directory_entry();
     return State->CurrentEntry == RHS.State->CurrentEntry;
   }
 
@@ -903,7 +926,7 @@ public:
   }
   // No operator++ because we need error_code.
   recursive_directory_iterator &increment(error_code &ec) {
-    static const directory_iterator end_itr;
+    const directory_iterator end_itr;
 
     if (State->HasNoPushRequest)
       State->HasNoPushRequest = false;
@@ -950,7 +973,7 @@ public:
     assert(State && "Cannot pop and end itertor!");
     assert(State->Level > 0 && "Cannot pop an iterator with level < 1");
 
-    static const directory_iterator end_itr;
+    const directory_iterator end_itr;
     error_code ec;
     do {
       if (ec)

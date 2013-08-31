@@ -27,9 +27,9 @@ defm CondStoreF64 : CondStores<FP64, nonvolatile_store,
 
 // Load zero.
 let neverHasSideEffects = 1, isAsCheapAsAMove = 1, isMoveImm = 1 in {
-  def LZER : InherentRRE<"lze", 0xB374, FP32,  (fpimm0)>;
-  def LZDR : InherentRRE<"lzd", 0xB375, FP64,  (fpimm0)>;
-  def LZXR : InherentRRE<"lzx", 0xB376, FP128, (fpimm0)>;
+  def LZER : InherentRRE<"lzer", 0xB374, FP32,  (fpimm0)>;
+  def LZDR : InherentRRE<"lzdr", 0xB375, FP64,  (fpimm0)>;
+  def LZXR : InherentRRE<"lzxr", 0xB376, FP128, (fpimm0)>;
 }
 
 // Moves between two floating-point registers.
@@ -38,6 +38,17 @@ let neverHasSideEffects = 1 in {
   def LDR : UnaryRR <"ld", 0x28,   null_frag, FP64,  FP64>;
   def LXR : UnaryRRE<"lx", 0xB365, null_frag, FP128, FP128>;
 }
+
+// Moves between two floating-point registers that also set the condition
+// codes.
+let Defs = [CC], CCValues = 0xF, CompareZeroCCMask = 0xF in {
+  defm LTEBR : LoadAndTestRRE<"lteb", 0xB302, FP32>;
+  defm LTDBR : LoadAndTestRRE<"ltdb", 0xB312, FP64>;
+  defm LTXBR : LoadAndTestRRE<"ltxb", 0xB342, FP128>;
+}
+def : CompareZeroFP<LTEBRCompare, FP32>;
+def : CompareZeroFP<LTDBRCompare, FP64>;
+def : CompareZeroFP<LTXBRCompare, FP128>;
 
 // Moves between 64-bit integer and floating-point registers.
 def LGDR : UnaryRRE<"lgd", 0xB3CD, bitconvert, GR64, FP64>;
@@ -75,9 +86,9 @@ def : CopySign128<FP64,  (CPSDRdd (EXTRACT_SUBREG FP128:$src1, subreg_high),
 def : CopySign128<FP128, (CPSDRdd (EXTRACT_SUBREG FP128:$src1, subreg_high),
                                   (EXTRACT_SUBREG FP128:$src2, subreg_high))>;
 
-defm LoadStoreF32  : MVCLoadStore<load, store, f32,  MVCWrapper, 4>;
-defm LoadStoreF64  : MVCLoadStore<load, store, f64,  MVCWrapper, 8>;
-defm LoadStoreF128 : MVCLoadStore<load, store, f128, MVCWrapper, 16>;
+defm LoadStoreF32  : MVCLoadStore<load, store, f32,  MVCSequence, 4>;
+defm LoadStoreF64  : MVCLoadStore<load, store, f64,  MVCSequence, 8>;
+defm LoadStoreF128 : MVCLoadStore<load, store, f128, MVCSequence, 16>;
 
 //===----------------------------------------------------------------------===//
 // Load instructions
@@ -138,15 +149,13 @@ def LXEB : UnaryRXE<"lxeb", 0xED06, extloadf32, FP128, 4>;
 def LXDB : UnaryRXE<"lxdb", 0xED05, extloadf64, FP128, 8>;
 
 // Convert a signed integer register value to a floating-point one.
-let Defs = [CC] in {
-  def CEFBR : UnaryRRE<"cefb", 0xB394, sint_to_fp, FP32,  GR32>;
-  def CDFBR : UnaryRRE<"cdfb", 0xB395, sint_to_fp, FP64,  GR32>;
-  def CXFBR : UnaryRRE<"cxfb", 0xB396, sint_to_fp, FP128, GR32>;
+def CEFBR : UnaryRRE<"cefb", 0xB394, sint_to_fp, FP32,  GR32>;
+def CDFBR : UnaryRRE<"cdfb", 0xB395, sint_to_fp, FP64,  GR32>;
+def CXFBR : UnaryRRE<"cxfb", 0xB396, sint_to_fp, FP128, GR32>;
 
-  def CEGBR : UnaryRRE<"cegb", 0xB3A4, sint_to_fp, FP32,  GR64>;
-  def CDGBR : UnaryRRE<"cdgb", 0xB3A5, sint_to_fp, FP64,  GR64>;
-  def CXGBR : UnaryRRE<"cxgb", 0xB3A6, sint_to_fp, FP128, GR64>;
-}
+def CEGBR : UnaryRRE<"cegb", 0xB3A4, sint_to_fp, FP32,  GR64>;
+def CDGBR : UnaryRRE<"cdgb", 0xB3A5, sint_to_fp, FP64,  GR64>;
+def CXGBR : UnaryRRE<"cxgb", 0xB3A6, sint_to_fp, FP128, GR64>;
 
 // Convert a floating-point register value to a signed integer value,
 // with the second operand (modifier M3) specifying the rounding mode.
@@ -174,21 +183,21 @@ def : Pat<(i64 (fp_to_sint FP128:$src)), (CGXBR 5, FP128:$src)>;
 //===----------------------------------------------------------------------===//
 
 // Negation (Load Complement).
-let Defs = [CC] in {
+let Defs = [CC], CCValues = 0xF, CompareZeroCCMask = 0xF in {
   def LCEBR : UnaryRRE<"lceb", 0xB303, fneg, FP32,  FP32>;
   def LCDBR : UnaryRRE<"lcdb", 0xB313, fneg, FP64,  FP64>;
   def LCXBR : UnaryRRE<"lcxb", 0xB343, fneg, FP128, FP128>;
 }
 
 // Absolute value (Load Positive).
-let Defs = [CC] in {
+let Defs = [CC], CCValues = 0xF, CompareZeroCCMask = 0xF in {
   def LPEBR : UnaryRRE<"lpeb", 0xB300, fabs, FP32,  FP32>;
   def LPDBR : UnaryRRE<"lpdb", 0xB310, fabs, FP64,  FP64>;
   def LPXBR : UnaryRRE<"lpxb", 0xB340, fabs, FP128, FP128>;
 }
 
 // Negative absolute value (Load Negative).
-let Defs = [CC] in {
+let Defs = [CC], CCValues = 0xF, CompareZeroCCMask = 0xF in {
   def LNEBR : UnaryRRE<"lneb", 0xB301, fnabs, FP32,  FP32>;
   def LNDBR : UnaryRRE<"lndb", 0xB311, fnabs, FP64,  FP64>;
   def LNXBR : UnaryRRE<"lnxb", 0xB341, fnabs, FP128, FP128>;
@@ -203,16 +212,19 @@ def SQEB : UnaryRXE<"sqeb", 0xED14, loadu<fsqrt>, FP32, 4>;
 def SQDB : UnaryRXE<"sqdb", 0xED15, loadu<fsqrt>, FP64, 8>;
 
 // Round to an integer, with the second operand (modifier M3) specifying
-// the rounding mode.
-//
-// These forms always check for inexact conditions.  z196 added versions
-// that allow this to suppressed (as for fnearbyint), but we don't yet
-// support -march=z196.
-let Defs = [CC] in {
-  def FIEBR : UnaryRRF<"fieb", 0xB357, FP32,  FP32>;
-  def FIDBR : UnaryRRF<"fidb", 0xB35F, FP64,  FP64>;
-  def FIXBR : UnaryRRF<"fixb", 0xB347, FP128, FP128>;
-}
+// the rounding mode.  These forms always check for inexact conditions.
+def FIEBR : UnaryRRF<"fieb", 0xB357, FP32,  FP32>;
+def FIDBR : UnaryRRF<"fidb", 0xB35F, FP64,  FP64>;
+def FIXBR : UnaryRRF<"fixb", 0xB347, FP128, FP128>;
+
+// Extended forms of the previous three instructions.  M4 can be set to 4
+// to suppress detection of inexact conditions.
+def FIEBRA : UnaryRRF4<"fiebra", 0xB357, FP32,  FP32>,
+             Requires<[FeatureFPExtension]>;
+def FIDBRA : UnaryRRF4<"fidbra", 0xB35F, FP64,  FP64>,
+             Requires<[FeatureFPExtension]>;
+def FIXBRA : UnaryRRF4<"fixbra", 0xB347, FP128, FP128>,
+             Requires<[FeatureFPExtension]>;
 
 // frint rounds according to the current mode (modifier 0) and detects
 // inexact conditions.
@@ -220,12 +232,42 @@ def : Pat<(frint FP32:$src),  (FIEBR 0, FP32:$src)>;
 def : Pat<(frint FP64:$src),  (FIDBR 0, FP64:$src)>;
 def : Pat<(frint FP128:$src), (FIXBR 0, FP128:$src)>;
 
+let Predicates = [FeatureFPExtension] in {
+  // fnearbyint is like frint but does not detect inexact conditions.
+  def : Pat<(fnearbyint FP32:$src),  (FIEBRA 0, FP32:$src,  4)>;
+  def : Pat<(fnearbyint FP64:$src),  (FIDBRA 0, FP64:$src,  4)>;
+  def : Pat<(fnearbyint FP128:$src), (FIXBRA 0, FP128:$src, 4)>;
+
+  // floor is no longer allowed to raise an inexact condition,
+  // so restrict it to the cases where the condition can be suppressed.
+  // Mode 7 is round towards -inf.
+  def : Pat<(ffloor FP32:$src),  (FIEBRA 7, FP32:$src,  4)>;
+  def : Pat<(ffloor FP64:$src),  (FIDBRA 7, FP64:$src,  4)>;
+  def : Pat<(ffloor FP128:$src), (FIXBRA 7, FP128:$src, 4)>;
+
+  // Same idea for ceil, where mode 6 is round towards +inf.
+  def : Pat<(fceil FP32:$src),  (FIEBRA 6, FP32:$src,  4)>;
+  def : Pat<(fceil FP64:$src),  (FIDBRA 6, FP64:$src,  4)>;
+  def : Pat<(fceil FP128:$src), (FIXBRA 6, FP128:$src, 4)>;
+
+  // Same idea for trunc, where mode 5 is round towards zero.
+  def : Pat<(ftrunc FP32:$src),  (FIEBRA 5, FP32:$src,  4)>;
+  def : Pat<(ftrunc FP64:$src),  (FIDBRA 5, FP64:$src,  4)>;
+  def : Pat<(ftrunc FP128:$src), (FIXBRA 5, FP128:$src, 4)>;
+
+  // Same idea for round, where mode 1 is round towards nearest with
+  // ties away from zero.
+  def : Pat<(frnd FP32:$src),  (FIEBRA 1, FP32:$src,  4)>;
+  def : Pat<(frnd FP64:$src),  (FIDBRA 1, FP64:$src,  4)>;
+  def : Pat<(frnd FP128:$src), (FIXBRA 1, FP128:$src, 4)>;
+}
+
 //===----------------------------------------------------------------------===//
 // Binary arithmetic
 //===----------------------------------------------------------------------===//
 
 // Addition.
-let Defs = [CC] in {
+let Defs = [CC], CCValues = 0xF, CompareZeroCCMask = 0xF in {
   let isCommutable = 1 in {
     def AEBR : BinaryRRE<"aeb", 0xB30A, fadd, FP32,  FP32>;
     def ADBR : BinaryRRE<"adb", 0xB31A, fadd, FP64,  FP64>;
@@ -236,7 +278,7 @@ let Defs = [CC] in {
 }
 
 // Subtraction.
-let Defs = [CC] in {
+let Defs = [CC], CCValues = 0xF, CompareZeroCCMask = 0xF in {
   def SEBR : BinaryRRE<"seb", 0xB30B, fsub, FP32,  FP32>;
   def SDBR : BinaryRRE<"sdb", 0xB31B, fsub, FP64,  FP64>;
   def SXBR : BinaryRRE<"sxb", 0xB34B, fsub, FP128, FP128>;
@@ -306,7 +348,7 @@ def DDB : BinaryRXE<"ddb", 0xED1D, fdiv, FP64, load, 8>;
 // Comparisons
 //===----------------------------------------------------------------------===//
 
-let Defs = [CC] in {
+let Defs = [CC], CCValues = 0xF in {
   def CEBR : CompareRRE<"ceb", 0xB309, z_cmp, FP32,  FP32>;
   def CDBR : CompareRRE<"cdb", 0xB319, z_cmp, FP64,  FP64>;
   def CXBR : CompareRRE<"cxb", 0xB349, z_cmp, FP128, FP128>;

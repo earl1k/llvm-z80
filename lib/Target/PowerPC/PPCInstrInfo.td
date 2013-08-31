@@ -785,6 +785,20 @@ multiclass XForm_26r<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
   }
 }
 
+multiclass XForm_28r<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
+                    string asmbase, string asmstr, InstrItinClass itin,
+                    list<dag> pattern> {
+  let BaseName = asmbase in {
+    def NAME : XForm_28<opcode, xo, OOL, IOL,
+                       !strconcat(asmbase, !strconcat(" ", asmstr)), itin,
+                       pattern>, RecFormRel;
+    let Defs = [CR1] in
+    def o    : XForm_28<opcode, xo, OOL, IOL,
+                       !strconcat(asmbase, !strconcat(". ", asmstr)), itin,
+                       []>, isDOT, RecFormRel;
+  }
+}
+
 multiclass AForm_1r<bits<6> opcode, bits<5> xo, dag OOL, dag IOL,
                     string asmbase, string asmstr, InstrItinClass itin,
                     list<dag> pattern> {
@@ -1686,23 +1700,13 @@ let Uses = [RM] in {
                           "frsp", "$frD, $frB", FPGeneral,
                           [(set f32:$frD, (fround f64:$frB))]>;
 
-  // The frin -> nearbyint mapping is valid only in fast-math mode.
   let Interpretation64Bit = 1 in
   defm FRIND  : XForm_26r<63, 392, (outs f8rc:$frD), (ins f8rc:$frB),
                           "frin", "$frD, $frB", FPGeneral,
-                          [(set f64:$frD, (fnearbyint f64:$frB))]>;
+                          [(set f64:$frD, (frnd f64:$frB))]>;
   defm FRINS  : XForm_26r<63, 392, (outs f4rc:$frD), (ins f4rc:$frB),
                           "frin", "$frD, $frB", FPGeneral,
-                          [(set f32:$frD, (fnearbyint f32:$frB))]>;
-  }
-
-  // These pseudos expand to rint but also set FE_INEXACT when the result does
-  // not equal the argument.
-  let usesCustomInserter = 1, Defs = [RM] in { // FIXME: Model FPSCR!
-    def FRINDrint : Pseudo<(outs f8rc:$frD), (ins f8rc:$frB),
-                            "#FRINDrint", [(set f64:$frD, (frint f64:$frB))]>;
-    def FRINSrint : Pseudo<(outs f4rc:$frD), (ins f4rc:$frB),
-                            "#FRINSrint", [(set f32:$frD, (frint f32:$frB))]>;
+                          [(set f32:$frD, (frnd f32:$frB))]>;
   }
 
   let neverHasSideEffects = 1 in {
@@ -1771,6 +1775,14 @@ let Interpretation64Bit = 1 in
 defm FNEGD  : XForm_26r<63, 40, (outs f8rc:$frD), (ins f8rc:$frB),
                         "fneg", "$frD, $frB", FPGeneral,
                         [(set f64:$frD, (fneg f64:$frB))]>;
+
+defm FCPSGNS : XForm_28r<63, 8, (outs f4rc:$frD), (ins f4rc:$frA, f4rc:$frB),
+                        "fcpsgn", "$frD, $frA, $frB", FPGeneral,
+                        [(set f32:$frD, (fcopysign f32:$frB, f32:$frA))]>;
+let Interpretation64Bit = 1 in
+defm FCPSGND : XForm_28r<63, 8, (outs f8rc:$frD), (ins f8rc:$frA, f8rc:$frB),
+                        "fcpsgn", "$frD, $frA, $frB", FPGeneral,
+                        [(set f64:$frD, (fcopysign f64:$frB, f64:$frA))]>;
 
 // Reciprocal estimates.
 defm FRE      : XForm_26r<63, 24, (outs f8rc:$frD), (ins f8rc:$frB),
@@ -2279,6 +2291,12 @@ def : Pat<(fma (fneg f32:$A), f32:$C, f32:$B),
           (FNMSUBS $A, $C, $B)>;
 def : Pat<(fma f32:$A, (fneg f32:$C), f32:$B),
           (FNMSUBS $A, $C, $B)>;
+
+// FCOPYSIGN's operand types need not agree.
+def : Pat<(fcopysign f64:$frB, f32:$frA),
+          (FCPSGND (COPY_TO_REGCLASS $frA, F8RC), $frB)>;
+def : Pat<(fcopysign f32:$frB, f64:$frA),
+          (FCPSGNS (COPY_TO_REGCLASS $frA, F4RC), $frB)>;
 
 include "PPCInstrAltivec.td"
 include "PPCInstr64Bit.td"

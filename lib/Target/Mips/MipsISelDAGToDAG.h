@@ -57,6 +57,11 @@ private:
   virtual bool selectAddrRegImm(SDValue Addr, SDValue &Base,
                                 SDValue &Offset) const;
 
+  // Complex Pattern.
+  /// (reg + reg).
+  virtual bool selectAddrRegReg(SDValue Addr, SDValue &Base,
+                                SDValue &Offset) const;
+
   /// Fall back on this function if all else fails.
   virtual bool selectAddrDefault(SDValue Addr, SDValue &Base,
                                  SDValue &Offset) const;
@@ -64,6 +69,9 @@ private:
   /// Match integer address pattern.
   virtual bool selectIntAddr(SDValue Addr, SDValue &Base,
                              SDValue &Offset) const;
+
+  virtual bool selectIntAddrMM(SDValue Addr, SDValue &Base,
+                               SDValue &Offset) const;
 
   virtual bool selectAddr16(SDNode *Parent, SDValue N, SDValue &Base,
                             SDValue &Offset, SDValue &Alias);

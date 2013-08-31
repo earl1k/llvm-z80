@@ -195,13 +195,6 @@ A documentation comment that uses all Doxygen features in a preferred way:
   /// \returns true on success.
   bool fooBar(bool Baz, StringRef Quux, std::vector<int> &Result);
 
-Don't duplicate the documentation comment in the header file and in the
-implementation file.  Put the documentation comments for public APIs into the
-header file.  Documentation comments for private APIs can go to the
-implementation file.  In any case, implementation files can include additional
-comments (not necessarily in Doxygen markup) to explain implementation details
-as needed.
-
 Don't duplicate function or class name at the beginning of the comment.
 For humans it is obvious which function or class is being documented;
 automatic documentation processing tools are smart enough to bind the comment
@@ -796,7 +789,9 @@ In general, names should be in camel case (e.g. ``TextFileReader`` and
   
 As an exception, classes that mimic STL classes can have member names in STL's
 style of lower-case words separated by underscores (e.g. ``begin()``,
-``push_back()``, and ``empty()``).
+``push_back()``, and ``empty()``). Classes that provide multiple
+iterators should add a singular prefix to ``begin()`` and ``end()``
+(e.g. ``global_begin()`` and ``use_begin()``).
 
 Here are some examples of good and bad names:
 

@@ -147,3 +147,28 @@ define double @f7(double *%ptr0) {
 
   ret double %sel10
 }
+
+; Check comparison with zero.
+define i64 @f8(i64 %a, i64 %b, double %f) {
+; CHECK-LABEL: f8:
+; CHECK: ltdbr %f0, %f0
+; CHECK-NEXT: je
+; CHECK: lgr %r2, %r3
+; CHECK: br %r14
+  %cond = fcmp oeq double %f, 0.0
+  %res = select i1 %cond, i64 %a, i64 %b
+  ret i64 %res
+}
+
+; Check the comparison can be reversed if that allows CDB to be used,
+define i64 @f9(i64 %a, i64 %b, double %f2, double *%ptr) {
+; CHECK-LABEL: f9:
+; CHECK: cdb %f0, 0(%r4)
+; CHECK-NEXT: jl {{\.L.*}}
+; CHECK: lgr %r2, %r3
+; CHECK: br %r14
+  %f1 = load double *%ptr
+  %cond = fcmp ogt double %f1, %f2
+  %res = select i1 %cond, i64 %a, i64 %b
+  ret i64 %res
+}

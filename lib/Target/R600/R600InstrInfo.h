@@ -68,6 +68,7 @@ namespace llvm {
 
   bool isTransOnly(unsigned Opcode) const;
   bool isTransOnly(const MachineInstr *MI) const;
+  bool isExport(unsigned Opcode) const;
 
   bool usesVertexCache(unsigned Opcode) const;
   bool usesVertexCache(const MachineInstr *MI) const;
@@ -75,6 +76,13 @@ namespace llvm {
   bool usesTextureCache(const MachineInstr *MI) const;
 
   bool mustBeLastInClause(unsigned Opcode) const;
+
+  /// \returns The operand index for the given source number.  Legal values
+  /// for SrcNum are 0, 1, and 2.
+  int getSrcIdx(unsigned Opcode, unsigned SrcNum) const;
+  /// \returns The operand Index for the Sel operand given an index to one
+  /// of the instruction's src operands.
+  int getSelIdx(unsigned Opcode, unsigned SrcIdx) const;
 
   /// \returns a pair for each src of an ALU instructions.
   /// The first member of a pair is the register id.

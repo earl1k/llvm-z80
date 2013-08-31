@@ -31,16 +31,16 @@ MipsSETargetLowering::MipsSETargetLowering(MipsTargetMachine &TM)
 
   clearRegisterClasses();
 
-  addRegisterClass(MVT::i32, &Mips::CPURegsRegClass);
+  addRegisterClass(MVT::i32, &Mips::GPR32RegClass);
 
   if (HasMips64)
-    addRegisterClass(MVT::i64, &Mips::CPU64RegsRegClass);
+    addRegisterClass(MVT::i64, &Mips::GPR64RegClass);
 
   if (Subtarget->hasDSP()) {
     MVT::SimpleValueType VecTys[2] = {MVT::v2i16, MVT::v4i8};
 
     for (unsigned i = 0; i < array_lengthof(VecTys); ++i) {
-      addRegisterClass(VecTys[i], &Mips::DSPRegsRegClass);
+      addRegisterClass(VecTys[i], &Mips::DSPRRegClass);
 
       // Expand all builtin opcodes.
       for (unsigned Opc = 0; Opc < ISD::BUILTIN_OP_END; ++Opc)
@@ -53,6 +53,20 @@ MipsSETargetLowering::MipsSETargetLowering(MipsTargetMachine &TM)
       setOperationAction(ISD::BITCAST, VecTys[i], Legal);
     }
 
+    // Expand all truncating stores and extending loads.
+    unsigned FirstVT = (unsigned)MVT::FIRST_VECTOR_VALUETYPE;
+    unsigned LastVT = (unsigned)MVT::LAST_VECTOR_VALUETYPE;
+
+    for (unsigned VT0 = FirstVT; VT0 <= LastVT; ++VT0) {
+      for (unsigned VT1 = FirstVT; VT1 <= LastVT; ++VT1)
+        setTruncStoreAction((MVT::SimpleValueType)VT0,
+                            (MVT::SimpleValueType)VT1, Expand);
+
+      setLoadExtAction(ISD::SEXTLOAD, (MVT::SimpleValueType)VT0, Expand);
+      setLoadExtAction(ISD::ZEXTLOAD, (MVT::SimpleValueType)VT0, Expand);
+      setLoadExtAction(ISD::EXTLOAD, (MVT::SimpleValueType)VT0, Expand);
+    }
+
     setTargetDAGCombine(ISD::SHL);
     setTargetDAGCombine(ISD::SRA);
     setTargetDAGCombine(ISD::SRL);
@@ -63,12 +77,22 @@ MipsSETargetLowering::MipsSETargetLowering(MipsTargetMachine &TM)
   if (Subtarget->hasDSPR2())
     setOperationAction(ISD::MUL, MVT::v2i16, Legal);
 
-  if (!TM.Options.UseSoftFloat) {
+  if (Subtarget->hasMSA()) {
+    addMSAType(MVT::v16i8, &Mips::MSA128BRegClass);
+    addMSAType(MVT::v8i16, &Mips::MSA128HRegClass);
+    addMSAType(MVT::v4i32, &Mips::MSA128WRegClass);
+    addMSAType(MVT::v2i64, &Mips::MSA128DRegClass);
+    addMSAType(MVT::v8f16, &Mips::MSA128HRegClass);
+    addMSAType(MVT::v4f32, &Mips::MSA128WRegClass);
+    addMSAType(MVT::v2f64, &Mips::MSA128DRegClass);
+  }
+
+  if (!Subtarget->mipsSEUsesSoftFloat()) {
     addRegisterClass(MVT::f32, &Mips::FGR32RegClass);
 
     // When dealing with single precision only, use libcalls
     if (!Subtarget->isSingleFloat()) {
-      if (HasMips64)
+      if (Subtarget->isFP64bit())
         addRegisterClass(MVT::f64, &Mips::FGR64RegClass);
       else
         addRegisterClass(MVT::f64, &Mips::AFGR64RegClass);
@@ -101,6 +125,10 @@ MipsSETargetLowering::MipsSETargetLowering(MipsTargetMachine &TM)
   setTargetDAGCombine(ISD::SUBE);
   setTargetDAGCombine(ISD::MUL);
 
+  setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
+  setOperationAction(ISD::INTRINSIC_W_CHAIN, MVT::Other, Custom);
+  setOperationAction(ISD::INTRINSIC_VOID, MVT::Other, Custom);
+
   computeRegisterProperties();
 }
 
@@ -109,6 +137,18 @@ llvm::createMipsSETargetLowering(MipsTargetMachine &TM) {
   return new MipsSETargetLowering(TM);
 }
 
+void MipsSETargetLowering::
+addMSAType(MVT::SimpleValueType Ty, const TargetRegisterClass *RC) {
+  addRegisterClass(Ty, RC);
+
+  // Expand all builtin opcodes.
+  for (unsigned Opc = 0; Opc < ISD::BUILTIN_OP_END; ++Opc)
+    setOperationAction(Opc, Ty, Expand);
+
+  setOperationAction(ISD::LOAD, Ty, Legal);
+  setOperationAction(ISD::STORE, Ty, Legal);
+  setOperationAction(ISD::BITCAST, Ty, Legal);
+}
 
 bool
 MipsSETargetLowering::allowsUnalignedMemoryAccesses(EVT VT, bool *Fast) const {
@@ -138,6 +178,7 @@ SDValue MipsSETargetLowering::LowerOperation(SDValue Op,
                                           DAG);
   case ISD::INTRINSIC_WO_CHAIN: return lowerINTRINSIC_WO_CHAIN(Op, DAG);
   case ISD::INTRINSIC_W_CHAIN:  return lowerINTRINSIC_W_CHAIN(Op, DAG);
+  case ISD::INTRINSIC_VOID:     return lowerINTRINSIC_VOID(Op, DAG);
   }
 
   return MipsTargetLowering::LowerOperation(Op, DAG);
@@ -514,6 +555,26 @@ MipsSETargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
     return MipsTargetLowering::EmitInstrWithCustomInserter(MI, BB);
   case Mips::BPOSGE32_PSEUDO:
     return emitBPOSGE32(MI, BB);
+  case Mips::SNZ_B_PSEUDO:
+    return emitMSACBranchPseudo(MI, BB, Mips::BNZ_B);
+  case Mips::SNZ_H_PSEUDO:
+    return emitMSACBranchPseudo(MI, BB, Mips::BNZ_H);
+  case Mips::SNZ_W_PSEUDO:
+    return emitMSACBranchPseudo(MI, BB, Mips::BNZ_W);
+  case Mips::SNZ_D_PSEUDO:
+    return emitMSACBranchPseudo(MI, BB, Mips::BNZ_D);
+  case Mips::SNZ_V_PSEUDO:
+    return emitMSACBranchPseudo(MI, BB, Mips::BNZ_V);
+  case Mips::SZ_B_PSEUDO:
+    return emitMSACBranchPseudo(MI, BB, Mips::BZ_B);
+  case Mips::SZ_H_PSEUDO:
+    return emitMSACBranchPseudo(MI, BB, Mips::BZ_H);
+  case Mips::SZ_W_PSEUDO:
+    return emitMSACBranchPseudo(MI, BB, Mips::BZ_W);
+  case Mips::SZ_D_PSEUDO:
+    return emitMSACBranchPseudo(MI, BB, Mips::BZ_D);
+  case Mips::SZ_V_PSEUDO:
+    return emitMSACBranchPseudo(MI, BB, Mips::BZ_V);
   }
 }
 
@@ -650,6 +711,16 @@ static SDValue lowerDSPIntr(SDValue Op, SelectionDAG &DAG, unsigned Opc) {
   return DAG.getMergeValues(Vals, 2, DL);
 }
 
+static SDValue lowerMSABranchIntr(SDValue Op, SelectionDAG &DAG, unsigned Opc) {
+  SDLoc DL(Op);
+  SDValue Value = Op->getOperand(1);
+  EVT ResTy = Op->getValueType(0);
+
+  SDValue Result = DAG.getNode(Opc, DL, ResTy, Value);
+
+  return Result;
+}
+
 SDValue MipsSETargetLowering::lowerINTRINSIC_WO_CHAIN(SDValue Op,
                                                       SelectionDAG &DAG) const {
   switch (cast<ConstantSDNode>(Op->getOperand(0))->getZExtValue()) {
@@ -687,12 +758,41 @@ SDValue MipsSETargetLowering::lowerINTRINSIC_WO_CHAIN(SDValue Op,
     return lowerDSPIntr(Op, DAG, MipsISD::MSub);
   case Intrinsic::mips_msubu:
     return lowerDSPIntr(Op, DAG, MipsISD::MSubu);
+  case Intrinsic::mips_bnz_b:
+  case Intrinsic::mips_bnz_h:
+  case Intrinsic::mips_bnz_w:
+  case Intrinsic::mips_bnz_d:
+    return lowerMSABranchIntr(Op, DAG, MipsISD::VALL_NONZERO);
+  case Intrinsic::mips_bnz_v:
+    return lowerMSABranchIntr(Op, DAG, MipsISD::VANY_NONZERO);
+  case Intrinsic::mips_bz_b:
+  case Intrinsic::mips_bz_h:
+  case Intrinsic::mips_bz_w:
+  case Intrinsic::mips_bz_d:
+    return lowerMSABranchIntr(Op, DAG, MipsISD::VALL_ZERO);
+  case Intrinsic::mips_bz_v:
+    return lowerMSABranchIntr(Op, DAG, MipsISD::VANY_ZERO);
   }
+}
+
+static SDValue lowerMSALoadIntr(SDValue Op, SelectionDAG &DAG, unsigned Intr) {
+  SDLoc DL(Op);
+  SDValue ChainIn = Op->getOperand(0);
+  SDValue Address = Op->getOperand(2);
+  SDValue Offset  = Op->getOperand(3);
+  EVT ResTy = Op->getValueType(0);
+  EVT PtrTy = Address->getValueType(0);
+
+  Address = DAG.getNode(ISD::ADD, DL, PtrTy, Address, Offset);
+
+  return DAG.getLoad(ResTy, DL, ChainIn, Address, MachinePointerInfo(), false,
+                     false, false, 16);
 }
 
 SDValue MipsSETargetLowering::lowerINTRINSIC_W_CHAIN(SDValue Op,
                                                      SelectionDAG &DAG) const {
-  switch (cast<ConstantSDNode>(Op->getOperand(1))->getZExtValue()) {
+  unsigned Intr = cast<ConstantSDNode>(Op->getOperand(1))->getZExtValue();
+  switch (Intr) {
   default:
     return SDValue();
   case Intrinsic::mips_extp:
@@ -735,6 +835,47 @@ SDValue MipsSETargetLowering::lowerINTRINSIC_W_CHAIN(SDValue Op,
     return lowerDSPIntr(Op, DAG, MipsISD::DPSQX_S_W_PH);
   case Intrinsic::mips_dpsqx_sa_w_ph:
     return lowerDSPIntr(Op, DAG, MipsISD::DPSQX_SA_W_PH);
+  case Intrinsic::mips_ld_b:
+  case Intrinsic::mips_ld_h:
+  case Intrinsic::mips_ld_w:
+  case Intrinsic::mips_ld_d:
+  case Intrinsic::mips_ldx_b:
+  case Intrinsic::mips_ldx_h:
+  case Intrinsic::mips_ldx_w:
+  case Intrinsic::mips_ldx_d:
+   return lowerMSALoadIntr(Op, DAG, Intr);
+  }
+}
+
+static SDValue lowerMSAStoreIntr(SDValue Op, SelectionDAG &DAG, unsigned Intr) {
+  SDLoc DL(Op);
+  SDValue ChainIn = Op->getOperand(0);
+  SDValue Value   = Op->getOperand(2);
+  SDValue Address = Op->getOperand(3);
+  SDValue Offset  = Op->getOperand(4);
+  EVT PtrTy = Address->getValueType(0);
+
+  Address = DAG.getNode(ISD::ADD, DL, PtrTy, Address, Offset);
+
+  return DAG.getStore(ChainIn, DL, Value, Address, MachinePointerInfo(), false,
+                      false, 16);
+}
+
+SDValue MipsSETargetLowering::lowerINTRINSIC_VOID(SDValue Op,
+                                                  SelectionDAG &DAG) const {
+  unsigned Intr = cast<ConstantSDNode>(Op->getOperand(1))->getZExtValue();
+  switch (Intr) {
+  default:
+    return SDValue();
+  case Intrinsic::mips_st_b:
+  case Intrinsic::mips_st_h:
+  case Intrinsic::mips_st_w:
+  case Intrinsic::mips_st_d:
+  case Intrinsic::mips_stx_b:
+  case Intrinsic::mips_stx_h:
+  case Intrinsic::mips_stx_w:
+  case Intrinsic::mips_stx_d:
+    return lowerMSAStoreIntr(Op, DAG, Intr);
   }
 }
 
@@ -755,7 +896,7 @@ emitBPOSGE32(MachineInstr *MI, MachineBasicBlock *BB) const{
 
   MachineRegisterInfo &RegInfo = BB->getParent()->getRegInfo();
   const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
-  const TargetRegisterClass *RC = &Mips::CPURegsRegClass;
+  const TargetRegisterClass *RC = &Mips::GPR32RegClass;
   DebugLoc DL = MI->getDebugLoc();
   const BasicBlock *LLVM_BB = BB->getBasicBlock();
   MachineFunction::iterator It = llvm::next(MachineFunction::iterator(BB));
@@ -796,6 +937,73 @@ emitBPOSGE32(MachineInstr *MI, MachineBasicBlock *BB) const{
   BuildMI(*Sink, Sink->begin(), DL, TII->get(Mips::PHI),
           MI->getOperand(0).getReg())
     .addReg(VR2).addMBB(FBB).addReg(VR1).addMBB(TBB);
+
+  MI->eraseFromParent();   // The pseudo instruction is gone now.
+  return Sink;
+}
+
+MachineBasicBlock * MipsSETargetLowering::
+emitMSACBranchPseudo(MachineInstr *MI, MachineBasicBlock *BB,
+                     unsigned BranchOp) const{
+  // $bb:
+  //  vany_nonzero $rd, $ws
+  //  =>
+  // $bb:
+  //  bnz.b $ws, $tbb
+  //  b $fbb
+  // $fbb:
+  //  li $rd1, 0
+  //  b $sink
+  // $tbb:
+  //  li $rd2, 1
+  // $sink:
+  //  $rd = phi($rd1, $fbb, $rd2, $tbb)
+
+  MachineRegisterInfo &RegInfo = BB->getParent()->getRegInfo();
+  const TargetInstrInfo *TII = getTargetMachine().getInstrInfo();
+  const TargetRegisterClass *RC = &Mips::GPR32RegClass;
+  DebugLoc DL = MI->getDebugLoc();
+  const BasicBlock *LLVM_BB = BB->getBasicBlock();
+  MachineFunction::iterator It = llvm::next(MachineFunction::iterator(BB));
+  MachineFunction *F = BB->getParent();
+  MachineBasicBlock *FBB = F->CreateMachineBasicBlock(LLVM_BB);
+  MachineBasicBlock *TBB = F->CreateMachineBasicBlock(LLVM_BB);
+  MachineBasicBlock *Sink  = F->CreateMachineBasicBlock(LLVM_BB);
+  F->insert(It, FBB);
+  F->insert(It, TBB);
+  F->insert(It, Sink);
+
+  // Transfer the remainder of BB and its successor edges to Sink.
+  Sink->splice(Sink->begin(), BB, llvm::next(MachineBasicBlock::iterator(MI)),
+               BB->end());
+  Sink->transferSuccessorsAndUpdatePHIs(BB);
+
+  // Add successors.
+  BB->addSuccessor(FBB);
+  BB->addSuccessor(TBB);
+  FBB->addSuccessor(Sink);
+  TBB->addSuccessor(Sink);
+
+  // Insert the real bnz.b instruction to $BB.
+  BuildMI(BB, DL, TII->get(BranchOp))
+    .addReg(MI->getOperand(1).getReg())
+    .addMBB(TBB);
+
+  // Fill $FBB.
+  unsigned RD1 = RegInfo.createVirtualRegister(RC);
+  BuildMI(*FBB, FBB->end(), DL, TII->get(Mips::ADDiu), RD1)
+    .addReg(Mips::ZERO).addImm(0);
+  BuildMI(*FBB, FBB->end(), DL, TII->get(Mips::B)).addMBB(Sink);
+
+  // Fill $TBB.
+  unsigned RD2 = RegInfo.createVirtualRegister(RC);
+  BuildMI(*TBB, TBB->end(), DL, TII->get(Mips::ADDiu), RD2)
+    .addReg(Mips::ZERO).addImm(1);
+
+  // Insert phi function to $Sink.
+  BuildMI(*Sink, Sink->begin(), DL, TII->get(Mips::PHI),
+          MI->getOperand(0).getReg())
+    .addReg(RD1).addMBB(FBB).addReg(RD2).addMBB(TBB);
 
   MI->eraseFromParent();   // The pseudo instruction is gone now.
   return Sink;

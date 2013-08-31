@@ -141,6 +141,75 @@ TEST(Support, Path) {
   }
 }
 
+TEST(Support, RelativePathIterator) {
+  SmallString<64> Path(StringRef("c/d/e/foo.txt"));
+  typedef SmallVector<StringRef, 4> PathComponents;
+  PathComponents ExpectedPathComponents;
+  PathComponents ActualPathComponents;
+
+  StringRef(Path).split(ExpectedPathComponents, "/");
+
+  for (path::const_iterator I = path::begin(Path), E = path::end(Path); I != E;
+       ++I) {
+    ActualPathComponents.push_back(*I);
+  }
+
+  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
+
+  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
+    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
+  }
+}
+
+TEST(Support, AbsolutePathIterator) {
+  SmallString<64> Path(StringRef("/c/d/e/foo.txt"));
+  typedef SmallVector<StringRef, 4> PathComponents;
+  PathComponents ExpectedPathComponents;
+  PathComponents ActualPathComponents;
+
+  StringRef(Path).split(ExpectedPathComponents, "/");
+
+  // The root path will also be a component when iterating
+  ExpectedPathComponents[0] = "/";
+
+  for (path::const_iterator I = path::begin(Path), E = path::end(Path); I != E;
+       ++I) {
+    ActualPathComponents.push_back(*I);
+  }
+
+  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
+
+  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
+    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
+  }
+}
+
+#ifdef LLVM_ON_WIN32
+TEST(Support, AbsolutePathIteratorWin32) {
+  SmallString<64> Path(StringRef("c:\\c\\e\\foo.txt"));
+  typedef SmallVector<StringRef, 4> PathComponents;
+  PathComponents ExpectedPathComponents;
+  PathComponents ActualPathComponents;
+
+  StringRef(Path).split(ExpectedPathComponents, "\\");
+
+  // The root path (which comes after the drive name) will also be a component
+  // when iterating.
+  ExpectedPathComponents.insert(ExpectedPathComponents.begin()+1, "\\");
+
+  for (path::const_iterator I = path::begin(Path), E = path::end(Path); I != E;
+       ++I) {
+    ActualPathComponents.push_back(*I);
+  }
+
+  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
+
+  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
+    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
+  }
+}
+#endif // LLVM_ON_WIN32
+
 class FileSystemTest : public testing::Test {
 protected:
   /// Unique temporary directory in which all created filesystem entities must
@@ -169,7 +238,7 @@ TEST_F(FileSystemTest, Unique) {
       fs::createTemporaryFile("prefix", "temp", FileDescriptor, TempPath));
 
   // The same file should return an identical unique id.
-  uint64_t F1, F2;
+  fs::UniqueID F1, F2;
   ASSERT_NO_ERROR(fs::getUniqueID(Twine(TempPath), F1));
   ASSERT_NO_ERROR(fs::getUniqueID(Twine(TempPath), F2));
   ASSERT_EQ(F1, F2);
@@ -180,7 +249,7 @@ TEST_F(FileSystemTest, Unique) {
   ASSERT_NO_ERROR(
       fs::createTemporaryFile("prefix", "temp", FileDescriptor2, TempPath2));
 
-  uint64_t D;
+  fs::UniqueID D;
   ASSERT_NO_ERROR(fs::getUniqueID(Twine(TempPath2), D));
   ASSERT_NE(D, F1);
   ::close(FileDescriptor2);
@@ -190,11 +259,24 @@ TEST_F(FileSystemTest, Unique) {
   // Two paths representing the same file on disk should still provide the
   // same unique id.  We can test this by making a hard link.
   ASSERT_NO_ERROR(fs::create_hard_link(Twine(TempPath), Twine(TempPath2)));
-  uint64_t D2;
+  fs::UniqueID D2;
   ASSERT_NO_ERROR(fs::getUniqueID(Twine(TempPath2), D2));
   ASSERT_EQ(D2, F1);
 
   ::close(FileDescriptor);
+
+  SmallString<128> Dir1;
+  ASSERT_NO_ERROR(
+     fs::createUniqueDirectory("dir1", Dir1));
+  ASSERT_NO_ERROR(fs::getUniqueID(Dir1.c_str(), F1));
+  ASSERT_NO_ERROR(fs::getUniqueID(Dir1.c_str(), F2));
+  ASSERT_EQ(F1, F2);
+
+  SmallString<128> Dir2;
+  ASSERT_NO_ERROR(
+     fs::createUniqueDirectory("dir2", Dir2));
+  ASSERT_NO_ERROR(fs::getUniqueID(Dir2.c_str(), F2));
+  ASSERT_NE(F1, F2);
 }
 
 TEST_F(FileSystemTest, TempFiles) {
@@ -213,6 +295,7 @@ TEST_F(FileSystemTest, TempFiles) {
   int FD2;
   SmallString<64> TempPath2;
   ASSERT_NO_ERROR(fs::createTemporaryFile("prefix", "temp", FD2, TempPath2));
+  ASSERT_TRUE(TempPath2.endswith(".temp"));
   ASSERT_NE(TempPath.str(), TempPath2.str());
 
   fs::file_status A, B;
@@ -226,9 +309,17 @@ TEST_F(FileSystemTest, TempFiles) {
   ASSERT_NO_ERROR(fs::remove(Twine(TempPath2), TempFileExists));
   EXPECT_TRUE(TempFileExists);
 
+  error_code EC = fs::status(TempPath2.c_str(), B);
+  EXPECT_EQ(EC, errc::no_such_file_or_directory);
+  EXPECT_EQ(B.type(), fs::file_type::file_not_found);
+
   // Make sure Temp2 doesn't exist.
   ASSERT_NO_ERROR(fs::exists(Twine(TempPath2), TempFileExists));
   EXPECT_FALSE(TempFileExists);
+
+  SmallString<64> TempPath3;
+  ASSERT_NO_ERROR(fs::createTemporaryFile("prefix", "", TempPath3));
+  ASSERT_FALSE(TempPath3.endswith("."));
 
   // Create a hard link to Temp1.
   ASSERT_NO_ERROR(fs::create_hard_link(Twine(TempPath), Twine(TempPath2)));

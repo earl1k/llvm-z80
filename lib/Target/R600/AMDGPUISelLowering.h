@@ -25,7 +25,18 @@ class MachineRegisterInfo;
 
 class AMDGPUTargetLowering : public TargetLowering {
 private:
+  void ExtractVectorElements(SDValue Op, SelectionDAG &DAG,
+                             SmallVectorImpl<SDValue> &Args,
+                             unsigned Start, unsigned Count) const;
+  SDValue LowerEXTRACT_SUBVECTOR(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerCONCAT_VECTORS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
+  /// \brief Lower vector stores by merging the vector elements into an integer
+  /// of the same bitwidth.
+  SDValue MergeVectorStore(const SDValue &Op, SelectionDAG &DAG) const;
+  /// \brief Split a vector store into multiple scalar stores.
+  /// \returns The resulting chain. 
+  SDValue SplitVectorStore(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerUDIVREM(SDValue Op, SelectionDAG &DAG) const;
 
 protected:
@@ -39,7 +50,9 @@ protected:
                                        unsigned Reg, EVT VT) const;
   SDValue LowerGlobalAddress(AMDGPUMachineFunction *MFI, SDValue Op,
                              SelectionDAG &DAG) const;
-
+  /// \brief Split a vector load into multiple scalar loads.
+  SDValue SplitVectorLoad(const SDValue &Op, SelectionDAG &DAG) const;
+  SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   bool isHWTrueValue(SDValue Op) const;
   bool isHWFalseValue(SDValue Op) const;
 
@@ -49,6 +62,9 @@ protected:
 public:
   AMDGPUTargetLowering(TargetMachine &TM);
 
+  virtual bool isFAbsFree(EVT VT) const;
+  virtual bool isFNegFree(EVT VT) const;
+  virtual MVT getVectorIdxTy() const;
   virtual SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                               bool isVarArg,
                               const SmallVectorImpl<ISD::OutputArg> &Outs,
@@ -136,6 +152,14 @@ enum {
   CONST_ADDRESS,
   REGISTER_LOAD,
   REGISTER_STORE,
+  LOAD_INPUT,
+  SAMPLE,
+  SAMPLEB,
+  SAMPLED,
+  SAMPLEL,
+  FIRST_MEM_OPCODE_NUMBER = ISD::FIRST_TARGET_MEMORY_OPCODE,
+  STORE_MSKOR,
+  LOAD_CONSTANT,
   LAST_AMDGPU_ISD_NUMBER
 };
 

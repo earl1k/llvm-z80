@@ -262,7 +262,6 @@ static int compileModule(char **argv, LLVMContext &Context) {
   TargetOptions Options;
   Options.LessPreciseFPMADOption = EnableFPMAD;
   Options.NoFramePointerElim = DisableFPElim;
-  Options.NoFramePointerElimNonLeaf = DisableFPElimNonLeaf;
   Options.AllowFPOpFusion = FuseFPOps;
   Options.UnsafeFPMath = EnableUnsafeFPMath;
   Options.NoInfsFPMath = EnableNoInfsFPMath;
@@ -276,12 +275,10 @@ static int compileModule(char **argv, LLVMContext &Context) {
   Options.GuaranteedTailCallOpt = EnableGuaranteedTailCallOpt;
   Options.DisableTailCalls = DisableTailCalls;
   Options.StackAlignmentOverride = OverrideStackAlignment;
-  Options.RealignStack = EnableRealignStack;
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
   Options.EnableSegmentedStacks = SegmentedStacks;
   Options.UseInitArray = UseInitArray;
-  Options.SSPBufferSize = SSPBufferSize;
 
   OwningPtr<TargetMachine>
     target(TheTarget->createTargetMachine(TheTriple.getTriple(),

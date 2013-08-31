@@ -92,12 +92,60 @@ def az_extload : PatFrag<(ops node:$ptr), (unindexedload node:$ptr), [{
          L->getExtensionType() == ISD::EXTLOAD;
 }]>;
 
-def zextloadi8_global : PatFrag<(ops node:$ptr), (zextloadi8 node:$ptr), [{
+def az_extloadi8 : PatFrag<(ops node:$ptr), (az_extload node:$ptr), [{
+  return cast<LoadSDNode>(N)->getMemoryVT() == MVT::i8;
+}]>;
+
+def az_extloadi8_global : PatFrag<(ops node:$ptr), (az_extloadi8 node:$ptr), [{
     return isGlobalLoad(dyn_cast<LoadSDNode>(N));
 }]>;
 
-def zextloadi8_constant : PatFrag<(ops node:$ptr), (zextloadi8 node:$ptr), [{
+def sextloadi8_global : PatFrag<(ops node:$ptr), (sextloadi8 node:$ptr), [{
     return isGlobalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def az_extloadi8_constant : PatFrag<(ops node:$ptr), (az_extloadi8 node:$ptr), [{
+    return isConstantLoad(dyn_cast<LoadSDNode>(N), -1);
+}]>;
+
+def sextloadi8_constant : PatFrag<(ops node:$ptr), (sextloadi8 node:$ptr), [{
+    return isConstantLoad(dyn_cast<LoadSDNode>(N), -1);
+}]>;
+
+def az_extloadi8_local : PatFrag<(ops node:$ptr), (az_extloadi8 node:$ptr), [{
+    return isLocalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def sextloadi8_local : PatFrag<(ops node:$ptr), (sextloadi8 node:$ptr), [{
+    return isLocalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def az_extloadi16 : PatFrag<(ops node:$ptr), (az_extload node:$ptr), [{
+  return cast<LoadSDNode>(N)->getMemoryVT() == MVT::i16;
+}]>;
+
+def az_extloadi16_global : PatFrag<(ops node:$ptr), (az_extloadi16 node:$ptr), [{
+    return isGlobalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def sextloadi16_global : PatFrag<(ops node:$ptr), (sextloadi16 node:$ptr), [{
+    return isGlobalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def az_extloadi16_constant : PatFrag<(ops node:$ptr), (az_extloadi16 node:$ptr), [{
+    return isConstantLoad(dyn_cast<LoadSDNode>(N), -1);
+}]>;
+
+def sextloadi16_constant : PatFrag<(ops node:$ptr), (sextloadi16 node:$ptr), [{
+    return isConstantLoad(dyn_cast<LoadSDNode>(N), -1);
+}]>;
+
+def az_extloadi16_local : PatFrag<(ops node:$ptr), (az_extloadi16 node:$ptr), [{
+    return isLocalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def sextloadi16_local : PatFrag<(ops node:$ptr), (sextloadi16 node:$ptr), [{
+    return isLocalLoad(dyn_cast<LoadSDNode>(N));
 }]>;
 
 def az_extloadi32 : PatFrag<(ops node:$ptr), (az_extload node:$ptr), [{
@@ -114,13 +162,38 @@ def az_extloadi32_constant : PatFrag<(ops node:$ptr),
   return isConstantLoad(dyn_cast<LoadSDNode>(N), -1);
 }]>;
 
-def local_load : PatFrag<(ops node:$ptr), (load node:$ptr), [{
-    return isLocalLoad(dyn_cast<LoadSDNode>(N));
+def truncstorei8_global : PatFrag<(ops node:$val, node:$ptr),
+                                  (truncstorei8 node:$val, node:$ptr), [{
+  return isGlobalStore(dyn_cast<StoreSDNode>(N));
+}]>;
+
+def truncstorei16_global : PatFrag<(ops node:$val, node:$ptr),
+                                  (truncstorei16 node:$val, node:$ptr), [{
+  return isGlobalStore(dyn_cast<StoreSDNode>(N));
 }]>;
 
 def local_store : PatFrag<(ops node:$val, node:$ptr),
                              (store node:$val, node:$ptr), [{
-    return isLocalStore(dyn_cast<StoreSDNode>(N));
+  return isLocalStore(dyn_cast<StoreSDNode>(N));
+}]>;
+
+def truncstorei8_local : PatFrag<(ops node:$val, node:$ptr),
+                                  (truncstorei8 node:$val, node:$ptr), [{
+  return isLocalStore(dyn_cast<StoreSDNode>(N));
+}]>;
+
+def truncstorei16_local : PatFrag<(ops node:$val, node:$ptr),
+                                  (truncstorei16 node:$val, node:$ptr), [{
+  return isLocalStore(dyn_cast<StoreSDNode>(N));
+}]>;
+
+def local_load : PatFrag<(ops node:$ptr), (load node:$ptr), [{
+    return isLocalLoad(dyn_cast<LoadSDNode>(N));
+}]>;
+
+def mskor_global : PatFrag<(ops node:$val, node:$ptr),
+                            (AMDGPUstore_mskor node:$val, node:$ptr), [{
+  return dyn_cast<MemSDNode>(N)->getAddressSpace() == AMDGPUAS::GLOBAL_ADDRESS;
 }]>;
 
 class Constants {
@@ -140,6 +213,9 @@ def FP_ONE : PatLeaf <
   (fpimm),
   [{return N->isExactlyValue(1.0);}]
 >;
+
+def U24 : ComplexPattern<i32, 1, "SelectU24", [], []>;
+def I24 : ComplexPattern<i32, 1, "SelectI24", [], []>;
 
 let isCodeGenOnly = 1, isPseudo = 1 in {
 
@@ -219,59 +295,10 @@ class Insert_Element <ValueType elem_type, ValueType vec_type,
   (INSERT_SUBREG $vec, $elem, sub_reg)
 >;
 
-// Vector Build pattern
-class Vector1_Build <ValueType vecType, ValueType elemType,
-                     RegisterClass rc> : Pat <
-  (vecType (build_vector elemType:$src)),
-  (vecType (COPY_TO_REGCLASS $src, rc))
->;
-
-class Vector2_Build <ValueType vecType, ValueType elemType> : Pat <
-  (vecType (build_vector elemType:$sub0, elemType:$sub1)),
-  (INSERT_SUBREG (INSERT_SUBREG
-    (vecType (IMPLICIT_DEF)), $sub0, sub0), $sub1, sub1)
->;
-
 class Vector4_Build <ValueType vecType, ValueType elemType> : Pat <
   (vecType (build_vector elemType:$x, elemType:$y, elemType:$z, elemType:$w)),
   (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
     (vecType (IMPLICIT_DEF)), $x, sub0), $y, sub1), $z, sub2), $w, sub3)
->;
-
-class Vector8_Build <ValueType vecType, ValueType elemType> : Pat <
-  (vecType (build_vector elemType:$sub0, elemType:$sub1,
-                         elemType:$sub2, elemType:$sub3,
-                         elemType:$sub4, elemType:$sub5,
-                         elemType:$sub6, elemType:$sub7)),
-  (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
-    (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
-    (vecType (IMPLICIT_DEF)), $sub0, sub0), $sub1, sub1),
-                              $sub2, sub2), $sub3, sub3),
-                              $sub4, sub4), $sub5, sub5),
-                              $sub6, sub6), $sub7, sub7)
->;
-
-class Vector16_Build <ValueType vecType, ValueType elemType> : Pat <
-  (vecType (build_vector elemType:$sub0, elemType:$sub1,
-                         elemType:$sub2, elemType:$sub3,
-                         elemType:$sub4, elemType:$sub5,
-                         elemType:$sub6, elemType:$sub7,
-                         elemType:$sub8, elemType:$sub9,
-                         elemType:$sub10, elemType:$sub11,
-                         elemType:$sub12, elemType:$sub13,
-                         elemType:$sub14, elemType:$sub15)),
-  (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
-    (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
-    (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
-    (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG (INSERT_SUBREG
-    (vecType (IMPLICIT_DEF)), $sub0, sub0), $sub1, sub1),
-                            $sub2, sub2), $sub3, sub3),
-                            $sub4, sub4), $sub5, sub5),
-                            $sub6, sub6), $sub7, sub7),
-                            $sub8, sub8), $sub9, sub9),
-                            $sub10, sub10), $sub11, sub11),
-                            $sub12, sub12), $sub13, sub13),
-                            $sub14, sub14), $sub15, sub15)
 >;
 
 // XXX: Convert to new syntax and use COPY_TO_REG, once the DFAPacketizer
@@ -333,6 +360,16 @@ class ROTRPattern <Instruction BIT_ALIGN> : Pat <
   (rotr i32:$src0, i32:$src1),
   (BIT_ALIGN $src0, $src0, $src1)
 >;
+
+// 24-bit arithmetic patterns
+def umul24 : PatFrag <(ops node:$x, node:$y), (mul node:$x, node:$y)>;
+
+/*
+class UMUL24Pattern <Instruction UMUL24> : Pat <
+  (mul U24:$x, U24:$y),
+  (UMUL24 $x, $y)
+>;
+*/
 
 include "R600Instructions.td"
 

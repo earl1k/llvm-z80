@@ -223,7 +223,7 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
      << "getRegPressureSetName(unsigned Idx) const {\n"
      << "  static const char *PressureNameTable[] = {\n";
   for (unsigned i = 0; i < NumSets; ++i ) {
-    OS << "    \"" << RegBank.getRegPressureSet(i).Name << "\",\n";
+    OS << "    \"" << RegBank.getRegSetAt(i).Name << "\",\n";
   }
   OS << "    0 };\n"
      << "  return PressureNameTable[Idx];\n"
@@ -235,9 +235,9 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
      << "getRegPressureSetLimit(unsigned Idx) const {\n"
      << "  static const unsigned PressureLimitTable[] = {\n";
   for (unsigned i = 0; i < NumSets; ++i ) {
-    const RegUnitSet &RegUnits = RegBank.getRegPressureSet(i);
-    OS << "    " << RegBank.getRegUnitSetWeight(RegUnits.Units)
-       << ",  \t// " << i << ": " << RegUnits.Name << "\n";
+    const RegUnitSet &RegUnits = RegBank.getRegSetAt(i);
+    OS << "    " << RegUnits.Weight << ",  \t// " << i << ": "
+       << RegUnits.Name << "\n";
   }
   OS << "    0 };\n"
      << "  return PressureLimitTable[Idx];\n"
@@ -252,9 +252,15 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
   for (unsigned i = 0, StartIdx = 0, e = NumRCUnitSets; i != e; ++i) {
     RCSetStarts[i] = StartIdx;
     ArrayRef<unsigned> PSetIDs = RegBank.getRCPressureSetIDs(i);
+    std::vector<unsigned> PSets;
+    PSets.reserve(PSetIDs.size());
     for (ArrayRef<unsigned>::iterator PSetI = PSetIDs.begin(),
            PSetE = PSetIDs.end(); PSetI != PSetE; ++PSetI) {
-      OS << *PSetI << ",  ";
+      PSets.push_back(RegBank.getRegPressureSet(*PSetI).Order);
+    }
+    std::sort(PSets.begin(), PSets.end());
+    for (unsigned j = 0, e = PSets.size(); j < e; ++j) {
+      OS << PSets[j] << ",  ";
       ++StartIdx;
     }
     OS << "-1,  \t// #" << RCSetStarts[i] << " ";
@@ -264,7 +270,7 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
       OS << "inferred";
       for (ArrayRef<unsigned>::iterator PSetI = PSetIDs.begin(),
              PSetE = PSetIDs.end(); PSetI != PSetE; ++PSetI) {
-        OS << "~" << RegBank.getRegPressureSet(*PSetI).Name;
+        OS << "~" << RegBank.getRegSetAt(*PSetI).Name;
       }
     }
     OS << "\n    ";
@@ -1308,9 +1314,21 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
     OS << "0 };\n";
 
     // Emit the *_RegMask bit mask of call-preserved registers.
+    BitVector Covered = RegBank.computeCoveredRegisters(*Regs);
+
+    // Check for an optional OtherPreserved set.
+    // Add those registers to RegMask, but not to SaveList.
+    if (DagInit *OPDag =
+        dyn_cast<DagInit>(CSRSet->getValueInit("OtherPreserved"))) {
+      SetTheory::RecSet OPSet;
+      RegBank.getSets().evaluate(OPDag, OPSet, CSRSet->getLoc());
+      Covered |= RegBank.computeCoveredRegisters(
+        ArrayRef<Record*>(OPSet.begin(), OPSet.end()));
+    }
+
     OS << "static const uint32_t " << CSRSet->getName()
        << "_RegMask[] = { ";
-    printBitVectorAsHex(OS, RegBank.computeCoveredRegisters(*Regs), 32);
+    printBitVectorAsHex(OS, Covered, 32);
     OS << "};\n";
   }
   OS << "\n\n";

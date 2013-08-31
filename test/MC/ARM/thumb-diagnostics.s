@@ -52,7 +52,6 @@ error: invalid operand for instruction
 @ CHECK-ERRORS:         ldm r2!, {r2, r3, r4}
 @ CHECK-ERRORS:               ^
 
-
 @ Invalid writeback and register lists for PUSH/POP
         pop {r1, r2, r10}
         push {r8, r9}
@@ -138,7 +137,26 @@ error: invalid operand for instruction
 @ CHECK-ERRORS: error: source register must be the same as destination
 @ CHECK-ERRORS:         add r2, sp, ip
 @ CHECK-ERRORS:                     ^
- 
+
+
+@------------------------------------------------------------------------------
+@ B/Bcc - out of range immediates for Thumb1 branches
+@------------------------------------------------------------------------------
+
+        beq    #-258
+        bne    #256
+        bgt    #13
+        b      #-1048578
+        b      #1048576
+        b      #10323
+
+@ CHECK-ERRORS: error: Branch target out of range
+@ CHECK-ERRORS: error: Branch target out of range
+@ CHECK-ERRORS: error: Branch target out of range
+@ CHECK-ERRORS: error: Branch target out of range
+@ CHECK-ERRORS: error: Branch target out of range
+@ CHECK-ERRORS: error: Branch target out of range
+
 @------------------------------------------------------------------------------
 @ WFE/WFI/YIELD - are not supported pre v6T2
 @------------------------------------------------------------------------------
@@ -155,4 +173,17 @@ error: invalid operand for instruction
 @ CHECK-ERRORS: error: instruction requires: thumb2
 @ CHECK-ERRORS: yield
 @ CHECK-ERRORS: ^
+
+@------------------------------------------------------------------------------
+@ PLDW required mp-extensions
+@------------------------------------------------------------------------------
+        pldw [r0, #4]
+@ CHECK-ERRORS: error: instruction requires: mp-extensions
+
+@------------------------------------------------------------------------------
+@ LDR(lit) - invalid offsets
+@------------------------------------------------------------------------------
+
+        ldr r4, [pc, #-12]
+@ CHECK-ERRORS: error: instruction requires: thumb2
 

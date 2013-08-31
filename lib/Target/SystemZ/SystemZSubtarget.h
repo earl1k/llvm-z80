@@ -28,6 +28,9 @@ class StringRef;
 class SystemZSubtarget : public SystemZGenSubtargetInfo {
 protected:
   bool HasDistinctOps;
+  bool HasLoadStoreOnCond;
+  bool HasHighWord;
+  bool HasFPExtension;
 
 private:
   Triple TargetTriple;
@@ -41,6 +44,15 @@ public:
 
   // Return true if the target has the distinct-operands facility.
   bool hasDistinctOps() const { return HasDistinctOps; }
+
+  // Return true if the target has the load/store-on-condition facility.
+  bool hasLoadStoreOnCond() const { return HasLoadStoreOnCond; }
+
+  // Return true if the target has the high-word facility.
+  bool hasHighWord() const { return HasHighWord; }
+
+  // Return true if the target has the floating-point extension facility.
+  bool hasFPExtension() const { return HasFPExtension; }
 
   // Return true if GV can be accessed using LARL for reloc model RM
   // and code model CM.

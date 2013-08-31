@@ -88,6 +88,7 @@ public:
     NoReturn,              ///< Mark the function as not returning
     NoUnwind,              ///< Function doesn't unwind stack
     OptimizeForSize,       ///< opt_size
+    OptimizeNone,          ///< Function must not be optimized.
     ReadNone,              ///< Function does not access memory
     ReadOnly,              ///< Function only reads from memory
     Returned,              ///< Return value is always equal to this argument
@@ -250,6 +251,8 @@ public:
   /// attribute sets are immutable, this returns a new set.
   AttributeSet addAttribute(LLVMContext &C, unsigned Index,
                             StringRef Kind) const;
+  AttributeSet addAttribute(LLVMContext &C, unsigned Index,
+                            StringRef Kind, StringRef Value) const;
 
   /// \brief Add attributes to the attribute set at the given index. Since
   /// attribute sets are immutable, this returns a new set.

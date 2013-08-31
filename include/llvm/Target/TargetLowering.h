@@ -151,10 +151,19 @@ public:
   // Return the pointer type for the given address space, defaults to
   // the pointer type from the data layout.
   // FIXME: The default needs to be removed once all the code is updated.
-  virtual MVT getPointerTy(uint32_t /*AS*/ = 0) const { return PointerTy; }
+  virtual MVT getPointerTy(uint32_t /*AS*/ = 0) const;
+  unsigned getPointerSizeInBits(uint32_t AS = 0) const;
+  unsigned getPointerTypeSizeInBits(Type *Ty) const;
   virtual MVT getScalarShiftAmountTy(EVT LHSTy) const;
 
   EVT getShiftAmountTy(EVT LHSTy) const;
+
+  /// Returns the type to be used for the index operand of:
+  /// ISD::INSERT_VECTOR_ELT, ISD::EXTRACT_VECTOR_ELT,
+  /// ISD::INSERT_SUBVECTOR, and ISD::EXTRACT_SUBVECTOR
+  virtual MVT getVectorIdxTy() const {
+    return getPointerTy();
+  }
 
   /// Return true if the select operation is expensive for this target.
   bool isSelectExpensive() const { return SelectIsExpensive; }
@@ -561,7 +570,7 @@ public:
   /// otherwise it will assert.
   EVT getValueType(Type *Ty, bool AllowUnknown = false) const {
     // Lower scalar pointers to native pointer types.
-    if (Ty->isPointerTy()) return PointerTy;
+    if (Ty->isPointerTy()) return getPointerTy(Ty->getPointerAddressSpace());
 
     if (Ty->isVectorTy()) {
       VectorType *VTy = cast<VectorType>(Ty);
@@ -1145,6 +1154,15 @@ public:
     return false;
   }
 
+  /// Return true if a truncation from Ty1 to Ty2 is permitted when deciding
+  /// whether a call is in tail position. Typically this means that both results
+  /// would be assigned to the same register or stack slot, but it could mean
+  /// the target performs adequate checks of its own before proceeding with the
+  /// tail call.
+  virtual bool allowTruncateForTailCall(Type * /*Ty1*/, Type * /*Ty2*/) const {
+    return false;
+  }
+
   virtual bool isTruncateFree(EVT /*VT1*/, EVT /*VT2*/) const {
     return false;
   }
@@ -1174,13 +1192,15 @@ public:
 
   /// Return true if an fneg operation is free to the point where it is never
   /// worthwhile to replace it with a bitwise operation.
-  virtual bool isFNegFree(EVT) const {
+  virtual bool isFNegFree(EVT VT) const {
+    assert(VT.isFloatingPoint());
     return false;
   }
 
-  /// Return true if an fneg operation is free to the point where it is never
+  /// Return true if an fabs operation is free to the point where it is never
   /// worthwhile to replace it with a bitwise operation.
-  virtual bool isFAbsFree(EVT) const {
+  virtual bool isFAbsFree(EVT VT) const {
+    assert(VT.isFloatingPoint());
     return false;
   }
 
@@ -1684,9 +1704,12 @@ public:
                            SDValue &NewLHS, SDValue &NewRHS,
                            ISD::CondCode &CCCode, SDLoc DL) const;
 
-  SDValue makeLibCall(SelectionDAG &DAG, RTLIB::Libcall LC, EVT RetVT,
-                      const SDValue *Ops, unsigned NumOps,
-                      bool isSigned, SDLoc dl) const;
+  /// Returns a pair of (return value, chain).
+  std::pair<SDValue, SDValue> makeLibCall(SelectionDAG &DAG, RTLIB::Libcall LC,
+                                          EVT RetVT, const SDValue *Ops,
+                                          unsigned NumOps, bool isSigned,
+                                          SDLoc dl, bool doesNotReturn = false,
+                                          bool isReturnValueUsed = true) const;
 
   //===--------------------------------------------------------------------===//
   // TargetLowering Optimization Methods

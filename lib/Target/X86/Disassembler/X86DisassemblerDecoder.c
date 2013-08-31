@@ -305,6 +305,7 @@ static int readPrefixes(struct InternalInstruction* insn) {
   BOOL prefixGroups[4] = { FALSE };
   uint64_t prefixLocation;
   uint8_t byte = 0;
+  uint8_t nextByte;
 
   BOOL hasAdSize = FALSE;
   BOOL hasOpSize = FALSE;
@@ -314,20 +315,21 @@ static int readPrefixes(struct InternalInstruction* insn) {
   while (isPrefix) {
     prefixLocation = insn->readerCursor;
 
+    /* If we fail reading prefixes, just stop here and let the opcode reader deal with it */
     if (consumeByte(insn, &byte))
-      return -1;
+      break;
 
     /*
      * If the byte is a LOCK/REP/REPNE prefix and not a part of the opcode, then
      * break and let it be disassembled as a normal "instruction".
      */
+    if (insn->readerCursor - 1 == insn->startLocation && byte == 0xf0)
+      break;
+
     if (insn->readerCursor - 1 == insn->startLocation
-        && (byte == 0xf0 || byte == 0xf2 || byte == 0xf3)) {
-      uint8_t nextByte;
-      if (byte == 0xf0)
-        break;
-      if (lookAtByte(insn, &nextByte))
-        return -1;
+        && (byte == 0xf2 || byte == 0xf3)
+        && !lookAtByte(insn, &nextByte))
+    {
       /*
        * If the byte is 0xf2 or 0xf3, and any of the following conditions are
        * met:
@@ -1255,6 +1257,8 @@ static int readModRM(struct InternalInstruction* insn) {
       return prefix##_EAX + index;                        \
     case TYPE_R64:                                        \
       return prefix##_RAX + index;                        \
+    case TYPE_XMM512:                                     \
+      return prefix##_ZMM0 + index;                       \
     case TYPE_XMM256:                                     \
       return prefix##_YMM0 + index;                       \
     case TYPE_XMM128:                                     \

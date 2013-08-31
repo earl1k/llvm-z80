@@ -155,6 +155,16 @@ def pred : PredicateOperand<OtherVT, (ops i32imm, i32imm),
   let DecoderMethod = "DecodePredicateOperand";
 }
 
+// Selectable predicate operand for CMOV instructions. We can't use a normal
+// predicate because the default values interfere with instruction selection. In
+// all other respects it is identical though: pseudo-instruction expansion
+// relies on the MachineOperands being compatible.
+def cmovpred : Operand<i32>, PredicateOp,
+               ComplexPattern<i32, 2, "SelectCMOVPred"> {
+  let MIOperandInfo = (ops i32imm, i32imm);
+  let PrintMethod = "printPredicateOperand";
+}
+
 // Conditional code result for instructions whose 's' bit is set, e.g. subs.
 def CCOutOperand : AsmOperandClass { let Name = "CCOut"; }
 def cc_out : OptionalDefOperand<OtherVT, (ops CCR), (ops (i32 zero_reg))> {
@@ -490,8 +500,7 @@ class JTI<dag oops, dag iops, InstrItinClass itin,
   : XI<oops, iops, AddrModeNone, 0, IndexModeNone, BrMiscFrm, itin,
        asm, "", pattern>;
 
-// Atomic load/store instructions
-class AIldrex<bits<2> opcod, dag oops, dag iops, InstrItinClass itin,
+class AIldr_ex_or_acq<bits<2> opcod, bits<2> opcod2, dag oops, dag iops, InstrItinClass itin,
               string opc, string asm, list<dag> pattern>
   : I<oops, iops, AddrModeNone, 4, IndexModeNone, LdStExFrm, itin,
       opc, asm, "", pattern> {
@@ -502,23 +511,52 @@ class AIldrex<bits<2> opcod, dag oops, dag iops, InstrItinClass itin,
   let Inst{20}    = 1;
   let Inst{19-16} = addr;
   let Inst{15-12} = Rt;
-  let Inst{11-0}  = 0b111110011111;
+  let Inst{11-10} = 0b11;
+  let Inst{9-8}   = opcod2;
+  let Inst{7-0}   = 0b10011111;
 }
-class AIstrex<bits<2> opcod, dag oops, dag iops, InstrItinClass itin,
+class AIstr_ex_or_rel<bits<2> opcod, bits<2> opcod2, dag oops, dag iops, InstrItinClass itin,
               string opc, string asm, list<dag> pattern>
   : I<oops, iops, AddrModeNone, 4, IndexModeNone, LdStExFrm, itin,
       opc, asm, "", pattern> {
-  bits<4> Rd;
   bits<4> Rt;
   bits<4> addr;
   let Inst{27-23} = 0b00011;
   let Inst{22-21} = opcod;
   let Inst{20}    = 0;
   let Inst{19-16} = addr;
-  let Inst{15-12} = Rd;
-  let Inst{11-4}  = 0b11111001;
+  let Inst{11-10} = 0b11;
+  let Inst{9-8}   = opcod2;
+  let Inst{7-4}   = 0b1001;
   let Inst{3-0}   = Rt;
 }
+// Atomic load/store instructions
+class AIldrex<bits<2> opcod, dag oops, dag iops, InstrItinClass itin,
+              string opc, string asm, list<dag> pattern>
+  : AIldr_ex_or_acq<opcod, 0b11, oops, iops, itin, opc, asm, pattern>;
+
+class AIstrex<bits<2> opcod, dag oops, dag iops, InstrItinClass itin,
+              string opc, string asm, list<dag> pattern>
+  : AIstr_ex_or_rel<opcod, 0b11, oops, iops, itin, opc, asm, pattern> {
+  bits<4> Rd;
+  let Inst{15-12} = Rd;
+}
+
+// Exclusive load/store instructions
+
+class AIldaex<bits<2> opcod, dag oops, dag iops, InstrItinClass itin,
+              string opc, string asm, list<dag> pattern>
+  : AIldr_ex_or_acq<opcod, 0b10, oops, iops, itin, opc, asm, pattern>,
+    Requires<[IsARM, HasV8]>;
+
+class AIstlex<bits<2> opcod, dag oops, dag iops, InstrItinClass itin,
+              string opc, string asm, list<dag> pattern>
+  : AIstr_ex_or_rel<opcod, 0b10, oops, iops, itin, opc, asm, pattern>,
+    Requires<[IsARM, HasV8]> {
+  bits<4> Rd;
+  let Inst{15-12} = Rd;
+}
+
 class AIswp<bit b, dag oops, dag iops, string opc, list<dag> pattern>
   : AI<oops, iops, MiscFrm, NoItinerary, opc, "\t$Rt, $Rt2, $addr", pattern> {
   bits<4> Rt;
@@ -534,6 +572,18 @@ class AIswp<bit b, dag oops, dag iops, string opc, list<dag> pattern>
 
   let Unpredictable{11-8} = 0b1111;
   let DecoderMethod = "DecodeSwap";
+}
+// Acquire/Release load/store instructions
+class AIldracq<bits<2> opcod, dag oops, dag iops, InstrItinClass itin,
+              string opc, string asm, list<dag> pattern>
+  : AIldr_ex_or_acq<opcod, 0b00, oops, iops, itin, opc, asm, pattern>,
+    Requires<[IsARM, HasV8]>;
+
+class AIstrrel<bits<2> opcod, dag oops, dag iops, InstrItinClass itin,
+              string opc, string asm, list<dag> pattern>
+  : AIstr_ex_or_rel<opcod, 0b00, oops, iops, itin, opc, asm, pattern>,
+    Requires<[IsARM, HasV8]> {
+  let Inst{15-12}   = 0b1111;
 }
 
 // addrmode1 instructions

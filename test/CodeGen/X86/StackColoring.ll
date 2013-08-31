@@ -82,8 +82,8 @@ bb2:
 bb3:
   ret i32 0
 }
-;YESCOLOR: subq  $208, %rsp
-;NOCOLOR: subq  $400, %rsp
+;YESCOLOR: subq  $200, %rsp
+;NOCOLOR: subq  $408, %rsp
 
 
 
@@ -429,4 +429,3 @@ declare void @llvm.lifetime.start(i64, i8* nocapture) nounwind
 declare void @llvm.lifetime.end(i64, i8* nocapture) nounwind
 
 declare i32 @foo(i32, i8*)
-

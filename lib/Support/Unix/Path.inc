@@ -18,6 +18,8 @@
 
 #include "Unix.h"
 #include "llvm/Support/Process.h"
+#include <limits.h>
+#include <stdio.h>
 #if HAVE_SYS_STAT_H
 #include <sys/stat.h>
 #endif
@@ -42,12 +44,6 @@
 # if HAVE_NDIR_H
 #  include <ndir.h>
 # endif
-#endif
-#if HAVE_STDIO_H
-#include <stdio.h>
-#endif
-#if HAVE_LIMITS_H
-#include <limits.h>
 #endif
 
 #ifdef __APPLE__
@@ -297,7 +293,23 @@ TimeValue file_status::getLastModificationTime() const {
   return Ret;
 }
 
+UniqueID file_status::getUniqueID() const {
+  return UniqueID(fs_st_dev, fs_st_ino);
+}
+
 error_code current_path(SmallVectorImpl<char> &result) {
+  result.clear();
+
+  const char *pwd = ::getenv("PWD");
+  llvm::sys::fs::file_status PWDStatus, DotStatus;
+  if (pwd && llvm::sys::path::is_absolute(pwd) &&
+      !llvm::sys::fs::status(pwd, PWDStatus) &&
+      !llvm::sys::fs::status(".", DotStatus) &&
+      PWDStatus.getUniqueID() == DotStatus.getUniqueID()) {
+    result.append(pwd, pwd + strlen(pwd));
+    return error_code::success();
+  }
+
 #ifdef MAXPATHLEN
   result.reserve(MAXPATHLEN);
 #else
@@ -458,18 +470,6 @@ error_code equivalent(const Twine &A, const Twine &B, bool &result) {
   if (error_code ec = status(A, fsA)) return ec;
   if (error_code ec = status(B, fsB)) return ec;
   result = equivalent(fsA, fsB);
-  return error_code::success();
-}
-
-error_code getUniqueID(const Twine Path, uint64_t &Result) {
-  SmallString<128> Storage;
-  StringRef P = Path.toNullTerminatedStringRef(Storage);
-
-  struct stat Status;
-  if (::stat(P.begin(), &Status) != 0)
-    return error_code(errno, system_category());
-
-  Result = Status.st_ino;
   return error_code::success();
 }
 

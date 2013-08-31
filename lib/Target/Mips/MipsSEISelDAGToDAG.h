@@ -30,6 +30,8 @@ private:
   void addDSPCtrlRegOperands(bool IsDef, MachineInstr &MI,
                              MachineFunction &MF);
 
+  unsigned getMSACtrlReg(const SDValue RegIdx) const;
+
   bool replaceUsesWithZeroReg(MachineRegisterInfo *MRI, const MachineInstr&);
 
   std::pair<SDNode*, SDNode*> selectMULT(SDNode *N, unsigned Opc, SDLoc dl,
@@ -41,11 +43,20 @@ private:
   virtual bool selectAddrRegImm(SDValue Addr, SDValue &Base,
                                 SDValue &Offset) const;
 
+  virtual bool selectAddrRegReg(SDValue Addr, SDValue &Base,
+                                SDValue &Offset) const;
+
   virtual bool selectAddrDefault(SDValue Addr, SDValue &Base,
                                  SDValue &Offset) const;
 
   virtual bool selectIntAddr(SDValue Addr, SDValue &Base,
                              SDValue &Offset) const;
+
+  virtual bool selectAddrRegImm12(SDValue Addr, SDValue &Base,
+                                  SDValue &Offset) const;
+
+  virtual bool selectIntAddrMM(SDValue Addr, SDValue &Base,
+                               SDValue &Offset) const;
 
   virtual std::pair<bool, SDNode*> selectNode(SDNode *Node);
 

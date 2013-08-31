@@ -656,7 +656,6 @@ multiclass VLD1DWB<bits<4> op7_4, string Dt> {
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{4} = Rn{4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVLDwbFixed";
   }
   def _register : NLdSt<0,0b10,0b0111,op7_4, (outs VecListOneD:$Vd, GPR:$wb),
                         (ins addrmode6:$Rn, rGPR:$Rm), IIC_VLD1u,
@@ -664,7 +663,6 @@ multiclass VLD1DWB<bits<4> op7_4, string Dt> {
                         "$Rn.addr = $wb", []> {
     let Inst{4} = Rn{4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVLDwbRegister";
   }
 }
 multiclass VLD1QWB<bits<4> op7_4, string Dt> {
@@ -675,7 +673,6 @@ multiclass VLD1QWB<bits<4> op7_4, string Dt> {
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVLDwbFixed";
   }
   def _register : NLdSt<0,0b10,0b1010,op7_4, (outs VecListDPair:$Vd, GPR:$wb),
                         (ins addrmode6:$Rn, rGPR:$Rm), IIC_VLD1x2u,
@@ -683,7 +680,6 @@ multiclass VLD1QWB<bits<4> op7_4, string Dt> {
                         "$Rn.addr = $wb", []> {
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVLDwbRegister";
   }
 }
 
@@ -713,7 +709,6 @@ multiclass VLD1D3WB<bits<4> op7_4, string Dt> {
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{4} = Rn{4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVLDwbFixed";
   }
   def _register : NLdSt<0,0b10,0b0110,op7_4, (outs VecListThreeD:$Vd, GPR:$wb),
                         (ins addrmode6:$Rn, rGPR:$Rm), IIC_VLD1x2u,
@@ -721,7 +716,6 @@ multiclass VLD1D3WB<bits<4> op7_4, string Dt> {
                         "$Rn.addr = $wb", []> {
     let Inst{4} = Rn{4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVLDwbRegister";
   }
 }
 
@@ -754,7 +748,6 @@ multiclass VLD1D4WB<bits<4> op7_4, string Dt> {
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVLDwbFixed";
   }
   def _register : NLdSt<0,0b10,0b0010,op7_4, (outs VecListFourD:$Vd, GPR:$wb),
                         (ins addrmode6:$Rn, rGPR:$Rm), IIC_VLD1x2u,
@@ -762,7 +755,6 @@ multiclass VLD1D4WB<bits<4> op7_4, string Dt> {
                         "$Rn.addr = $wb", []> {
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVLDwbRegister";
   }
 }
 
@@ -811,7 +803,6 @@ multiclass VLD2WB<bits<4> op11_8, bits<4> op7_4, string Dt,
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST2Instruction";
-    let AsmMatchConverter = "cvtVLDwbFixed";
   }
   def _register : NLdSt<0, 0b10, op11_8, op7_4, (outs VdTy:$Vd, GPR:$wb),
                         (ins addrmode6:$Rn, rGPR:$Rm), itin,
@@ -819,7 +810,6 @@ multiclass VLD2WB<bits<4> op11_8, bits<4> op7_4, string Dt,
                         "$Rn.addr = $wb", []> {
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST2Instruction";
-    let AsmMatchConverter = "cvtVLDwbRegister";
   }
 }
 
@@ -1348,7 +1338,6 @@ multiclass VLD1DUPWB<bits<4> op7_4, string Dt> {
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{4} = Rn{4};
     let DecoderMethod = "DecodeVLD1DupInstruction";
-    let AsmMatchConverter = "cvtVLDwbFixed";
   }
   def _register : NLdSt<1, 0b10, 0b1100, op7_4,
                         (outs VecListOneDAllLanes:$Vd, GPR:$wb),
@@ -1357,7 +1346,6 @@ multiclass VLD1DUPWB<bits<4> op7_4, string Dt> {
                         "$Rn.addr = $wb", []> {
     let Inst{4} = Rn{4};
     let DecoderMethod = "DecodeVLD1DupInstruction";
-    let AsmMatchConverter = "cvtVLDwbRegister";
   }
 }
 multiclass VLD1QDUPWB<bits<4> op7_4, string Dt> {
@@ -1369,7 +1357,6 @@ multiclass VLD1QDUPWB<bits<4> op7_4, string Dt> {
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{4} = Rn{4};
     let DecoderMethod = "DecodeVLD1DupInstruction";
-    let AsmMatchConverter = "cvtVLDwbFixed";
   }
   def _register : NLdSt<1, 0b10, 0b1100, op7_4,
                         (outs VecListDPairAllLanes:$Vd, GPR:$wb),
@@ -1378,7 +1365,6 @@ multiclass VLD1QDUPWB<bits<4> op7_4, string Dt> {
                         "$Rn.addr = $wb", []> {
     let Inst{4} = Rn{4};
     let DecoderMethod = "DecodeVLD1DupInstruction";
-    let AsmMatchConverter = "cvtVLDwbRegister";
   }
 }
 
@@ -1419,7 +1405,6 @@ multiclass VLD2DUPWB<bits<4> op7_4, string Dt, RegisterOperand VdTy> {
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{4} = Rn{4};
     let DecoderMethod = "DecodeVLD2DupInstruction";
-    let AsmMatchConverter = "cvtVLDwbFixed";
   }
   def _register : NLdSt<1, 0b10, 0b1101, op7_4,
                         (outs VdTy:$Vd, GPR:$wb),
@@ -1428,7 +1413,6 @@ multiclass VLD2DUPWB<bits<4> op7_4, string Dt, RegisterOperand VdTy> {
                         "$Rn.addr = $wb", []> {
     let Inst{4} = Rn{4};
     let DecoderMethod = "DecodeVLD2DupInstruction";
-    let AsmMatchConverter = "cvtVLDwbRegister";
   }
 }
 
@@ -1609,7 +1593,6 @@ multiclass VST1DWB<bits<4> op7_4, string Dt> {
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{4} = Rn{4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVSTwbFixed";
   }
   def _register : NLdSt<0,0b00,0b0111,op7_4, (outs GPR:$wb),
                         (ins addrmode6:$Rn, rGPR:$Rm, VecListOneD:$Vd),
@@ -1618,7 +1601,6 @@ multiclass VST1DWB<bits<4> op7_4, string Dt> {
                         "$Rn.addr = $wb", []> {
     let Inst{4} = Rn{4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVSTwbRegister";
   }
 }
 multiclass VST1QWB<bits<4> op7_4, string Dt> {
@@ -1629,7 +1611,6 @@ multiclass VST1QWB<bits<4> op7_4, string Dt> {
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVSTwbFixed";
   }
   def _register : NLdSt<0,0b00,0b1010,op7_4, (outs GPR:$wb),
                         (ins addrmode6:$Rn, rGPR:$Rm, VecListDPair:$Vd),
@@ -1638,7 +1619,6 @@ multiclass VST1QWB<bits<4> op7_4, string Dt> {
                         "$Rn.addr = $wb", []> {
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVSTwbRegister";
   }
 }
 
@@ -1669,7 +1649,6 @@ multiclass VST1D3WB<bits<4> op7_4, string Dt> {
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVSTwbFixed";
   }
   def _register : NLdSt<0,0b00,0b0110,op7_4, (outs GPR:$wb),
                         (ins addrmode6:$Rn, rGPR:$Rm, VecListThreeD:$Vd),
@@ -1678,7 +1657,6 @@ multiclass VST1D3WB<bits<4> op7_4, string Dt> {
                         "$Rn.addr = $wb", []> {
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVSTwbRegister";
   }
 }
 
@@ -1714,7 +1692,6 @@ multiclass VST1D4WB<bits<4> op7_4, string Dt> {
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVSTwbFixed";
   }
   def _register : NLdSt<0,0b00,0b0010,op7_4, (outs GPR:$wb),
                         (ins addrmode6:$Rn, rGPR:$Rm, VecListFourD:$Vd),
@@ -1723,7 +1700,6 @@ multiclass VST1D4WB<bits<4> op7_4, string Dt> {
                         "$Rn.addr = $wb", []> {
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST1Instruction";
-    let AsmMatchConverter = "cvtVSTwbRegister";
   }
 }
 
@@ -1773,7 +1749,6 @@ multiclass VST2DWB<bits<4> op11_8, bits<4> op7_4, string Dt,
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST2Instruction";
-    let AsmMatchConverter = "cvtVSTwbFixed";
   }
   def _register : NLdSt<0, 0b00, op11_8, op7_4, (outs GPR:$wb),
                         (ins addrmode6:$Rn, rGPR:$Rm, VdTy:$Vd), IIC_VLD1u,
@@ -1781,7 +1756,6 @@ multiclass VST2DWB<bits<4> op11_8, bits<4> op7_4, string Dt,
                         "$Rn.addr = $wb", []> {
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST2Instruction";
-    let AsmMatchConverter = "cvtVSTwbRegister";
   }
 }
 multiclass VST2QWB<bits<4> op7_4, string Dt> {
@@ -1792,7 +1766,6 @@ multiclass VST2QWB<bits<4> op7_4, string Dt> {
     let Rm = 0b1101; // NLdSt will assign to the right encoding bits.
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST2Instruction";
-    let AsmMatchConverter = "cvtVSTwbFixed";
   }
   def _register : NLdSt<0, 0b00, 0b0011, op7_4, (outs GPR:$wb),
                         (ins addrmode6:$Rn, rGPR:$Rm, VecListFourD:$Vd),
@@ -1801,7 +1774,6 @@ multiclass VST2QWB<bits<4> op7_4, string Dt> {
                         "$Rn.addr = $wb", []> {
     let Inst{5-4} = Rn{5-4};
     let DecoderMethod = "DecodeVLDST2Instruction";
-    let AsmMatchConverter = "cvtVSTwbRegister";
   }
 }
 
@@ -4001,11 +3973,17 @@ defm VQADDu   : N3VInt_QHSD<1, 0, 0b0000, 1, N3RegFrm,
                             IIC_VBINi4D, IIC_VBINi4D, IIC_VBINi4Q, IIC_VBINi4Q,
                             "vqadd", "u", int_arm_neon_vqaddu, 1>;
 //   VADDHN   : Vector Add and Narrow Returning High Half (D = Q + Q)
-defm VADDHN   : N3VNInt_HSD<0,1,0b0100,0, "vaddhn", "i",
-                            int_arm_neon_vaddhn, 1>;
+defm VADDHN   : N3VNInt_HSD<0,1,0b0100,0, "vaddhn", "i", null_frag, 1>;
 //   VRADDHN  : Vector Rounding Add and Narrow Returning High Half (D = Q + Q)
 defm VRADDHN  : N3VNInt_HSD<1,1,0b0100,0, "vraddhn", "i",
                             int_arm_neon_vraddhn, 1>;
+
+def : Pat<(v8i8  (trunc (NEONvshru (add (v8i16 QPR:$Vn), QPR:$Vm), 8))),
+          (VADDHNv8i8 QPR:$Vn, QPR:$Vm)>;
+def : Pat<(v4i16 (trunc (NEONvshru (add (v4i32 QPR:$Vn), QPR:$Vm), 16))),
+          (VADDHNv4i16 QPR:$Vn, QPR:$Vm)>;
+def : Pat<(v2i32 (trunc (NEONvshru (add (v2i64 QPR:$Vn), QPR:$Vm), 32))),
+          (VADDHNv2i32 QPR:$Vn, QPR:$Vm)>;
 
 // Vector Multiply Operations.
 
@@ -4161,8 +4139,27 @@ defm VMLALslu : N3VLMulOpSL_HS<1, 0b0010, "vmlal", "u", NEONvmullu, add>;
 
 //   VQDMLAL  : Vector Saturating Doubling Multiply Accumulate Long (Q += D * D)
 defm VQDMLAL  : N3VLInt3_HS<0, 1, 0b1001, 0, IIC_VMACi16D, IIC_VMACi32D,
-                            "vqdmlal", "s", int_arm_neon_vqdmlal>;
-defm VQDMLALsl: N3VLInt3SL_HS<0, 0b0011, "vqdmlal", "s", int_arm_neon_vqdmlal>;
+                            "vqdmlal", "s", null_frag>;
+defm VQDMLALsl: N3VLInt3SL_HS<0, 0b0011, "vqdmlal", "s", null_frag>;
+
+def : Pat<(v4i32 (int_arm_neon_vqadds (v4i32 QPR:$src1),
+                     (v4i32 (int_arm_neon_vqdmull (v4i16 DPR:$Vn),
+                                                  (v4i16 DPR:$Vm))))),
+          (VQDMLALv4i32 QPR:$src1, DPR:$Vn, DPR:$Vm)>;
+def : Pat<(v2i64 (int_arm_neon_vqadds (v2i64 QPR:$src1),
+                     (v2i64 (int_arm_neon_vqdmull (v2i32 DPR:$Vn),
+                                                  (v2i32 DPR:$Vm))))),
+          (VQDMLALv2i64 QPR:$src1, DPR:$Vn, DPR:$Vm)>;
+def : Pat<(v4i32 (int_arm_neon_vqadds (v4i32 QPR:$src1),
+                     (v4i32 (int_arm_neon_vqdmull (v4i16 DPR:$Vn),
+                                (v4i16 (NEONvduplane (v4i16 DPR_8:$Vm),
+                                                     imm:$lane)))))),
+          (VQDMLALslv4i16 QPR:$src1, DPR:$Vn, DPR_8:$Vm, imm:$lane)>;
+def : Pat<(v2i64 (int_arm_neon_vqadds (v2i64 QPR:$src1),
+                     (v2i64 (int_arm_neon_vqdmull (v2i32 DPR:$Vn),
+                                (v2i32 (NEONvduplane (v2i32 DPR_VFP2:$Vm),
+                                                     imm:$lane)))))),
+          (VQDMLALslv2i32 QPR:$src1, DPR:$Vn, DPR_VFP2:$Vm, imm:$lane)>;
 
 //   VMLS     : Vector Multiply Subtract (integer and floating-point)
 defm VMLS     : N3VMulOp_QHS<1, 0, 0b1001, 0, IIC_VMACi16D, IIC_VMACi32D,
@@ -4218,8 +4215,27 @@ defm VMLSLslu : N3VLMulOpSL_HS<1, 0b0110, "vmlsl", "u", NEONvmullu, sub>;
 
 //   VQDMLSL  : Vector Saturating Doubling Multiply Subtract Long (Q -= D * D)
 defm VQDMLSL  : N3VLInt3_HS<0, 1, 0b1011, 0, IIC_VMACi16D, IIC_VMACi32D,
-                            "vqdmlsl", "s", int_arm_neon_vqdmlsl>;
-defm VQDMLSLsl: N3VLInt3SL_HS<0, 0b111, "vqdmlsl", "s", int_arm_neon_vqdmlsl>;
+                            "vqdmlsl", "s", null_frag>;
+defm VQDMLSLsl: N3VLInt3SL_HS<0, 0b111, "vqdmlsl", "s", null_frag>;
+
+def : Pat<(v4i32 (int_arm_neon_vqsubs (v4i32 QPR:$src1),
+                     (v4i32 (int_arm_neon_vqdmull (v4i16 DPR:$Vn),
+                                                  (v4i16 DPR:$Vm))))),
+          (VQDMLSLv4i32 QPR:$src1, DPR:$Vn, DPR:$Vm)>;
+def : Pat<(v2i64 (int_arm_neon_vqsubs (v2i64 QPR:$src1),
+                     (v2i64 (int_arm_neon_vqdmull (v2i32 DPR:$Vn),
+                                                  (v2i32 DPR:$Vm))))),
+          (VQDMLSLv2i64 QPR:$src1, DPR:$Vn, DPR:$Vm)>;
+def : Pat<(v4i32 (int_arm_neon_vqsubs (v4i32 QPR:$src1),
+                     (v4i32 (int_arm_neon_vqdmull (v4i16 DPR:$Vn),
+                                (v4i16 (NEONvduplane (v4i16 DPR_8:$Vm),
+                                                     imm:$lane)))))),
+          (VQDMLSLslv4i16 QPR:$src1, DPR:$Vn, DPR_8:$Vm, imm:$lane)>;
+def : Pat<(v2i64 (int_arm_neon_vqsubs (v2i64 QPR:$src1),
+                     (v2i64 (int_arm_neon_vqdmull (v2i32 DPR:$Vn),
+                                (v2i32 (NEONvduplane (v2i32 DPR_VFP2:$Vm),
+                                                     imm:$lane)))))),
+          (VQDMLSLslv2i32 QPR:$src1, DPR:$Vn, DPR_VFP2:$Vm, imm:$lane)>;
 
 // Fused Vector Multiply-Accumulate and Fused Multiply-Subtract Operations.
 def  VFMAfd   : N3VDMulOp<0, 0, 0b00, 0b1100, 1, IIC_VFMACD, "vfma", "f32",
@@ -4284,11 +4300,17 @@ defm VQSUBu   : N3VInt_QHSD<1, 0, 0b0010, 1, N3RegFrm,
                             IIC_VSUBi4D, IIC_VSUBi4D, IIC_VSUBi4Q, IIC_VSUBi4Q,
                             "vqsub", "u", int_arm_neon_vqsubu, 0>;
 //   VSUBHN   : Vector Subtract and Narrow Returning High Half (D = Q - Q)
-defm VSUBHN   : N3VNInt_HSD<0,1,0b0110,0, "vsubhn", "i",
-                            int_arm_neon_vsubhn, 0>;
+defm VSUBHN   : N3VNInt_HSD<0,1,0b0110,0, "vsubhn", "i", null_frag, 0>;
 //   VRSUBHN  : Vector Rounding Subtract and Narrow Returning High Half (D=Q-Q)
 defm VRSUBHN  : N3VNInt_HSD<1,1,0b0110,0, "vrsubhn", "i",
                             int_arm_neon_vrsubhn, 0>;
+
+def : Pat<(v8i8  (trunc (NEONvshru (sub (v8i16 QPR:$Vn), QPR:$Vm), 8))),
+          (VSUBHNv8i8 QPR:$Vn, QPR:$Vm)>;
+def : Pat<(v4i16 (trunc (NEONvshru (sub (v4i32 QPR:$Vn), QPR:$Vm), 16))),
+          (VSUBHNv4i16 QPR:$Vn, QPR:$Vm)>;
+def : Pat<(v2i32 (trunc (NEONvshru (sub (v2i64 QPR:$Vn), QPR:$Vm), 32))),
+          (VSUBHNv2i32 QPR:$Vn, QPR:$Vm)>;
 
 // Vector Comparisons.
 
@@ -5489,6 +5511,25 @@ def VCVTxu2fq : N2VCvtQ<1, 1, 0b1110, 0, 1, "vcvt", "f32.u32",
                         v4f32, v4i32, int_arm_neon_vcvtfxu2fp>;
 }
 
+def : NEONInstAlias<"vcvt${p}.s32.f32 $Dd, $Dm, #0", 
+                    (VCVTf2sd DPR:$Dd, DPR:$Dm, pred:$p)>;
+def : NEONInstAlias<"vcvt${p}.u32.f32 $Dd, $Dm, #0", 
+                    (VCVTf2ud DPR:$Dd, DPR:$Dm, pred:$p)>;
+def : NEONInstAlias<"vcvt${p}.f32.s32 $Dd, $Dm, #0", 
+                    (VCVTs2fd DPR:$Dd, DPR:$Dm, pred:$p)>;
+def : NEONInstAlias<"vcvt${p}.f32.u32 $Dd, $Dm, #0", 
+                    (VCVTu2fd DPR:$Dd, DPR:$Dm, pred:$p)>;
+
+def : NEONInstAlias<"vcvt${p}.s32.f32 $Qd, $Qm, #0", 
+                    (VCVTf2sq QPR:$Qd, QPR:$Qm, pred:$p)>;
+def : NEONInstAlias<"vcvt${p}.u32.f32 $Qd, $Qm, #0", 
+                    (VCVTf2uq QPR:$Qd, QPR:$Qm, pred:$p)>;
+def : NEONInstAlias<"vcvt${p}.f32.s32 $Qd, $Qm, #0", 
+                    (VCVTs2fq QPR:$Qd, QPR:$Qm, pred:$p)>;
+def : NEONInstAlias<"vcvt${p}.f32.u32 $Qd, $Qm, #0", 
+                    (VCVTu2fq QPR:$Qd, QPR:$Qm, pred:$p)>;
+
+
 //   VCVT     : Vector Convert Between Half-Precision and Single-Precision.
 def  VCVTf2h  : N2VNInt<0b11, 0b11, 0b01, 0b10, 0b01100, 0, 0,
                         IIC_VUNAQ, "vcvt", "f16.f32",
@@ -5753,9 +5794,9 @@ multiclass VRINT_FPI<string op, bits<3> op9_7, SDPatternOperator Int> {
     }
   }
 
-  def : InstAlias<!strconcat("vrint", op, ".f32.f32\t$Dd, $Dm"),
+  def : NEONInstAlias<!strconcat("vrint", op, ".f32.f32\t$Dd, $Dm"),
                   (!cast<Instruction>(NAME#"D") DPR:$Dd, DPR:$Dm)>;
-  def : InstAlias<!strconcat("vrint", op, ".f32.f32\t$Qd, $Qm"),
+  def : NEONInstAlias<!strconcat("vrint", op, ".f32.f32\t$Qd, $Qm"),
                   (!cast<Instruction>(NAME#"Q") QPR:$Qd, QPR:$Qm)>;
 }
 

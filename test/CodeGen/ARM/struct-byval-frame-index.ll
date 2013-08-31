@@ -143,6 +143,7 @@ land.lhs.true246:                                 ; preds = %if.end236
   br i1 undef, label %if.end249, label %if.then248
 
 if.then248:                                       ; preds = %land.lhs.true246
+  tail call void asm sideeffect "", "~{r1},~{r2},~{r3},~{r4},~{r5},~{r6},~{r7},~{r8},~{r9},~{r10},~{r11}"() nounwind
   tail call void @RestoreMVBlock8x8(i32 1, i32 0, %structN* byval @tr8x8, i32 0) #0
   tail call void @RestoreMVBlock8x8(i32 1, i32 2, %structN* byval @tr8x8, i32 0) #0
   tail call void @RestoreMVBlock8x8(i32 1, i32 3, %structN* byval @tr8x8, i32 0) #0
@@ -215,7 +216,7 @@ declare void @update_offset_params(i32, i32) #1
 declare void @RestoreMVBlock8x8(i32, i32, %structN* byval nocapture, i32) #1
 
 attributes #0 = { nounwind }
-attributes #1 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-frame-pointer-elim-non-leaf"="false" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #1 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "unsafe-fp-math"="false" "use-soft-float"="false" }
 
 !0 = metadata !{metadata !"any pointer", metadata !1}
 !1 = metadata !{metadata !"omnipotent char", metadata !2}

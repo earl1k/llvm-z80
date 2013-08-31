@@ -50,10 +50,10 @@ def FeatureSSE3    : SubtargetFeature<"sse3", "X86SSELevel", "SSE3",
 def FeatureSSSE3   : SubtargetFeature<"ssse3", "X86SSELevel", "SSSE3",
                                       "Enable SSSE3 instructions",
                                       [FeatureSSE3]>;
-def FeatureSSE41   : SubtargetFeature<"sse41", "X86SSELevel", "SSE41",
+def FeatureSSE41   : SubtargetFeature<"sse4.1", "X86SSELevel", "SSE41",
                                       "Enable SSE 4.1 instructions",
                                       [FeatureSSSE3]>;
-def FeatureSSE42   : SubtargetFeature<"sse42", "X86SSELevel", "SSE42",
+def FeatureSSE42   : SubtargetFeature<"sse4.2", "X86SSELevel", "SSE42",
                                       "Enable SSE 4.2 instructions",
                                       [FeatureSSE41]>;
 def Feature3DNow   : SubtargetFeature<"3dnow", "X863DNowLevel", "ThreeDNow",
@@ -86,6 +86,19 @@ def FeatureAVX     : SubtargetFeature<"avx", "X86SSELevel", "AVX",
 def FeatureAVX2    : SubtargetFeature<"avx2", "X86SSELevel", "AVX2",
                                       "Enable AVX2 instructions",
                                       [FeatureAVX]>;
+def FeatureAVX512   : SubtargetFeature<"avx512f", "X86SSELevel", "AVX512F",
+                                      "Enable AVX-512 instructions",
+                                      [FeatureAVX2]>;
+def FeatureERI      : SubtargetFeature<"avx512er", "HasERI", "true",
+                      "Enable AVX-512 Exponential and Reciprocal Instructions",
+                                      [FeatureAVX512]>;
+def FeatureCDI      : SubtargetFeature<"avx512cd", "HasCDI", "true",
+                      "Enable AVX-512 Conflict Detection Instructions",
+                                      [FeatureAVX512]>;
+def FeaturePFI      : SubtargetFeature<"avx512pf", "HasPFI", "true",
+                      "Enable AVX-512 PreFetch Instructions",
+                                      [FeatureAVX512]>;
+
 def FeaturePCLMUL  : SubtargetFeature<"pclmul", "HasPCLMUL", "true",
                          "Enable packed carry-less multiplication instructions",
                                [FeatureSSE2]>;
@@ -106,7 +119,7 @@ def FeatureAES     : SubtargetFeature<"aes", "HasAES", "true",
                                       [FeatureSSE2]>;
 def FeatureMOVBE   : SubtargetFeature<"movbe", "HasMOVBE", "true",
                                       "Support MOVBE instruction">;
-def FeatureRDRAND  : SubtargetFeature<"rdrand", "HasRDRAND", "true",
+def FeatureRDRAND  : SubtargetFeature<"rdrnd", "HasRDRAND", "true",
                                       "Support RDRAND instruction">;
 def FeatureF16C    : SubtargetFeature<"f16c", "HasF16C", "true",
                        "Support 16-bit floating point conversion instructions">;
@@ -193,6 +206,15 @@ def : ProcessorModel<"atom", AtomModel,
                       FeatureLEAUsesAG,
                       FeaturePadShortFunctions]>;
 
+// Silvermont.
+def : ProcessorModel<"slm", AtomModel,
+                     [ProcIntelAtom, FeatureSSE42, FeatureCMPXCHG16B,
+                      FeatureMOVBE, FeatureSlowBTMem, FeatureLeaForSP,
+                      FeatureSlowDivide,
+                      FeatureCallRegIndirect,
+                      FeatureLEAUsesAG,
+                      FeaturePadShortFunctions]>;
+
 // "Arrandale" along with corei3 and corei5
 def : ProcessorModel<"corei7", SandyBridgeModel,
                      [FeatureSSE42, FeatureCMPXCHG16B, FeatureSlowBTMem,
@@ -226,6 +248,15 @@ def : ProcessorModel<"core-avx2", HaswellModel,
                       FeatureF16C, FeatureFSGSBase, FeatureMOVBE, FeatureLZCNT,
                       FeatureBMI, FeatureBMI2, FeatureFMA, FeatureRTM,
                       FeatureHLE]>;
+
+// KNL
+// FIXME: define KNL model
+def : ProcessorModel<"knl", HaswellModel,
+                     [FeatureAVX512, FeatureERI, FeatureCDI, FeaturePFI,
+                      FeatureCMPXCHG16B, FeatureFastUAMem, FeaturePOPCNT,
+                      FeatureAES, FeaturePCLMUL, FeatureRDRAND, FeatureF16C,
+                      FeatureFSGSBase, FeatureMOVBE, FeatureLZCNT, FeatureBMI,
+                      FeatureBMI2, FeatureFMA, FeatureRTM, FeatureHLE]>;
 
 def : Proc<"k6",              [FeatureMMX]>;
 def : Proc<"k6-2",            [Feature3DNow]>;

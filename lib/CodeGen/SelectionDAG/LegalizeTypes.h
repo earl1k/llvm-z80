@@ -410,6 +410,7 @@ private:
   SDValue SoftenFloatRes_FPOWI(SDNode *N);
   SDValue SoftenFloatRes_FREM(SDNode *N);
   SDValue SoftenFloatRes_FRINT(SDNode *N);
+  SDValue SoftenFloatRes_FROUND(SDNode *N);
   SDValue SoftenFloatRes_FSIN(SDNode *N);
   SDValue SoftenFloatRes_FSQRT(SDNode *N);
   SDValue SoftenFloatRes_FSUB(SDNode *N);
@@ -470,6 +471,7 @@ private:
   void ExpandFloatRes_FPOWI     (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandFloatRes_FREM      (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandFloatRes_FRINT     (SDNode *N, SDValue &Lo, SDValue &Hi);
+  void ExpandFloatRes_FROUND    (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandFloatRes_FSIN      (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandFloatRes_FSQRT     (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandFloatRes_FSUB      (SDNode *N, SDValue &Lo, SDValue &Hi);
@@ -480,6 +482,7 @@ private:
   // Float Operand Expansion.
   bool ExpandFloatOperand(SDNode *N, unsigned OperandNo);
   SDValue ExpandFloatOp_BR_CC(SDNode *N);
+  SDValue ExpandFloatOp_FCOPYSIGN(SDNode *N);
   SDValue ExpandFloatOp_FP_ROUND(SDNode *N);
   SDValue ExpandFloatOp_FP_TO_SINT(SDNode *N);
   SDValue ExpandFloatOp_FP_TO_UINT(SDNode *N);
@@ -628,6 +631,7 @@ private:
 
   SDValue WidenVecRes_Ternary(SDNode *N);
   SDValue WidenVecRes_Binary(SDNode *N);
+  SDValue WidenVecRes_BinaryCanTrap(SDNode *N);
   SDValue WidenVecRes_Convert(SDNode *N);
   SDValue WidenVecRes_POWI(SDNode *N);
   SDValue WidenVecRes_Shift(SDNode *N);

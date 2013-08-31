@@ -329,6 +329,34 @@
 	brcl	-1, bar
 	brcl	16, bar
 
+#CHECK: error: offset out of range
+#CHECK: brct	%r0, -0x100002
+#CHECK: error: offset out of range
+#CHECK: brct	%r0, -1
+#CHECK: error: offset out of range
+#CHECK: brct	%r0, 1
+#CHECK: error: offset out of range
+#CHECK: brct	%r0, 0x10000
+
+	brct	%r0, -0x100002
+	brct	%r0, -1
+	brct	%r0, 1
+	brct	%r0, 0x10000
+
+#CHECK: error: offset out of range
+#CHECK: brctg	%r0, -0x100002
+#CHECK: error: offset out of range
+#CHECK: brctg	%r0, -1
+#CHECK: error: offset out of range
+#CHECK: brctg	%r0, 1
+#CHECK: error: offset out of range
+#CHECK: brctg	%r0, 0x10000
+
+	brctg	%r0, -0x100002
+	brctg	%r0, -1
+	brctg	%r0, 1
+	brctg	%r0, 0x10000
+
 #CHECK: error: invalid operand
 #CHECK: c	%r0, -1
 #CHECK: error: invalid operand
@@ -683,6 +711,50 @@
 
 	cl	%r0, -1
 	cl	%r0, 4096
+
+#CHECK: error: missing length in address
+#CHECK: clc	0, 0
+#CHECK: error: missing length in address
+#CHECK: clc	0(%r1), 0(%r1)
+#CHECK: error: invalid use of length addressing
+#CHECK: clc	0(1,%r1), 0(2,%r1)
+#CHECK: error: invalid operand
+#CHECK: clc	0(0,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: clc	0(257,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: clc	-1(1,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: clc	4096(1,%r1), 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: clc	0(1,%r1), -1(%r1)
+#CHECK: error: invalid operand
+#CHECK: clc	0(1,%r1), 4096(%r1)
+#CHECK: error: %r0 used in an address
+#CHECK: clc	0(1,%r0), 0(%r1)
+#CHECK: error: %r0 used in an address
+#CHECK: clc	0(1,%r1), 0(%r0)
+#CHECK: error: invalid use of indexed addressing
+#CHECK: clc	0(%r1,%r2), 0(%r1)
+#CHECK: error: invalid use of indexed addressing
+#CHECK: clc	0(1,%r2), 0(%r1,%r2)
+#CHECK: error: unknown token in expression
+#CHECK: clc	0(-), 0
+
+	clc	0, 0
+	clc	0(%r1), 0(%r1)
+	clc	0(1,%r1), 0(2,%r1)
+	clc	0(0,%r1), 0(%r1)
+	clc	0(257,%r1), 0(%r1)
+	clc	-1(1,%r1), 0(%r1)
+	clc	4096(1,%r1), 0(%r1)
+	clc	0(1,%r1), -1(%r1)
+	clc	0(1,%r1), 4096(%r1)
+	clc	0(1,%r0), 0(%r1)
+	clc	0(1,%r1), 0(%r0)
+	clc	0(%r1,%r2), 0(%r1)
+	clc	0(1,%r2), 0(%r1,%r2)
+	clc	0(-), 0
 
 #CHECK: error: invalid operand
 #CHECK: clfhsi	-1, 0
@@ -1070,6 +1142,11 @@
 	fidbr	%f0, -1, %f0
 	fidbr	%f0, 16, %f0
 
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: fidbra	%f0, 0, %f0, 0
+
+	fidbra	%f0, 0, %f0, 0
+
 #CHECK: error: invalid operand
 #CHECK: fiebr	%f0, -1, %f0
 #CHECK: error: invalid operand
@@ -1077,6 +1154,11 @@
 
 	fiebr	%f0, -1, %f0
 	fiebr	%f0, 16, %f0
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: fiebra	%f0, 0, %f0, 0
+
+	fiebra	%f0, 0, %f0, 0
 
 #CHECK: error: invalid operand
 #CHECK: fixbr	%f0, -1, %f0
@@ -1091,6 +1173,11 @@
 	fixbr	%f0, 16, %f0
 	fixbr	%f0, 0, %f2
 	fixbr	%f2, 0, %f0
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: fixbra	%f0, 0, %f0, 0
+
+	fixbra	%f0, 0, %f0, 0
 
 #CHECK: error: invalid register pair
 #CHECK: flogr	%r1, %r0
@@ -1591,6 +1678,38 @@
 
 	lrvg	%r0, -524289
 	lrvg	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: lt	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: lt	%r0, 524288
+
+	lt	%r0, -524289
+	lt	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: ltg	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: ltg	%r0, 524288
+
+	ltg	%r0, -524289
+	ltg	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: ltgf	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: ltgf	%r0, 524288
+
+	ltgf	%r0, -524289
+	ltgf	%r0, 524288
+
+#CHECK: error: invalid register pair
+#CHECK: ltxbr	%f0, %f14
+#CHECK: error: invalid register pair
+#CHECK: ltxbr	%f14, %f0
+
+	ltxbr	%f0, %f14
+	ltxbr	%f14, %f0
 
 #CHECK: error: invalid register pair
 #CHECK: lxr	%f0, %f2
@@ -2157,6 +2276,40 @@
 	oy	%r0, 524288
 
 #CHECK: error: invalid operand
+#CHECK: pfd	-1, 0
+#CHECK: error: invalid operand
+#CHECK: pfd	16, 0
+#CHECK: error: invalid operand
+#CHECK: pfd	1, -524289
+#CHECK: error: invalid operand
+#CHECK: pfd	1, 524288
+
+	pfd	-1, 0
+	pfd	16, 0
+	pfd	1, -524289
+	pfd	1, 524288
+
+#CHECK: error: invalid operand
+#CHECK: pfdrl	-1, 0
+#CHECK: error: invalid operand
+#CHECK: pfdrl	16, 0
+#CHECK: error: offset out of range
+#CHECK: pfdrl	1, -0x1000000002
+#CHECK: error: offset out of range
+#CHECK: pfdrl	1, -1
+#CHECK: error: offset out of range
+#CHECK: pfdrl	1, 1
+#CHECK: error: offset out of range
+#CHECK: pfdrl	1, 0x100000000
+
+	pfdrl	-1, 0
+	pfdrl	16, 0
+	pfdrl	1, -0x1000000002
+	pfdrl	1, -1
+	pfdrl	1, 1
+	pfdrl	1, 0x100000000
+
+#CHECK: error: invalid operand
 #CHECK: risbg	%r0,%r0,0,0,-1
 #CHECK: error: invalid operand
 #CHECK: risbg	%r0,%r0,0,0,64
@@ -2175,6 +2328,16 @@
 	risbg	%r0,%r0,0,256,0
 	risbg	%r0,%r0,-1,0,0
 	risbg	%r0,%r0,256,0,0
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: risbhg	%r1, %r2, 0, 0, 0
+
+	risbhg	%r1, %r2, 0, 0, 0
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: risblg	%r1, %r2, 0, 0, 0
+
+	risblg	%r1, %r2, 0, 0, 0
 
 #CHECK: error: invalid operand
 #CHECK: rnsbg	%r0,%r0,0,0,-1
@@ -2699,6 +2862,38 @@
 
 	sy	%r0, -524289
 	sy	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: tmhh	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: tmhh	%r0, 0x10000
+
+	tmhh	%r0, -1
+	tmhh	%r0, 0x10000
+
+#CHECK: error: invalid operand
+#CHECK: tmhl	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: tmhl	%r0, 0x10000
+
+	tmhl	%r0, -1
+	tmhl	%r0, 0x10000
+
+#CHECK: error: invalid operand
+#CHECK: tmlh	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: tmlh	%r0, 0x10000
+
+	tmlh	%r0, -1
+	tmlh	%r0, 0x10000
+
+#CHECK: error: invalid operand
+#CHECK: tmll	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: tmll	%r0, 0x10000
+
+	tmll	%r0, -1
+	tmll	%r0, 0x10000
 
 #CHECK: error: invalid operand
 #CHECK: x	%r0, -1

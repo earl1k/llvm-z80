@@ -14,15 +14,16 @@ add_public_tablegen_target(AMDGPUCommonTableGen)
 add_llvm_target(R600CodeGen
   AMDILCFGStructurizer.cpp
   AMDILIntrinsicInfo.cpp
-  AMDILISelDAGToDAG.cpp
   AMDILISelLowering.cpp
   AMDGPUAsmPrinter.cpp
   AMDGPUFrameLowering.cpp
   AMDGPUIndirectAddressing.cpp
+  AMDGPUISelDAGToDAG.cpp
   AMDGPUMCInstLower.cpp
   AMDGPUMachineFunction.cpp
   AMDGPUSubtarget.cpp
   AMDGPUTargetMachine.cpp
+  AMDGPUTargetTransformInfo.cpp
   AMDGPUISelLowering.cpp
   AMDGPUConvertToISA.cpp
   AMDGPUInstrInfo.cpp
@@ -39,15 +40,17 @@ add_llvm_target(R600CodeGen
   R600RegisterInfo.cpp
   R600TextureIntrinsicsReplacer.cpp
   SIAnnotateControlFlow.cpp
+  SIFixSGPRCopies.cpp
   SIInsertWaits.cpp
   SIInstrInfo.cpp
   SIISelLowering.cpp
   SILowerControlFlow.cpp
   SIMachineFunctionInfo.cpp
   SIRegisterInfo.cpp
+  SITypeRewriter.cpp
   )
 
-add_dependencies(LLVMR600CodeGen intrinsics_gen)
+add_dependencies(LLVMR600CodeGen AMDGPUCommonTableGen intrinsics_gen)
 
 add_subdirectory(InstPrinter)
 add_subdirectory(TargetInfo)

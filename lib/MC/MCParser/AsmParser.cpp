@@ -149,6 +149,9 @@ private:
   /// ActiveMacros - Stack of active macro instantiations.
   std::vector<MacroInstantiation*> ActiveMacros;
 
+  /// MacroLikeBodies - List of bodies of anonymous macros.
+  std::deque<MCAsmMacro> MacroLikeBodies;
+
   /// Boolean tracking whether macro substitution is enabled.
   unsigned MacrosEnabledFlag : 1;
 
@@ -162,7 +165,7 @@ private:
   int CppHashBuf;
   /// When generating dwarf for assembly source files we need to calculate the
   /// logical line number based on the last parsed cpp hash file line comment
-  /// and current line. Since this is slow and messes up the SourceMgr's 
+  /// and current line. Since this is slow and messes up the SourceMgr's
   /// cache we save the last info we queried with SrcMgr.FindLineNumber().
   SMLoc LastQueryIDLoc;
   int LastQueryBuffer;
@@ -273,7 +276,7 @@ private:
   /// \brief Are we inside a macro instantiation?
   bool InsideMacroInstantiation() {return !ActiveMacros.empty();}
 
-  /// \brief Handle entry to macro instantiation. 
+  /// \brief Handle entry to macro instantiation.
   ///
   /// \param M The macro.
   /// \param NameLoc Instantiation location.
@@ -339,7 +342,7 @@ private:
     DK_FLOAT, DK_DOUBLE, DK_ALIGN, DK_ALIGN32, DK_BALIGN, DK_BALIGNW,
     DK_BALIGNL, DK_P2ALIGN, DK_P2ALIGNW, DK_P2ALIGNL, DK_ORG, DK_FILL, DK_ENDR,
     DK_BUNDLE_ALIGN_MODE, DK_BUNDLE_LOCK, DK_BUNDLE_UNLOCK,
-    DK_ZERO, DK_EXTERN, DK_GLOBL, DK_GLOBAL, DK_INDIRECT_SYMBOL,
+    DK_ZERO, DK_EXTERN, DK_GLOBL, DK_GLOBAL,
     DK_LAZY_REFERENCE, DK_NO_DEAD_STRIP, DK_SYMBOL_RESOLVER, DK_PRIVATE_EXTERN,
     DK_REFERENCE, DK_WEAK_DEFINITION, DK_WEAK_REFERENCE,
     DK_WEAK_DEF_CAN_BE_HIDDEN, DK_COMM, DK_COMMON, DK_LCOMM, DK_ABORT,
@@ -820,7 +823,7 @@ bool AsmParser::ParsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
           Variant = MCSymbolRefExpr::VK_None;
           return TokError("invalid variant '" + Split.second + "'");
         }
-	IDVal = Split.first;
+        IDVal = Split.first;
       }
       if (IDVal == "f" || IDVal == "b"){
         MCSymbol *Sym = Ctx.GetDirectionalLocalSymbol(IntVal,
@@ -893,6 +896,10 @@ bool AsmParser::parsePrimaryExpr(const MCExpr *&Res, SMLoc &EndLoc) {
 const MCExpr *
 AsmParser::ApplyModifierToExpr(const MCExpr *E,
                                MCSymbolRefExpr::VariantKind Variant) {
+  // Ask the target implementation about this expression first.
+  const MCExpr *NewE = getTargetParser().applyModifierToExpr(E, Variant, Ctx);
+  if (NewE)
+    return NewE;
   // Recurse over the given expression, rebuilding it to apply the given variant
   // if there is exactly one symbol.
   switch (E->getKind()) {
@@ -1267,11 +1274,11 @@ bool AsmParser::ParseStatement(ParseStatementInfo &Info) {
     }
 
   // Otherwise, we have a normal instruction or directive.
-  
+
   // Directives start with "."
   if (IDVal[0] == '.' && IDVal != ".") {
     // There are several entities interested in parsing directives:
-    // 
+    //
     // 1. The target-specific assembly parser. Some directives are target
     //    specific or may potentially behave differently on certain targets.
     // 2. Asm parser extensions. For example, platform-specific parsers
@@ -1358,8 +1365,6 @@ bool AsmParser::ParseStatement(ParseStatementInfo &Info) {
       case DK_GLOBL:
       case DK_GLOBAL:
         return ParseDirectiveSymbolAttribute(MCSA_Global);
-      case DK_INDIRECT_SYMBOL:
-        return ParseDirectiveSymbolAttribute(MCSA_IndirectSymbol);
       case DK_LAZY_REFERENCE:
         return ParseDirectiveSymbolAttribute(MCSA_LazyReference);
       case DK_NO_DEAD_STRIP:
@@ -1487,7 +1492,8 @@ bool AsmParser::ParseStatement(ParseStatementInfo &Info) {
   std::string OpcodeStr = IDVal.lower();
   ParseInstructionInfo IInfo(Info.AsmRewrites);
   bool HadError = getTargetParser().ParseInstruction(IInfo, OpcodeStr,
-                                                     IDLoc, Info.ParsedOperands);
+                                                     IDLoc,
+                                                     Info.ParsedOperands);
   Info.ParseError = HadError;
 
   // Dump the parsed representation, if requested.
@@ -1517,7 +1523,7 @@ bool AsmParser::ParseStatement(ParseStatementInfo &Info) {
     // If we previously parsed a cpp hash file line comment then make sure the
     // current Dwarf File is for the CppHashFilename if not then emit the
     // Dwarf File table for it and adjust the line number for the .loc.
-    const SmallVectorImpl<MCDwarfFile *> &MCDwarfFiles = 
+    const SmallVectorImpl<MCDwarfFile *> &MCDwarfFiles =
       getContext().getMCDwarfFiles();
     if (CppHashFilename.size() != 0) {
       if (MCDwarfFiles[getContext().getGenDwarfFileNumber()]->getName() !=
@@ -1525,7 +1531,7 @@ bool AsmParser::ParseStatement(ParseStatementInfo &Info) {
         getStreamer().EmitDwarfFileDirective(
           getContext().nextGenDwarfFileNumber(), StringRef(), CppHashFilename);
 
-       // Since SrcMgr.FindLineNumber() is slow and messes up the SourceMgr's 
+       // Since SrcMgr.FindLineNumber() is slow and messes up the SourceMgr's
        // cache with the different Loc from the call above we save the last
        // info we queried here with SrcMgr.FindLineNumber().
        unsigned CppHashLocLineNo;
@@ -1887,7 +1893,8 @@ bool AsmParser::ParseMacroArgument(MCAsmMacroArgument &MA,
 }
 
 // Parse the macro instantiation arguments.
-bool AsmParser::ParseMacroArguments(const MCAsmMacro *M, MCAsmMacroArguments &A) {
+bool AsmParser::ParseMacroArguments(const MCAsmMacro *M,
+                                    MCAsmMacroArguments &A) {
   const unsigned NParameters = M ? M->Parameters.size() : 0;
   // Argument delimiter is initially unknown. It will be set by
   // ParseMacroArgument()
@@ -3372,7 +3379,8 @@ bool AsmParser::ParseDirectiveSymbolAttribute(MCSymbolAttr Attr) {
       if (Sym->isTemporary())
         return Error(Loc, "non-local symbol required in directive");
 
-      getStreamer().EmitSymbolAttribute(Sym, Attr);
+      if (!getStreamer().EmitSymbolAttribute(Sym, Attr))
+        return Error(Loc, "unable to emit symbol attribute");
 
       if (getLexer().is(AsmToken::EndOfStatement))
         break;
@@ -3745,7 +3753,6 @@ void AsmParser::initializeDirectiveKindMap() {
   DirectiveKindMap[".extern"] = DK_EXTERN;
   DirectiveKindMap[".globl"] = DK_GLOBL;
   DirectiveKindMap[".global"] = DK_GLOBAL;
-  DirectiveKindMap[".indirect_symbol"] = DK_INDIRECT_SYMBOL;
   DirectiveKindMap[".lazy_reference"] = DK_LAZY_REFERENCE;
   DirectiveKindMap[".no_dead_strip"] = DK_NO_DEAD_STRIP;
   DirectiveKindMap[".symbol_resolver"] = DK_SYMBOL_RESOLVER;
@@ -3858,7 +3865,8 @@ MCAsmMacro *AsmParser::ParseMacroLikeBody(SMLoc DirectiveLoc) {
   // We Are Anonymous.
   StringRef Name;
   MCAsmMacroParameters Parameters;
-  return new MCAsmMacro(Name, Body, Parameters);
+  MacroLikeBodies.push_back(MCAsmMacro(Name, Body, Parameters));
+  return &MacroLikeBodies.back();
 }
 
 void AsmParser::InstantiateMacroLikeBody(MCAsmMacro *M, SMLoc DirectiveLoc,

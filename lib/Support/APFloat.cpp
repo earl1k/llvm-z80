@@ -778,6 +778,7 @@ APFloat::bitwiseIsEqual(const APFloat &rhs) const {
 APFloat::APFloat(const fltSemantics &ourSemantics, integerPart value) {
   initialize(&ourSemantics);
   sign = 0;
+  category = fcNormal;
   zeroSignificand();
   exponent = ourSemantics.precision - 1;
   significandParts()[0] = value;
@@ -845,7 +846,6 @@ APFloat::significandParts()
 void
 APFloat::zeroSignificand()
 {
-  category = fcNormal;
   APInt::tcSet(significandParts(), 0, partCount());
 }
 
@@ -1354,6 +1354,7 @@ APFloat::addOrSubtractSpecials(const APFloat &rhs, bool subtract)
   case PackCategoriesIntoKey(fcZero, fcNaN):
   case PackCategoriesIntoKey(fcNormal, fcNaN):
   case PackCategoriesIntoKey(fcInfinity, fcNaN):
+    sign = false;
     category = fcNaN;
     copySignificand(rhs);
     return opOK;
@@ -1472,11 +1473,13 @@ APFloat::multiplySpecials(const APFloat &rhs)
   case PackCategoriesIntoKey(fcNaN, fcNormal):
   case PackCategoriesIntoKey(fcNaN, fcInfinity):
   case PackCategoriesIntoKey(fcNaN, fcNaN):
+    sign = false;
     return opOK;
 
   case PackCategoriesIntoKey(fcZero, fcNaN):
   case PackCategoriesIntoKey(fcNormal, fcNaN):
   case PackCategoriesIntoKey(fcInfinity, fcNaN):
+    sign = false;
     category = fcNaN;
     copySignificand(rhs);
     return opOK;
@@ -1510,21 +1513,20 @@ APFloat::divideSpecials(const APFloat &rhs)
   default:
     llvm_unreachable(0);
 
-  case PackCategoriesIntoKey(fcNaN, fcZero):
-  case PackCategoriesIntoKey(fcNaN, fcNormal):
-  case PackCategoriesIntoKey(fcNaN, fcInfinity):
-  case PackCategoriesIntoKey(fcNaN, fcNaN):
-  case PackCategoriesIntoKey(fcInfinity, fcZero):
-  case PackCategoriesIntoKey(fcInfinity, fcNormal):
-  case PackCategoriesIntoKey(fcZero, fcInfinity):
-  case PackCategoriesIntoKey(fcZero, fcNormal):
-    return opOK;
-
   case PackCategoriesIntoKey(fcZero, fcNaN):
   case PackCategoriesIntoKey(fcNormal, fcNaN):
   case PackCategoriesIntoKey(fcInfinity, fcNaN):
     category = fcNaN;
     copySignificand(rhs);
+  case PackCategoriesIntoKey(fcNaN, fcZero):
+  case PackCategoriesIntoKey(fcNaN, fcNormal):
+  case PackCategoriesIntoKey(fcNaN, fcInfinity):
+  case PackCategoriesIntoKey(fcNaN, fcNaN):
+    sign = false;
+  case PackCategoriesIntoKey(fcInfinity, fcZero):
+  case PackCategoriesIntoKey(fcInfinity, fcNormal):
+  case PackCategoriesIntoKey(fcZero, fcInfinity):
+  case PackCategoriesIntoKey(fcZero, fcNormal):
     return opOK;
 
   case PackCategoriesIntoKey(fcNormal, fcInfinity):
@@ -1564,6 +1566,7 @@ APFloat::modSpecials(const APFloat &rhs)
   case PackCategoriesIntoKey(fcZero, fcNaN):
   case PackCategoriesIntoKey(fcNormal, fcNaN):
   case PackCategoriesIntoKey(fcInfinity, fcNaN):
+    sign = false;
     category = fcNaN;
     copySignificand(rhs);
     return opOK;
@@ -2301,9 +2304,9 @@ APFloat::convertFromHexadecimalString(StringRef s, roundingMode rounding_mode)
 {
   lostFraction lost_fraction = lfExactlyZero;
 
+  category = fcNormal;
   zeroSignificand();
   exponent = 0;
-  category = fcNormal;
 
   integerPart *significand = significandParts();
   unsigned partsCount = partCount();
@@ -2512,6 +2515,7 @@ APFloat::convertFromDecimalString(StringRef str, roundingMode rounding_mode)
              (D.normalizedExponent + 1) * 28738 <=
                8651 * (semantics->minExponent - (int) semantics->precision)) {
     /* Underflow to zero and round.  */
+    category = fcNormal;
     zeroSignificand();
     fs = normalize(rounding_mode, lfLessThanHalf);
 
@@ -3398,6 +3402,7 @@ APFloat APFloat::getSmallestNormalized(const fltSemantics &Sem, bool Negative) {
   //   exponent = 0..0
   //   significand = 10..0
 
+  Val.category = fcNormal;
   Val.zeroSignificand();
   Val.sign = Negative;
   Val.exponent = Sem.minExponent;
@@ -3541,11 +3546,14 @@ void APFloat::toString(SmallVectorImpl<char> &Str,
   // Set FormatPrecision if zero.  We want to do this before we
   // truncate trailing zeros, as those are part of the precision.
   if (!FormatPrecision) {
-    // It's an interesting question whether to use the nominal
-    // precision or the active precision here for denormals.
+    // We use enough digits so the number can be round-tripped back to an
+    // APFloat. The formula comes from "How to Print Floating-Point Numbers
+    // Accurately" by Steele and White.
+    // FIXME: Using a formula based purely on the precision is conservative;
+    // we can print fewer digits depending on the actual value being printed.
 
-    // FormatPrecision = ceil(significandBits / lg_2(10))
-    FormatPrecision = (semantics->precision * 59 + 195) / 196;
+    // FormatPrecision = 2 + floor(significandBits / lg_2(10))
+    FormatPrecision = 2 + semantics->precision * 59 / 196;
   }
 
   // Ignore trailing binary zeros.

@@ -71,7 +71,7 @@ void DWARFDebugInfoEntryMinimal::dumpAttribute(raw_ostream &OS,
                                                uint16_t attr,
                                                uint16_t form,
                                                unsigned indent) const {
-  OS << format("0x%8.8x: ", *offset_ptr);
+  OS << "            ";
   OS.indent(indent+2);
   const char *attrString = AttributeString(attr);
   if (attrString)
@@ -222,29 +222,30 @@ DWARFDebugInfoEntryMinimal::getAttributeValue(const DWARFCompileUnit *cu,
   return 0;
 }
 
-const char*
-DWARFDebugInfoEntryMinimal::getAttributeValueAsString(
-                                                     const DWARFCompileUnit* cu,
-                                                     const uint16_t attr,
-                                                     const char* fail_value)
-                                                     const {
-  DWARFFormValue form_value;
-  if (getAttributeValue(cu, attr, form_value)) {
-    DataExtractor stringExtractor(cu->getStringSection(), false, 0);
-    return form_value.getAsCString(&stringExtractor);
-  }
-  return fail_value;
+const char *DWARFDebugInfoEntryMinimal::getAttributeValueAsString(
+    const DWARFCompileUnit *CU, const uint16_t Attr,
+    const char *FailValue) const {
+  DWARFFormValue FormValue;
+  if (getAttributeValue(CU, Attr, FormValue))
+    return FormValue.getAsCString(CU);
+  return FailValue;
 }
 
-uint64_t
-DWARFDebugInfoEntryMinimal::getAttributeValueAsUnsigned(
-                                                    const DWARFCompileUnit* cu,
-                                                    const uint16_t attr,
-                                                    uint64_t fail_value) const {
-  DWARFFormValue form_value;
-  if (getAttributeValue(cu, attr, form_value))
-      return form_value.getUnsigned();
-  return fail_value;
+uint64_t DWARFDebugInfoEntryMinimal::getAttributeValueAsAddress(
+    const DWARFCompileUnit *CU, const uint16_t Attr, uint64_t FailValue) const {
+  DWARFFormValue FormValue;
+  if (getAttributeValue(CU, Attr, FormValue))
+    return FormValue.getAsAddress(CU);
+  return FailValue;
+}
+
+uint64_t DWARFDebugInfoEntryMinimal::getAttributeValueAsUnsigned(
+    const DWARFCompileUnit *CU, const uint16_t Attr, uint64_t FailValue) const {
+  DWARFFormValue FormValue;
+  if (getAttributeValue(CU, Attr, FormValue)) {
+    return FormValue.getUnsigned();
+  }
+  return FailValue;
 }
 
 int64_t
@@ -274,29 +275,29 @@ bool DWARFDebugInfoEntryMinimal::getLowAndHighPC(const DWARFCompileUnit *CU,
                                                  uint64_t &LowPC,
                                                  uint64_t &HighPC) const {
   HighPC = -1ULL;
-  LowPC = getAttributeValueAsUnsigned(CU, DW_AT_low_pc, -1ULL);
+  LowPC = getAttributeValueAsAddress(CU, DW_AT_low_pc, -1ULL);
   if (LowPC != -1ULL)
-    HighPC = getAttributeValueAsUnsigned(CU, DW_AT_high_pc, -1ULL);
+    HighPC = getAttributeValueAsAddress(CU, DW_AT_high_pc, -1ULL);
   return (HighPC != -1ULL);
 }
 
 void
 DWARFDebugInfoEntryMinimal::buildAddressRangeTable(const DWARFCompileUnit *CU,
-                                               DWARFDebugAranges *DebugAranges)
+                                               DWARFDebugAranges *DebugAranges,
+                                               uint32_t CUOffsetInAranges)
                                                    const {
   if (AbbrevDecl) {
     if (isSubprogramDIE()) {
       uint64_t LowPC, HighPC;
-      if (getLowAndHighPC(CU, LowPC, HighPC)) {
-        DebugAranges->appendRange(CU->getOffset(), LowPC, HighPC);
-      }
+      if (getLowAndHighPC(CU, LowPC, HighPC))
+        DebugAranges->appendRange(CUOffsetInAranges, LowPC, HighPC);
       // FIXME: try to append ranges from .debug_ranges section.
     }
 
-    const DWARFDebugInfoEntryMinimal *child = getFirstChild();
-    while (child) {
-      child->buildAddressRangeTable(CU, DebugAranges);
-      child = child->getSibling();
+    const DWARFDebugInfoEntryMinimal *Child = getFirstChild();
+    while (Child) {
+      Child->buildAddressRangeTable(CU, DebugAranges, CUOffsetInAranges);
+      Child = Child->getSibling();
     }
   }
 }
@@ -366,19 +367,18 @@ void DWARFDebugInfoEntryMinimal::getCallerFrame(const DWARFCompileUnit *CU,
   CallColumn = getAttributeValueAsUnsigned(CU, DW_AT_call_column, 0);
 }
 
-DWARFDebugInfoEntryMinimal::InlinedChain
+DWARFDebugInfoEntryInlinedChain
 DWARFDebugInfoEntryMinimal::getInlinedChainForAddress(
-                                                     const DWARFCompileUnit *CU,
-                                                     const uint64_t Address)
-                                                     const {
-  DWARFDebugInfoEntryMinimal::InlinedChain InlinedChain;
+    const DWARFCompileUnit *CU, const uint64_t Address) const {
+  DWARFDebugInfoEntryInlinedChain InlinedChain;
+  InlinedChain.CU = CU;
   if (isNULL())
     return InlinedChain;
   for (const DWARFDebugInfoEntryMinimal *DIE = this; DIE; ) {
     // Append current DIE to inlined chain only if it has correct tag
     // (e.g. it is not a lexical block).
     if (DIE->isSubroutineDIE()) {
-      InlinedChain.push_back(*DIE);
+      InlinedChain.DIEs.push_back(*DIE);
     }
     // Try to get child which also contains provided address.
     const DWARFDebugInfoEntryMinimal *Child = DIE->getFirstChild();
@@ -392,6 +392,6 @@ DWARFDebugInfoEntryMinimal::getInlinedChainForAddress(
     DIE = Child;
   }
   // Reverse the obtained chain to make the root of inlined chain last.
-  std::reverse(InlinedChain.begin(), InlinedChain.end());
+  std::reverse(InlinedChain.DIEs.begin(), InlinedChain.DIEs.end());
   return InlinedChain;
 }

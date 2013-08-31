@@ -21,6 +21,25 @@ def FeatureDistinctOps : SystemZFeature<
   "Assume that the distinct-operands facility is installed"
 >;
 
+def FeatureLoadStoreOnCond : SystemZFeature<
+  "load-store-on-cond", "LoadStoreOnCond",
+  "Assume that the load/store-on-condition facility is installed"
+>;
+
+def FeatureHighWord : SystemZFeature<
+  "high-word", "HighWord",
+  "Assume that the high-word facility is installed"
+>;
+
+def FeatureFPExtension : SystemZFeature<
+  "fp-extension", "FPExtension",
+  "Assume that the floating-point extension facility is installed"
+>;
+
 def : Processor<"z10",   NoItineraries, []>;
-def : Processor<"z196",  NoItineraries, [FeatureDistinctOps]>;
-def : Processor<"zEC12", NoItineraries, [FeatureDistinctOps]>;
+def : Processor<"z196",  NoItineraries,
+                [FeatureDistinctOps, FeatureLoadStoreOnCond, FeatureHighWord,
+                 FeatureFPExtension]>;
+def : Processor<"zEC12", NoItineraries,
+                [FeatureDistinctOps, FeatureLoadStoreOnCond, FeatureHighWord,
+                 FeatureFPExtension]>;

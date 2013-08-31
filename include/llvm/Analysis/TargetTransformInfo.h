@@ -171,6 +171,12 @@ public:
   /// comments for a detailed explanation of the cost values.
   virtual unsigned getUserCost(const User *U) const;
 
+  /// \brief hasBranchDivergence - Return true if branch divergence exists.
+  /// Branch divergence has a significantly negative impact on GPU performance
+  /// when threads in the same wavefront take different paths due to conditional
+  /// branches.
+  virtual bool hasBranchDivergence() const;
+
   /// \brief Test whether calls to a function lower to actual program function
   /// calls.
   ///
@@ -255,6 +261,10 @@ public:
 
   /// getPopcntSupport - Return hardware support for population count.
   virtual PopcntSupportKind getPopcntSupport(unsigned IntTyWidthInBit) const;
+
+  /// haveFastSqrt -- Return true if the hardware has a fast square-root
+  /// instruction.
+  virtual bool haveFastSqrt(Type *Ty) const;
 
   /// getIntImmCost - Return the expected cost of materializing the given
   /// integer immediate of the specified type.

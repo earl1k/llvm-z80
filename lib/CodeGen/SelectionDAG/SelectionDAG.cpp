@@ -1298,11 +1298,8 @@ static void commuteShuffle(SDValue &N1, SDValue &N2, SmallVectorImpl<int> &M) {
 
 SDValue SelectionDAG::getVectorShuffle(EVT VT, SDLoc dl, SDValue N1,
                                        SDValue N2, const int *Mask) {
-  assert(N1.getValueType() == N2.getValueType() && "Invalid VECTOR_SHUFFLE");
-  assert(VT.isVector() && N1.getValueType().isVector() &&
-         "Vector Shuffle VTs must be a vectors");
-  assert(VT.getVectorElementType() == N1.getValueType().getVectorElementType()
-         && "Vector Shuffle VTs must have same element type");
+  assert(VT == N1.getValueType() && VT == N2.getValueType() &&
+         "Invalid VECTOR_SHUFFLE");
 
   // Canonicalize shuffle undef, undef -> undef
   if (N1.getOpcode() == ISD::UNDEF && N2.getOpcode() == ISD::UNDEF)
@@ -1351,17 +1348,13 @@ SDValue SelectionDAG::getVectorShuffle(EVT VT, SDLoc dl, SDValue N1,
     commuteShuffle(N1, N2, MaskVec);
   }
 
-  // If Identity shuffle, or all shuffle in to undef, return that node.
-  bool AllUndef = true;
+  // If Identity shuffle return that node.
   bool Identity = true;
   for (unsigned i = 0; i != NElts; ++i) {
     if (MaskVec[i] >= 0 && MaskVec[i] != (int)i) Identity = false;
-    if (MaskVec[i] >= 0) AllUndef = false;
   }
-  if (Identity && NElts == N1.getValueType().getVectorNumElements())
+  if (Identity && NElts)
     return N1;
-  if (AllUndef)
-    return getUNDEF(VT);
 
   FoldingSetNodeID ID;
   SDValue Ops[2] = { N1, N2 };
@@ -3075,7 +3068,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, EVT VT, SDValue N1,
              "Extract subvector VTs must be a vectors!");
       assert(VT.getVectorElementType() == N1.getValueType().getVectorElementType() &&
              "Extract subvector VTs must have the same element type!");
-      assert(VT.getSimpleVT() <= N1.getValueType().getSimpleVT() &&
+      assert(VT.getSimpleVT() <= N1.getSimpleValueType() &&
              "Extract subvector must be from larger vector to smaller vector!");
 
       if (isa<ConstantSDNode>(Index.getNode())) {
@@ -3086,7 +3079,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, EVT VT, SDValue N1,
       }
 
       // Trivial extraction.
-      if (VT.getSimpleVT() == N1.getValueType().getSimpleVT())
+      if (VT.getSimpleVT() == N1.getSimpleValueType())
         return N1;
     }
     break;
@@ -3316,7 +3309,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, EVT VT,
              "Insert subvector VTs must be a vectors");
       assert(VT == N1.getValueType() &&
              "Dest and insert subvector source types must match!");
-      assert(N2.getValueType().getSimpleVT() <= N1.getValueType().getSimpleVT() &&
+      assert(N2.getSimpleValueType() <= N1.getSimpleValueType() &&
              "Insert subvector must be from smaller vector to larger vector!");
       if (isa<ConstantSDNode>(Index.getNode())) {
         assert((N2.getValueType().getVectorNumElements() +
@@ -3326,7 +3319,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, EVT VT,
       }
 
       // Trivial insertion.
-      if (VT.getSimpleVT() == N2.getValueType().getSimpleVT())
+      if (VT.getSimpleVT() == N2.getSimpleValueType())
         return N2;
     }
     break;
@@ -6140,7 +6133,7 @@ SDValue SelectionDAG::UnrollVectorOp(SDNode *N, unsigned ResNE) {
         Operands[j] = getNode(ISD::EXTRACT_VECTOR_ELT, dl,
                               OperandEltVT,
                               Operand,
-                              getConstant(i, TLI->getPointerTy()));
+                              getConstant(i, TLI->getVectorIdxTy()));
       } else {
         // A scalar operand; just use it as is.
         Operands[j] = Operand;

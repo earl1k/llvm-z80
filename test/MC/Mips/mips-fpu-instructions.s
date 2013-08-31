@@ -1,4 +1,5 @@
 # RUN: llvm-mc  %s -triple=mipsel-unknown-linux -show-encoding -mcpu=mips32r2 | FileCheck %s
+# RUN: llvm-mc  %s -triple=mips64el-unknown-linux -show-encoding -mcpu=mips64r2 | FileCheck %s
 # Check that the assembler can handle the documented syntax
 # for FPU instructions.
 #------------------------------------------------------------------------------
@@ -138,7 +139,8 @@
 # FP move instructions
 #------------------------------------------------------------------------------
 
-# CHECK:  cfc1    $6, $fcc0            # encoding: [0x00,0x00,0x46,0x44]
+# CHECK:  cfc1    $6, $0               # encoding: [0x00,0x00,0x46,0x44]
+# CHECK:  ctc1    $10, $31             # encoding: [0x00,0xf8,0xca,0x44]
 # CHECK:  mfc1    $6, $f7              # encoding: [0x00,0x38,0x06,0x44]
 # CHECK:  mfhi    $5                   # encoding: [0x10,0x28,0x00,0x00]
 # CHECK:  mflo    $5                   # encoding: [0x12,0x28,0x00,0x00]
@@ -158,10 +160,16 @@
 # CHECK:  mtc2    $9, $4, 5               # encoding: [0x05,0x20,0x89,0x48]
 # CHECK:  movf    $2, $1, $fcc0           # encoding: [0x01,0x10,0x20,0x00]
 # CHECK:  movt    $2, $1, $fcc0           # encoding: [0x01,0x10,0x21,0x00]
+# CHECK:  movt    $4, $5, $fcc4           # encoding: [0x01,0x20,0xb1,0x00]
+# CHECK:  movf.d  $f4, $f6, $fcc2         # encoding: [0x11,0x31,0x28,0x46]
+# CHECK:  movf.s  $f4, $f6, $fcc5         # encoding: [0x11,0x31,0x14,0x46]
 # CHECK:  luxc1   $f0, $6($5)             # encoding: [0x05,0x00,0xa6,0x4c]
 # CHECK:  suxc1   $f4, $24($5)            # encoding: [0x0d,0x20,0xb8,0x4c]
+# CHECK:  lwxc1   $f20, $12($14)          # encoding: [0x00,0x05,0xcc,0x4d]
+# CHECK:  swxc1   $f26, $18($22)          # encoding: [0x08,0xd0,0xd2,0x4e]
 
    cfc1    $a2,$0
+   ctc1    $10,$31
    mfc1    $a2,$f7
    mfhi    $a1
    mflo    $a1
@@ -181,5 +189,10 @@
    mtc2    $9, $4, 5
    movf    $2, $1, $fcc0
    movt    $2, $1, $fcc0
-   luxc1 $f0, $a2($a1)
-   suxc1 $f4, $t8($a1)
+   movt    $4, $5, $fcc4
+   movf.d  $f4, $f6, $fcc2
+   movf.s  $f4, $f6, $fcc5
+   luxc1   $f0, $a2($a1)
+   suxc1   $f4, $t8($a1)
+   lwxc1   $f20, $12($14)
+   swxc1   $f26, $s2($s6)

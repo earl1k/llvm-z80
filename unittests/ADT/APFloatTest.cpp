@@ -866,10 +866,11 @@ TEST(APFloatTest, toString) {
   ASSERT_EQ("0.0101", convertToString(1.01E-2, 5, 2));
   ASSERT_EQ("0.0101", convertToString(1.01E-2, 4, 2));
   ASSERT_EQ("1.01E-2", convertToString(1.01E-2, 5, 1));
-  ASSERT_EQ("0.7853981633974483", convertToString(0.78539816339744830961, 0, 3));
-  ASSERT_EQ("4.940656458412465E-324", convertToString(4.9406564584124654e-324, 0, 3));
-  ASSERT_EQ("873.1834", convertToString(873.1834, 0, 1));
-  ASSERT_EQ("8.731834E+2", convertToString(873.1834, 0, 0));
+  ASSERT_EQ("0.78539816339744828", convertToString(0.78539816339744830961, 0, 3));
+  ASSERT_EQ("4.9406564584124654E-324", convertToString(4.9406564584124654e-324, 0, 3));
+  ASSERT_EQ("873.18340000000001", convertToString(873.1834, 0, 1));
+  ASSERT_EQ("8.7318340000000001E+2", convertToString(873.1834, 0, 0));
+  ASSERT_EQ("1.7976931348623157E+308", convertToString(1.7976931348623157E+308, 0, 0));
 }
 
 TEST(APFloatTest, toInteger) {
@@ -1523,10 +1524,6 @@ TEST(APFloatTest, add) {
   // 1. Since we perform only default exception handling all operations with
   // signaling NaNs should have a result that is a quiet NaN. Currently they
   // return sNaN.
-  // 2. It seems that add(-x, NaN) = -NaN but add(NaN, -x) = NaN. This is an
-  // inconsistency that should be looked into. IEEE-754R specifies that the
-  // interpretation of the sign of NaN is unspecified. We should always have NaN
-  // be positive since that is one less thing for the compiler to deal with.
 
   APFloat PInf = APFloat::getInf(APFloat::IEEEsingle, false);
   APFloat MInf = APFloat::getInf(APFloat::IEEEsingle, true);
@@ -1576,8 +1573,7 @@ TEST(APFloatTest, add) {
     { MInf, MInf, "-inf", APFloat::opOK, APFloat::fcInfinity },
     { MInf, PZero, "-inf", APFloat::opOK, APFloat::fcInfinity },
     { MInf, MZero, "-inf", APFloat::opOK, APFloat::fcInfinity },
-    // See Note 2.
-    { MInf, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MInf, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
     // See Note 1.
     { MInf, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -1611,8 +1607,7 @@ TEST(APFloatTest, add) {
     { MZero, MInf, "-inf", APFloat::opOK, APFloat::fcInfinity },
     { MZero, PZero, "0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MZero, MZero, "-0x0p+0", APFloat::opOK, APFloat::fcZero },
-    // See Note 2.
-    { MZero, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MZero, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
     // See Note 1.
     { MZero, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -1680,8 +1675,7 @@ TEST(APFloatTest, add) {
     { MNormalValue, MInf, "-inf", APFloat::opOK, APFloat::fcInfinity },
     { MNormalValue, PZero, "-0x1p+0", APFloat::opOK, APFloat::fcNormal },
     { MNormalValue, MZero, "-0x1p+0", APFloat::opOK, APFloat::fcNormal },
-    // See Note 2.
-    { MNormalValue, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MNormalValue, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
     // See Note 1.
     { MNormalValue, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -1715,8 +1709,7 @@ TEST(APFloatTest, add) {
     { MLargestValue, MInf, "-inf", APFloat::opOK, APFloat::fcInfinity },
     { MLargestValue, PZero, "-0x1.fffffep+127", APFloat::opOK, APFloat::fcNormal },
     { MLargestValue, MZero, "-0x1.fffffep+127", APFloat::opOK, APFloat::fcNormal },
-    // See Note 2.
-    { MLargestValue, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MLargestValue, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
     // See Note 1.
     { MLargestValue, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -1750,8 +1743,7 @@ TEST(APFloatTest, add) {
     { MSmallestValue, MInf, "-inf", APFloat::opOK, APFloat::fcInfinity },
     { MSmallestValue, PZero, "-0x1p-149", APFloat::opOK, APFloat::fcNormal },
     { MSmallestValue, MZero, "-0x1p-149", APFloat::opOK, APFloat::fcNormal },
-    // See Note 2.
-    { MSmallestValue, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MSmallestValue, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
     // See Note 1.
     { MSmallestValue, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -1785,8 +1777,7 @@ TEST(APFloatTest, add) {
     { MSmallestNormalized, MInf, "-inf", APFloat::opOK, APFloat::fcInfinity },
     { MSmallestNormalized, PZero, "-0x1p-126", APFloat::opOK, APFloat::fcNormal },
     { MSmallestNormalized, MZero, "-0x1p-126", APFloat::opOK, APFloat::fcNormal },
-    // See Note 2.
-    { MSmallestNormalized, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MSmallestNormalized, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
     // See Note 1.
     { MSmallestNormalized, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -1821,10 +1812,6 @@ TEST(APFloatTest, subtract) {
   // 1. Since we perform only default exception handling all operations with
   // signaling NaNs should have a result that is a quiet NaN. Currently they
   // return sNaN.
-  // 2. It seems that sub(-x, NaN) = -NaN but sub(NaN, -x) = NaN. This is an
-  // inconsistency that should be looked into. IEEE-754R specifies that the
-  // interpretation of the sign of NaN is unspecified. We should always have NaN
-  // be positive since that is one less thing for the compiler to deal with.
 
   APFloat PInf = APFloat::getInf(APFloat::IEEEsingle, false);
   APFloat MInf = APFloat::getInf(APFloat::IEEEsingle, true);
@@ -1874,8 +1861,7 @@ TEST(APFloatTest, subtract) {
     { MInf, MInf, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
     { MInf, PZero, "-inf", APFloat::opOK, APFloat::fcInfinity },
     { MInf, MZero, "-inf", APFloat::opOK, APFloat::fcInfinity },
-    // See Note 2.
-    { MInf, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MInf, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MInf, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -1909,8 +1895,7 @@ TEST(APFloatTest, subtract) {
     { MZero, MInf, "inf", APFloat::opOK, APFloat::fcInfinity },
     { MZero, PZero, "-0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MZero, MZero, "0x0p+0", APFloat::opOK, APFloat::fcZero },
-    // See Note 2.
-    { MZero, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MZero, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MZero, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -1978,8 +1963,7 @@ TEST(APFloatTest, subtract) {
     { MNormalValue, MInf, "inf", APFloat::opOK, APFloat::fcInfinity },
     { MNormalValue, PZero, "-0x1p+0", APFloat::opOK, APFloat::fcNormal },
     { MNormalValue, MZero, "-0x1p+0", APFloat::opOK, APFloat::fcNormal },
-    // See Note 2.
-    { MNormalValue, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MNormalValue, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MNormalValue, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2013,8 +1997,7 @@ TEST(APFloatTest, subtract) {
     { MLargestValue, MInf, "inf", APFloat::opOK, APFloat::fcInfinity },
     { MLargestValue, PZero, "-0x1.fffffep+127", APFloat::opOK, APFloat::fcNormal },
     { MLargestValue, MZero, "-0x1.fffffep+127", APFloat::opOK, APFloat::fcNormal },
-    // See Note 2.
-    { MLargestValue, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MLargestValue, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MLargestValue, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2048,8 +2031,7 @@ TEST(APFloatTest, subtract) {
     { MSmallestValue, MInf, "inf", APFloat::opOK, APFloat::fcInfinity },
     { MSmallestValue, PZero, "-0x1p-149", APFloat::opOK, APFloat::fcNormal },
     { MSmallestValue, MZero, "-0x1p-149", APFloat::opOK, APFloat::fcNormal },
-    // See Note 2.
-    { MSmallestValue, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MSmallestValue, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MSmallestValue, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2083,8 +2065,7 @@ TEST(APFloatTest, subtract) {
     { MSmallestNormalized, MInf, "inf", APFloat::opOK, APFloat::fcInfinity },
     { MSmallestNormalized, PZero, "-0x1p-126", APFloat::opOK, APFloat::fcNormal },
     { MSmallestNormalized, MZero, "-0x1p-126", APFloat::opOK, APFloat::fcNormal },
-    // See Note 2.
-    { MSmallestNormalized, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MSmallestNormalized, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MSmallestNormalized, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2119,9 +2100,6 @@ TEST(APFloatTest, multiply) {
   // 1. Since we perform only default exception handling all operations with
   // signaling NaNs should have a result that is a quiet NaN. Currently they
   // return sNaN.
-  // 2. It seems that multiply(-x, NaN) = multiply(NaN, -x) = -NaN. IEEE-754R
-  // leaves the meaning of the sign of NaNs as unspecified. To simplify things,
-  // we should just assume that NaN is always positive. I will fix this.
 
   APFloat PInf = APFloat::getInf(APFloat::IEEEsingle, false);
   APFloat MInf = APFloat::getInf(APFloat::IEEEsingle, true);
@@ -2172,8 +2150,7 @@ TEST(APFloatTest, multiply) {
     { MInf, MInf, "inf", APFloat::opOK, APFloat::fcInfinity },
     { MInf, PZero, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
     { MInf, MZero, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
-    // See Note 2.
-    { MInf, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MInf, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MInf, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2207,8 +2184,7 @@ TEST(APFloatTest, multiply) {
     { MZero, MInf, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
     { MZero, PZero, "-0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MZero, MZero, "0x0p+0", APFloat::opOK, APFloat::fcZero },
-    // See Note 2.
-    { MZero, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MZero, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MZero, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2222,28 +2198,22 @@ TEST(APFloatTest, multiply) {
     { MZero, PSmallestNormalized, "-0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MZero, MSmallestNormalized, "0x0p+0", APFloat::opOK, APFloat::fcZero },
     { QNaN, PInf, "nan", APFloat::opOK, APFloat::fcNaN },
-    // See Note 2.
-    { QNaN, MInf, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { QNaN, MInf, "nan", APFloat::opOK, APFloat::fcNaN },
     { QNaN, PZero, "nan", APFloat::opOK, APFloat::fcNaN },
-    // See Note 2.
-    { QNaN, MZero, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { QNaN, MZero, "nan", APFloat::opOK, APFloat::fcNaN },
     { QNaN, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { QNaN, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
 #endif
     { QNaN, PNormalValue, "nan", APFloat::opOK, APFloat::fcNaN },
-    // See Note 2.
-    { QNaN, MNormalValue, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { QNaN, MNormalValue, "nan", APFloat::opOK, APFloat::fcNaN },
     { QNaN, PLargestValue, "nan", APFloat::opOK, APFloat::fcNaN },
-    // See Note 2.
-    { QNaN, MLargestValue, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { QNaN, MLargestValue, "nan", APFloat::opOK, APFloat::fcNaN },
     { QNaN, PSmallestValue, "nan", APFloat::opOK, APFloat::fcNaN },
-    // See Note 2.
-    { QNaN, MSmallestValue, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { QNaN, MSmallestValue, "nan", APFloat::opOK, APFloat::fcNaN },
     { QNaN, PSmallestNormalized, "nan", APFloat::opOK, APFloat::fcNaN },
-    // See Note 2.
-    { QNaN, MSmallestNormalized, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { QNaN, MSmallestNormalized, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { SNaN, PInf, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2282,8 +2252,7 @@ TEST(APFloatTest, multiply) {
     { MNormalValue, MInf, "inf", APFloat::opOK, APFloat::fcInfinity },
     { MNormalValue, PZero, "-0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MNormalValue, MZero, "0x0p+0", APFloat::opOK, APFloat::fcZero },
-    // See Note 2.
-    { MNormalValue, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MNormalValue, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MNormalValue, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2317,8 +2286,7 @@ TEST(APFloatTest, multiply) {
     { MLargestValue, MInf, "inf", APFloat::opOK, APFloat::fcInfinity },
     { MLargestValue, PZero, "-0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MLargestValue, MZero, "0x0p+0", APFloat::opOK, APFloat::fcZero },
-    // See Note 2.
-    { MLargestValue, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MLargestValue, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MLargestValue, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2352,8 +2320,7 @@ TEST(APFloatTest, multiply) {
     { MSmallestValue, MInf, "inf", APFloat::opOK, APFloat::fcInfinity },
     { MSmallestValue, PZero, "-0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MSmallestValue, MZero, "0x0p+0", APFloat::opOK, APFloat::fcZero },
-    // See Note 2.
-    { MSmallestValue, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MSmallestValue, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MSmallestValue, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2387,8 +2354,7 @@ TEST(APFloatTest, multiply) {
     { MSmallestNormalized, MInf, "inf", APFloat::opOK, APFloat::fcInfinity },
     { MSmallestNormalized, PZero, "-0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MSmallestNormalized, MZero, "0x0p+0", APFloat::opOK, APFloat::fcZero },
-    // See Note 2.
-    { MSmallestNormalized, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MSmallestNormalized, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MSmallestNormalized, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2423,9 +2389,6 @@ TEST(APFloatTest, divide) {
   // 1. Since we perform only default exception handling all operations with
   // signaling NaNs should have a result that is a quiet NaN. Currently they
   // return sNaN.
-  // 2. It seems that divide(-x, NaN) = divide(NaN, -x) = -NaN. IEEE-754R
-  // leaves the meaning of the sign of NaNs as unspecified. To simplify things,
-  // we should just assume that NaN is always positive. I will fix this.
 
   APFloat PInf = APFloat::getInf(APFloat::IEEEsingle, false);
   APFloat MInf = APFloat::getInf(APFloat::IEEEsingle, true);
@@ -2476,8 +2439,7 @@ TEST(APFloatTest, divide) {
     { MInf, MInf, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
     { MInf, PZero, "-inf", APFloat::opOK, APFloat::fcInfinity },
     { MInf, MZero, "inf", APFloat::opOK, APFloat::fcInfinity },
-    // See Note 2.
-    { MInf, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MInf, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MInf, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2511,8 +2473,7 @@ TEST(APFloatTest, divide) {
     { MZero, MInf, "0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MZero, PZero, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
     { MZero, MZero, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
-    // See Note 2.
-    { MZero, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MZero, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MZero, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2526,28 +2487,22 @@ TEST(APFloatTest, divide) {
     { MZero, PSmallestNormalized, "-0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MZero, MSmallestNormalized, "0x0p+0", APFloat::opOK, APFloat::fcZero },
     { QNaN, PInf, "nan", APFloat::opOK, APFloat::fcNaN },
-    // See Note 2.
-    { QNaN, MInf, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { QNaN, MInf, "nan", APFloat::opOK, APFloat::fcNaN },
     { QNaN, PZero, "nan", APFloat::opOK, APFloat::fcNaN },
-    // See Note 2.
-    { QNaN, MZero, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { QNaN, MZero, "nan", APFloat::opOK, APFloat::fcNaN },
     { QNaN, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { QNaN, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
 #endif
     { QNaN, PNormalValue, "nan", APFloat::opOK, APFloat::fcNaN },
-    // See Note 2.
-    { QNaN, MNormalValue, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { QNaN, MNormalValue, "nan", APFloat::opOK, APFloat::fcNaN },
     { QNaN, PLargestValue, "nan", APFloat::opOK, APFloat::fcNaN },
-    // See Note 2.
-    { QNaN, MLargestValue, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { QNaN, MLargestValue, "nan", APFloat::opOK, APFloat::fcNaN },
     { QNaN, PSmallestValue, "nan", APFloat::opOK, APFloat::fcNaN },
-    // See Note 2.
-    { QNaN, MSmallestValue, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { QNaN, MSmallestValue, "nan", APFloat::opOK, APFloat::fcNaN },
     { QNaN, PSmallestNormalized, "nan", APFloat::opOK, APFloat::fcNaN },
-    // See Note 2.
-    { QNaN, MSmallestNormalized, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { QNaN, MSmallestNormalized, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { SNaN, PInf, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2586,8 +2541,7 @@ TEST(APFloatTest, divide) {
     { MNormalValue, MInf, "0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MNormalValue, PZero, "-inf", APFloat::opDivByZero, APFloat::fcInfinity },
     { MNormalValue, MZero, "inf", APFloat::opDivByZero, APFloat::fcInfinity },
-    // See Note 2.
-    { MNormalValue, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MNormalValue, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MNormalValue, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2621,8 +2575,7 @@ TEST(APFloatTest, divide) {
     { MLargestValue, MInf, "0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MLargestValue, PZero, "-inf", APFloat::opDivByZero, APFloat::fcInfinity },
     { MLargestValue, MZero, "inf", APFloat::opDivByZero, APFloat::fcInfinity },
-    // See Note 2.
-    { MLargestValue, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MLargestValue, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MLargestValue, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2656,8 +2609,7 @@ TEST(APFloatTest, divide) {
     { MSmallestValue, MInf, "0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MSmallestValue, PZero, "-inf", APFloat::opDivByZero, APFloat::fcInfinity },
     { MSmallestValue, MZero, "inf", APFloat::opDivByZero, APFloat::fcInfinity },
-    // See Note 2.
-    { MSmallestValue, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MSmallestValue, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MSmallestValue, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },
@@ -2691,8 +2643,7 @@ TEST(APFloatTest, divide) {
     { MSmallestNormalized, MInf, "0x0p+0", APFloat::opOK, APFloat::fcZero },
     { MSmallestNormalized, PZero, "-inf", APFloat::opDivByZero, APFloat::fcInfinity },
     { MSmallestNormalized, MZero, "inf", APFloat::opDivByZero, APFloat::fcInfinity },
-    // See Note 2.
-    { MSmallestNormalized, QNaN, "-nan", APFloat::opOK, APFloat::fcNaN },
+    { MSmallestNormalized, QNaN, "nan", APFloat::opOK, APFloat::fcNaN },
 #if 0
 // See Note 1.
     { MSmallestNormalized, SNaN, "nan", APFloat::opInvalidOp, APFloat::fcNaN },

@@ -70,7 +70,8 @@ static const char *const kAsanReportErrorTemplate = "__asan_report_";
 static const char *const kAsanReportLoadN = "__asan_report_load_n";
 static const char *const kAsanReportStoreN = "__asan_report_store_n";
 static const char *const kAsanRegisterGlobalsName = "__asan_register_globals";
-static const char *const kAsanUnregisterGlobalsName = "__asan_unregister_globals";
+static const char *const kAsanUnregisterGlobalsName =
+    "__asan_unregister_globals";
 static const char *const kAsanPoisonGlobalsName = "__asan_before_dynamic_init";
 static const char *const kAsanUnpoisonGlobalsName = "__asan_after_dynamic_init";
 static const char *const kAsanInitName = "__asan_init_v3";
@@ -222,7 +223,8 @@ static ShadowMapping getShadowMapping(const Module &M, int LongSize,
   llvm::Triple TargetTriple(M.getTargetTriple());
   bool IsAndroid = TargetTriple.getEnvironment() == llvm::Triple::Android;
   bool IsMacOSX = TargetTriple.getOS() == llvm::Triple::MacOSX;
-  bool IsPPC64 = TargetTriple.getArch() == llvm::Triple::ppc64;
+  bool IsPPC64 = TargetTriple.getArch() == llvm::Triple::ppc64 ||
+                 TargetTriple.getArch() == llvm::Triple::ppc64le;
   bool IsX86_64 = TargetTriple.getArch() == llvm::Triple::x86_64;
   bool IsMIPS32 = TargetTriple.getArch() == llvm::Triple::mips ||
                   TargetTriple.getArch() == llvm::Triple::mipsel;
@@ -486,7 +488,7 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
   void initializeCallbacks(Module &M);
 
   // Check if we want (and can) handle this alloca.
-  bool isInterestingAlloca(AllocaInst &AI) {
+  bool isInterestingAlloca(AllocaInst &AI) const {
     return (!AI.isArrayAllocation() &&
             AI.isStaticAlloca() &&
             AI.getAlignment() <= RedzoneSize() &&
@@ -496,24 +498,24 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
   size_t RedzoneSize() const {
     return RedzoneSizeForScale(Mapping.Scale);
   }
-  uint64_t getAllocaSizeInBytes(AllocaInst *AI) {
+  uint64_t getAllocaSizeInBytes(AllocaInst *AI) const {
     Type *Ty = AI->getAllocatedType();
     uint64_t SizeInBytes = ASan.TD->getTypeAllocSize(Ty);
     return SizeInBytes;
   }
-  uint64_t getAlignedSize(uint64_t SizeInBytes) {
+  uint64_t getAlignedSize(uint64_t SizeInBytes) const {
     size_t RZ = RedzoneSize();
     return ((SizeInBytes + RZ - 1) / RZ) * RZ;
   }
-  uint64_t getAlignedAllocaSize(AllocaInst *AI) {
+  uint64_t getAlignedAllocaSize(AllocaInst *AI) const {
     uint64_t SizeInBytes = getAllocaSizeInBytes(AI);
     return getAlignedSize(SizeInBytes);
   }
   /// Finds alloca where the value comes from.
   AllocaInst *findAllocaForValue(Value *V);
-  void poisonRedZones(const ArrayRef<AllocaInst*> &AllocaVec, IRBuilder<> IRB,
+  void poisonRedZones(const ArrayRef<AllocaInst*> &AllocaVec, IRBuilder<> &IRB,
                       Value *ShadowBase, bool DoPoison);
-  void poisonAlloca(Value *V, uint64_t Size, IRBuilder<> IRB, bool DoPoison);
+  void poisonAlloca(Value *V, uint64_t Size, IRBuilder<> &IRB, bool DoPoison);
 };
 
 }  // namespace
@@ -545,11 +547,11 @@ static size_t TypeSizeToSizeIndex(uint32_t TypeSize) {
   return Res;
 }
 
-// Create a constant for Str so that we can pass it to the run-time lib.
+// \brief Create a constant for Str so that we can pass it to the run-time lib.
 static GlobalVariable *createPrivateGlobalForString(Module &M, StringRef Str) {
   Constant *StrConst = ConstantDataArray::getString(M.getContext(), Str);
   GlobalVariable *GV = new GlobalVariable(M, StrConst->getType(), true,
-                            GlobalValue::PrivateLinkage, StrConst,
+                            GlobalValue::InternalLinkage, StrConst,
                             kAsanGenPrefix);
   GV->setUnnamedAddr(true);  // Ok to merge these.
   GV->setAlignment(1);  // Strings may not be merged w/o setting align 1.
@@ -881,7 +883,7 @@ bool AddressSanitizerModule::runOnModule(Module &M) {
   TD = getAnalysisIfAvailable<DataLayout>();
   if (!TD)
     return false;
-  BL.reset(new SpecialCaseList(BlacklistFile));
+  BL.reset(SpecialCaseList::createOrDie(BlacklistFile));
   if (BL->isIn(M)) return false;
   C = &(M.getContext());
   int LongSize = TD->getPointerSizeInBits();
@@ -959,8 +961,11 @@ bool AddressSanitizerModule::runOnModule(Module &M) {
     GlobalVariable *Name = createPrivateGlobalForString(M, G->getName());
 
     // Create a new global variable with enough space for a redzone.
+    GlobalValue::LinkageTypes Linkage = G->getLinkage();
+    if (G->isConstant() && Linkage == GlobalValue::PrivateLinkage)
+      Linkage = GlobalValue::InternalLinkage;
     GlobalVariable *NewGlobal = new GlobalVariable(
-        M, NewTy, G->isConstant(), G->getLinkage(),
+        M, NewTy, G->isConstant(), Linkage,
         NewInitializer, "", G, G->getThreadLocalMode());
     NewGlobal->copyAttributesFrom(G);
     NewGlobal->setAlignment(MinRZ);
@@ -993,7 +998,7 @@ bool AddressSanitizerModule::runOnModule(Module &M) {
 
   ArrayType *ArrayOfGlobalStructTy = ArrayType::get(GlobalStructTy, n);
   GlobalVariable *AllGlobals = new GlobalVariable(
-      M, ArrayOfGlobalStructTy, false, GlobalVariable::PrivateLinkage,
+      M, ArrayOfGlobalStructTy, false, GlobalVariable::InternalLinkage,
       ConstantArray::get(ArrayOfGlobalStructTy, Initializers), "");
 
   // Create calls for poisoning before initializers run and unpoisoning after.
@@ -1071,7 +1076,7 @@ bool AddressSanitizer::doInitialization(Module &M) {
 
   if (!TD)
     return false;
-  BL.reset(new SpecialCaseList(BlacklistFile));
+  BL.reset(SpecialCaseList::createOrDie(BlacklistFile));
   DynamicallyInitializedGlobals.Init(M);
 
   C = &(M.getContext());
@@ -1278,7 +1283,7 @@ void FunctionStackPoisoner::initializeCallbacks(Module &M) {
 }
 
 void FunctionStackPoisoner::poisonRedZones(
-  const ArrayRef<AllocaInst*> &AllocaVec, IRBuilder<> IRB, Value *ShadowBase,
+  const ArrayRef<AllocaInst*> &AllocaVec, IRBuilder<> &IRB, Value *ShadowBase,
   bool DoPoison) {
   size_t ShadowRZSize = RedzoneSize() >> Mapping.Scale;
   assert(ShadowRZSize >= 1 && ShadowRZSize <= 4);
@@ -1455,7 +1460,7 @@ void FunctionStackPoisoner::poisonStack() {
 }
 
 void FunctionStackPoisoner::poisonAlloca(Value *V, uint64_t Size,
-                                         IRBuilder<> IRB, bool DoPoison) {
+                                         IRBuilder<> &IRB, bool DoPoison) {
   // For now just insert the call to ASan runtime.
   Value *AddrArg = IRB.CreatePointerCast(V, IntptrTy);
   Value *SizeArg = ConstantInt::get(IntptrTy, Size);

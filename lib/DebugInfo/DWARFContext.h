@@ -27,14 +27,14 @@ namespace llvm {
 /// information parsing. The actual data is supplied through pure virtual
 /// methods that a concrete implementation provides.
 class DWARFContext : public DIContext {
-  SmallVector<DWARFCompileUnit, 1> CUs;
+  SmallVector<DWARFCompileUnit *, 1> CUs;
   OwningPtr<DWARFDebugAbbrev> Abbrev;
   OwningPtr<DWARFDebugLoc> Loc;
   OwningPtr<DWARFDebugAranges> Aranges;
   OwningPtr<DWARFDebugLine> Line;
   OwningPtr<DWARFDebugFrame> DebugFrame;
 
-  SmallVector<DWARFCompileUnit, 1> DWOCUs;
+  SmallVector<DWARFCompileUnit *, 1> DWOCUs;
   OwningPtr<DWARFDebugAbbrev> AbbrevDWO;
 
   DWARFContext(DWARFContext &) LLVM_DELETED_FUNCTION;
@@ -48,7 +48,13 @@ class DWARFContext : public DIContext {
   void parseDWOCompileUnits();
 
 public:
-  DWARFContext() {}
+  DWARFContext() : DIContext(CK_DWARF) {}
+  virtual ~DWARFContext();
+
+  static bool classof(const DIContext *DICtx) {
+    return DICtx->getKind() == CK_DWARF;
+  }
+
   virtual void dump(raw_ostream &OS, DIDumpType DumpType = DIDT_All);
 
   /// Get the number of compile units in this context.
@@ -69,14 +75,14 @@ public:
   DWARFCompileUnit *getCompileUnitAtIndex(unsigned index) {
     if (CUs.empty())
       parseCompileUnits();
-    return &CUs[index];
+    return CUs[index];
   }
 
   /// Get the compile unit at the specified index for the DWO compile units.
   DWARFCompileUnit *getDWOCompileUnitAtIndex(unsigned index) {
     if (DWOCUs.empty())
       parseDWOCompileUnits();
-    return &DWOCUs[index];
+    return DWOCUs[index];
   }
 
   /// Get a pointer to the parsed DebugAbbrev object.
@@ -130,7 +136,7 @@ public:
   virtual const RelocAddrMap &infoDWORelocMap() const = 0;
 
   static bool isSupportedVersion(unsigned version) {
-    return version == 2 || version == 3;
+    return version == 2 || version == 3 || version == 4;
   }
 private:
   /// Return the compile unit that includes an offset (relative to .debug_info).

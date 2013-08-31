@@ -1,4 +1,4 @@
-//===- InstCombineWorklist.h - Worklist for the InstCombine pass ----------===//
+//===- InstCombineWorklist.h - Worklist for InstCombine pass ----*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -74,8 +74,7 @@ public:
   }
 
   Instruction *RemoveOne() {
-    Instruction *I = Worklist.back();
-    Worklist.pop_back();
+    Instruction *I = Worklist.pop_back_val();
     WorklistMap.erase(I);
     return I;
   }

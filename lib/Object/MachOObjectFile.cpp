@@ -18,7 +18,9 @@
 #include "llvm/Support/DataExtractor.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/Host.h"
+#include "llvm/Support/MachO.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/raw_ostream.h"
 #include <cctype>
 #include <cstring>
 #include <limits>
@@ -566,16 +568,16 @@ error_code MachOObjectFile::getSymbolType(DataRefImpl Symb,
   Res = SymbolRef::ST_Other;
 
   // If this is a STAB debugging symbol, we can do nothing more.
-  if (n_type & MachO::NlistMaskStab) {
+  if (n_type & MachO::N_STAB) {
     Res = SymbolRef::ST_Debug;
     return object_error::success;
   }
 
-  switch (n_type & MachO::NlistMaskType) {
-    case MachO::NListTypeUndefined :
+  switch (n_type & MachO::N_TYPE) {
+    case MachO::N_UNDF :
       Res = SymbolRef::ST_Unknown;
       break;
-    case MachO::NListTypeSection :
+    case MachO::N_SECT :
       Res = SymbolRef::ST_Function;
       break;
   }
@@ -618,15 +620,15 @@ error_code MachOObjectFile::getSymbolFlags(DataRefImpl DRI,
   // TODO: Correctly set SF_ThreadLocal
   Result = SymbolRef::SF_None;
 
-  if ((MachOType & MachO::NlistMaskType) == MachO::NListTypeUndefined)
+  if ((MachOType & MachO::N_TYPE) == MachO::N_UNDF)
     Result |= SymbolRef::SF_Undefined;
 
   if (MachOFlags & macho::STF_StabsEntryMask)
     Result |= SymbolRef::SF_FormatSpecific;
 
-  if (MachOType & MachO::NlistMaskExternal) {
+  if (MachOType & MachO::N_EXT) {
     Result |= SymbolRef::SF_Global;
-    if ((MachOType & MachO::NlistMaskType) == MachO::NListTypeUndefined) {
+    if ((MachOType & MachO::N_TYPE) == MachO::N_UNDF) {
       uint64_t Value;
       getSymbolAddress(DRI, Value);
       if (Value)
@@ -634,10 +636,10 @@ error_code MachOObjectFile::getSymbolFlags(DataRefImpl DRI,
     }
   }
 
-  if (MachOFlags & (MachO::NListDescWeakRef | MachO::NListDescWeakDef))
+  if (MachOFlags & (MachO::N_WEAK_REF | MachO::N_WEAK_DEF))
     Result |= SymbolRef::SF_Weak;
 
-  if ((MachOType & MachO::NlistMaskType) == MachO::NListTypeAbsolute)
+  if ((MachOType & MachO::N_TYPE) == MachO::N_ABS)
     Result |= SymbolRef::SF_Absolute;
 
   return object_error::success;
@@ -775,9 +777,9 @@ error_code MachOObjectFile::isSectionVirtual(DataRefImpl Sec,
 error_code
 MachOObjectFile::isSectionZeroInit(DataRefImpl Sec, bool &Res) const {
   uint32_t Flags = getSectionFlags(this, Sec);
-  unsigned SectionType = Flags & MachO::SectionFlagMaskSectionType;
-  Res = SectionType == MachO::SectionTypeZeroFill ||
-    SectionType == MachO::SectionTypeZeroFillLarge;
+  unsigned SectionType = Flags & MachO::SECTION_TYPE;
+  Res = SectionType == MachO::S_ZEROFILL ||
+    SectionType == MachO::S_GB_ZEROFILL;
   return object_error::success;
 }
 
@@ -1059,7 +1061,8 @@ MachOObjectFile::getRelocationValueString(DataRefImpl Rel,
         break;
     }
   // X86 and ARM share some relocation types in common.
-  } else if (Arch == Triple::x86 || Arch == Triple::arm) {
+  } else if (Arch == Triple::x86 || Arch == Triple::arm ||
+             Arch == Triple::ppc) {
     // Generic relocation types...
     switch (Type) {
       case macho::RIT_Pair: // GENERIC_RELOC_PAIR - prints no info
@@ -1084,7 +1087,7 @@ MachOObjectFile::getRelocationValueString(DataRefImpl Rel,
       }
     }
 
-    if (Arch == Triple::x86) {
+    if (Arch == Triple::x86 || Arch == Triple::ppc) {
       // All X86 relocations that need special printing were already
       // handled in the generic code.
       switch (Type) {
@@ -1177,11 +1180,11 @@ MachOObjectFile::getRelocationHidden(DataRefImpl Rel, bool &Result) const {
 
   // On arches that use the generic relocations, GENERIC_RELOC_PAIR
   // is always hidden.
-  if (Arch == Triple::x86 || Arch == Triple::arm) {
+  if (Arch == Triple::x86 || Arch == Triple::arm || Arch == Triple::ppc) {
     if (Type == macho::RIT_Pair) Result = true;
   } else if (Arch == Triple::x86_64) {
     // On x86_64, X86_64_RELOC_UNSIGNED is hidden only when it follows
-    // an X864_64_RELOC_SUBTRACTOR.
+    // an X86_64_RELOC_SUBTRACTOR.
     if (Type == macho::RIT_X86_64_Unsigned && Rel.d.a > 0) {
       DataRefImpl RelPrev = Rel;
       RelPrev.d.a--;
@@ -1269,28 +1272,28 @@ StringRef MachOObjectFile::getFileFormatName() const {
   unsigned CPUType = getCPUType(this);
   if (!is64Bit()) {
     switch (CPUType) {
-    case llvm::MachO::CPUTypeI386:
+    case llvm::MachO::CPU_TYPE_I386:
       return "Mach-O 32-bit i386";
-    case llvm::MachO::CPUTypeARM:
+    case llvm::MachO::CPU_TYPE_ARM:
       return "Mach-O arm";
-    case llvm::MachO::CPUTypePowerPC:
+    case llvm::MachO::CPU_TYPE_POWERPC:
       return "Mach-O 32-bit ppc";
     default:
-      assert((CPUType & llvm::MachO::CPUArchABI64) == 0 &&
+      assert((CPUType & llvm::MachO::CPU_ARCH_ABI64) == 0 &&
              "64-bit object file when we're not 64-bit?");
       return "Mach-O 32-bit unknown";
     }
   }
 
   // Make sure the cpu type has the correct mask.
-  assert((CPUType & llvm::MachO::CPUArchABI64)
-	 == llvm::MachO::CPUArchABI64 &&
-	 "32-bit object file when we're 64-bit?");
+  assert((CPUType & llvm::MachO::CPU_ARCH_ABI64)
+         == llvm::MachO::CPU_ARCH_ABI64 &&
+         "32-bit object file when we're 64-bit?");
 
   switch (CPUType) {
-  case llvm::MachO::CPUTypeX86_64:
+  case llvm::MachO::CPU_TYPE_X86_64:
     return "Mach-O 64-bit x86-64";
-  case llvm::MachO::CPUTypePowerPC64:
+  case llvm::MachO::CPU_TYPE_POWERPC64:
     return "Mach-O 64-bit ppc64";
   default:
     return "Mach-O 64-bit unknown";
@@ -1299,15 +1302,15 @@ StringRef MachOObjectFile::getFileFormatName() const {
 
 Triple::ArchType MachOObjectFile::getArch(uint32_t CPUType) {
   switch (CPUType) {
-  case llvm::MachO::CPUTypeI386:
+  case llvm::MachO::CPU_TYPE_I386:
     return Triple::x86;
-  case llvm::MachO::CPUTypeX86_64:
+  case llvm::MachO::CPU_TYPE_X86_64:
     return Triple::x86_64;
-  case llvm::MachO::CPUTypeARM:
+  case llvm::MachO::CPU_TYPE_ARM:
     return Triple::arm;
-  case llvm::MachO::CPUTypePowerPC:
+  case llvm::MachO::CPU_TYPE_POWERPC:
     return Triple::ppc;
-  case llvm::MachO::CPUTypePowerPC64:
+  case llvm::MachO::CPU_TYPE_POWERPC64:
     return Triple::ppc64;
   default:
     return Triple::UnknownArch;
@@ -1379,35 +1382,37 @@ MachOObjectFile::getSectionRawFinalSegmentName(DataRefImpl Sec) const {
 bool
 MachOObjectFile::isRelocationScattered(const macho::RelocationEntry &RE)
   const {
-  if (getCPUType(this) == llvm::MachO::CPUTypeX86_64)
+  if (getCPUType(this) == llvm::MachO::CPU_TYPE_X86_64)
     return false;
   return getPlainRelocationAddress(RE) & macho::RF_Scattered;
 }
 
-unsigned MachOObjectFile::getPlainRelocationSymbolNum(const macho::RelocationEntry &RE) const {
+unsigned MachOObjectFile::getPlainRelocationSymbolNum(
+    const macho::RelocationEntry &RE) const {
   if (isLittleEndian())
     return RE.Word1 & 0xffffff;
   return RE.Word1 >> 8;
 }
 
-bool MachOObjectFile::getPlainRelocationExternal(const macho::RelocationEntry &RE) const {
+bool MachOObjectFile::getPlainRelocationExternal(
+    const macho::RelocationEntry &RE) const {
   if (isLittleEndian())
     return (RE.Word1 >> 27) & 1;
   return (RE.Word1 >> 4) & 1;
 }
 
-bool
-MachOObjectFile::getScatteredRelocationScattered(const macho::RelocationEntry &RE) const {
+bool MachOObjectFile::getScatteredRelocationScattered(
+    const macho::RelocationEntry &RE) const {
   return RE.Word0 >> 31;
 }
 
-uint32_t
-MachOObjectFile::getScatteredRelocationValue(const macho::RelocationEntry &RE) const {
+uint32_t MachOObjectFile::getScatteredRelocationValue(
+    const macho::RelocationEntry &RE) const {
   return RE.Word1;
 }
 
-unsigned
-MachOObjectFile::getAnyRelocationAddress(const macho::RelocationEntry &RE) const {
+unsigned MachOObjectFile::getAnyRelocationAddress(
+    const macho::RelocationEntry &RE) const {
   if (isRelocationScattered(RE))
     return getScatteredRelocationAddress(RE);
   return getPlainRelocationAddress(RE);
@@ -1420,8 +1425,8 @@ MachOObjectFile::getAnyRelocationPCRel(const macho::RelocationEntry &RE) const {
   return getPlainRelocationPCRel(this, RE);
 }
 
-unsigned
-MachOObjectFile::getAnyRelocationLength(const macho::RelocationEntry &RE) const {
+unsigned MachOObjectFile::getAnyRelocationLength(
+    const macho::RelocationEntry &RE) const {
   if (isRelocationScattered(RE))
     return getScatteredRelocationLength(RE);
   return getPlainRelocationLength(this, RE);
@@ -1494,8 +1499,8 @@ MachOObjectFile::getSymbol64TableEntry(DataRefImpl DRI) const {
   return getStruct<macho::Symbol64TableEntry>(this, P);
 }
 
-macho::LinkeditDataLoadCommand
-MachOObjectFile::getLinkeditDataLoadCommand(const MachOObjectFile::LoadCommandInfo &L) const {
+macho::LinkeditDataLoadCommand MachOObjectFile::getLinkeditDataLoadCommand(
+    const MachOObjectFile::LoadCommandInfo &L) const {
   return getStruct<macho::LinkeditDataLoadCommand>(this, L.Ptr);
 }
 
@@ -1597,21 +1602,23 @@ void MachOObjectFile::ReadULEB128s(uint64_t Index,
 ObjectFile *ObjectFile::createMachOObjectFile(MemoryBuffer *Buffer) {
   StringRef Magic = Buffer->getBuffer().slice(0, 4);
   error_code ec;
-  ObjectFile *Ret;
+  OwningPtr<ObjectFile> Ret;
   if (Magic == "\xFE\xED\xFA\xCE")
-    Ret = new MachOObjectFile(Buffer, false, false, ec);
+    Ret.reset(new MachOObjectFile(Buffer, false, false, ec));
   else if (Magic == "\xCE\xFA\xED\xFE")
-    Ret = new MachOObjectFile(Buffer, true, false, ec);
+    Ret.reset(new MachOObjectFile(Buffer, true, false, ec));
   else if (Magic == "\xFE\xED\xFA\xCF")
-    Ret = new MachOObjectFile(Buffer, false, true, ec);
+    Ret.reset(new MachOObjectFile(Buffer, false, true, ec));
   else if (Magic == "\xCF\xFA\xED\xFE")
-    Ret = new MachOObjectFile(Buffer, true, true, ec);
-  else
+    Ret.reset(new MachOObjectFile(Buffer, true, true, ec));
+  else {
+    delete Buffer;
     return NULL;
+  }
 
   if (ec)
     return NULL;
-  return Ret;
+  return Ret.take();
 }
 
 } // end namespace object

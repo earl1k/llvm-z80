@@ -19,7 +19,7 @@
 #include <utility>
 
 namespace llvm {
-  template<typename T>
+  template <typename T>
   class SmallVectorImpl;
   class APInt;
   class hash_code;
@@ -175,7 +175,7 @@ namespace llvm {
     /// transform one of the given strings into the other. If zero,
     /// the strings are identical.
     unsigned edit_distance(StringRef Other, bool AllowReplacements = true,
-                           unsigned MaxEditDistance = 0);
+                           unsigned MaxEditDistance = 0) const;
 
     /// str - Get the contents as an std::string.
     std::string str() const {
@@ -548,6 +548,10 @@ namespace llvm {
   template <typename T> struct isPodLike;
   template <> struct isPodLike<StringRef> { static const bool value = true; };
 
+  /// Construct a string ref from a boolean.
+  inline StringRef toStringRef(bool B) {
+    return StringRef(B ? "true" : "false");
+  }
 }
 
 #endif

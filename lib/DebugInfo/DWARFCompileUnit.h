@@ -10,6 +10,7 @@
 #ifndef LLVM_DEBUGINFO_DWARFCOMPILEUNIT_H
 #define LLVM_DEBUGINFO_DWARFCOMPILEUNIT_H
 
+#include "llvm/ADT/OwningPtr.h"
 #include "DWARFDebugAbbrev.h"
 #include "DWARFDebugInfoEntry.h"
 #include "DWARFDebugRangeList.h"
@@ -18,18 +19,27 @@
 
 namespace llvm {
 
+namespace object {
+class ObjectFile;
+}
+
 class DWARFDebugAbbrev;
 class StringRef;
 class raw_ostream;
 
 class DWARFCompileUnit {
+  DWARFCompileUnit(DWARFCompileUnit const &) LLVM_DELETED_FUNCTION;
+  DWARFCompileUnit &operator=(DWARFCompileUnit const &) LLVM_DELETED_FUNCTION;
+
   const DWARFDebugAbbrev *Abbrev;
   StringRef InfoSection;
   StringRef AbbrevSection;
   StringRef RangeSection;
+  uint32_t RangeSectionBase;
   StringRef StringSection;
   StringRef StringOffsetSection;
   StringRef AddrOffsetSection;
+  uint32_t AddrOffsetSectionBase;
   const RelocAddrMap *RelocMap;
   bool isLittleEndian;
 
@@ -41,6 +51,17 @@ class DWARFCompileUnit {
   uint64_t BaseAddr;
   // The compile unit debug information entry items.
   std::vector<DWARFDebugInfoEntryMinimal> DieArray;
+
+  class DWOHolder {
+    OwningPtr<object::ObjectFile> DWOFile;
+    OwningPtr<DWARFContext> DWOContext;
+    DWARFCompileUnit *DWOCU;
+  public:
+    DWOHolder(object::ObjectFile *DWOFile);
+    DWARFCompileUnit *getCU() const { return DWOCU; }
+  };
+  OwningPtr<DWOHolder> DWO;
+
 public:
 
   DWARFCompileUnit(const DWARFDebugAbbrev *DA, StringRef IS, StringRef AS,
@@ -54,9 +75,27 @@ public:
 
   StringRef getStringSection() const { return StringSection; }
   StringRef getStringOffsetSection() const { return StringOffsetSection; }
-  StringRef getAddrOffsetSection() const { return AddrOffsetSection; }
+  void setAddrOffsetSection(StringRef AOS, uint32_t Base) {
+    AddrOffsetSection = AOS;
+    AddrOffsetSectionBase = Base;
+  }
+  void setRangesSection(StringRef RS, uint32_t Base) {
+    RangeSection = RS;
+    RangeSectionBase = Base;
+  }
+
+  bool getAddrOffsetSectionItem(uint32_t Index, uint64_t &Result) const;
+  // FIXME: Result should be uint64_t in DWARF64.
+  bool getStringOffsetSectionItem(uint32_t Index, uint32_t &Result) const;
+
+  DataExtractor getDebugInfoExtractor() const {
+    return DataExtractor(InfoSection, isLittleEndian, AddrSize);
+  }
+  DataExtractor getStringExtractor() const {
+    return DataExtractor(StringSection, false, 0);
+  }
+
   const RelocAddrMap *getRelocMap() const { return RelocMap; }
-  DataExtractor getDebugInfoExtractor() const;
 
   bool extract(DataExtractor debug_info, uint32_t* offset_ptr);
   uint32_t extract(uint32_t offset, DataExtractor debug_info_data,
@@ -102,6 +141,7 @@ public:
   }
 
   const char *getCompilationDir();
+  uint64_t getDWOId();
 
   /// setDIERelations - We read in all of the DIE entries into our flat list
   /// of DIE entries and now we need to go back through all of them and set the
@@ -109,12 +149,13 @@ public:
   void setDIERelations();
 
   void buildAddressRangeTable(DWARFDebugAranges *debug_aranges,
-                              bool clear_dies_if_already_not_parsed);
+                              bool clear_dies_if_already_not_parsed,
+                              uint32_t CUOffsetInAranges);
 
   /// getInlinedChainForAddress - fetches inlined chain for a given address.
-  /// Returns empty chain if there is no subprogram containing address.
-  DWARFDebugInfoEntryMinimal::InlinedChain getInlinedChainForAddress(
-      uint64_t Address);
+  /// Returns empty chain if there is no subprogram containing address. The
+  /// chain is valid as long as parsed compile unit DIEs are not cleared.
+  DWARFDebugInfoEntryInlinedChain getInlinedChainForAddress(uint64_t Address);
 
 private:
   /// extractDIEsToVector - Appends all parsed DIEs to a vector.
@@ -122,6 +163,15 @@ private:
                            std::vector<DWARFDebugInfoEntryMinimal> &DIEs) const;
   /// clearDIEs - Clear parsed DIEs to keep memory usage low.
   void clearDIEs(bool KeepCUDie);
+
+  /// parseDWO - Parses .dwo file for current compile unit. Returns true if
+  /// it was actually constructed.
+  bool parseDWO();
+
+  /// getSubprogramForAddress - Returns subprogram DIE with address range
+  /// encompassing the provided address. The pointer is alive as long as parsed
+  /// compile unit DIEs are not cleared.
+  const DWARFDebugInfoEntryMinimal *getSubprogramForAddress(uint64_t Address);
 };
 
 }

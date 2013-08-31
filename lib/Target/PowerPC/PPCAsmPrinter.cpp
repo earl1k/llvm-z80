@@ -704,6 +704,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     break;
   case PPC::LD:
   case PPC::STD:
+  case PPC::LWA_32:
   case PPC::LWA: {
     // Verify alignment is legal, so we don't create relocations
     // that can't be supported.
@@ -839,7 +840,8 @@ void PPCDarwinAsmPrinter::EmitStartOfAsmFile(Module &M) {
     "power6",
     "power6x",
     "power7",
-    "ppc64"
+    "ppc64",
+    "ppc64le"
   };
 
   unsigned Directive = Subtarget.getDarwinDirective();

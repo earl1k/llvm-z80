@@ -5,17 +5,17 @@ target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f3
 ; Make sure we are preserving debug info in the vectorized code.
 
 ; CHECK: for.body.lr.ph
-; CHECK:   cmp.zero = icmp eq i64 {{.*}}, 0, !dbg !21
+; CHECK:   cmp.zero = icmp eq i64 {{.*}}, 0, !dbg ![[LOC:[0-9]+]]
 ; CHECK: vector.body
-; CHECK:   index {{.*}}, !dbg !21
-; CHECK:   getelementptr inbounds i32* %a, {{.*}}, !dbg !22
-; CHECK:   load <2 x i32>* {{.*}}, !dbg !22
-; CHECK:   add <2 x i32> {{.*}}, !dbg !22
-; CHECK:   add i64 %index, 2, !dbg !21
-; CHECK:   icmp eq i64 %index.next, %end.idx.rnd.down, !dbg !21
+; CHECK:   index {{.*}}, !dbg ![[LOC]]
+; CHECK:   getelementptr inbounds i32* %a, {{.*}}, !dbg ![[LOC2:[0-9]+]]
+; CHECK:   load <2 x i32>* {{.*}}, !dbg ![[LOC2]]
+; CHECK:   add <2 x i32> {{.*}}, !dbg ![[LOC2]]
+; CHECK:   add i64 %index, 2, !dbg ![[LOC]]
+; CHECK:   icmp eq i64 %index.next, %end.idx.rnd.down, !dbg ![[LOC]]
 ; CHECK: middle.block
-; CHECK:   add <2 x i32> %rdx.vec.exit.phi, %rdx.shuf, !dbg !22
-; CHECK:   extractelement <2 x i32> %bin.rdx, i32 0, !dbg !22
+; CHECK:   add <2 x i32> %rdx.vec.exit.phi, %rdx.shuf, !dbg ![[LOC2]]
+; CHECK:   extractelement <2 x i32> %bin.rdx, i32 0, !dbg ![[LOC2]]
 
 define i32 @f(i32* nocapture %a, i32 %size) #0 {
 entry:
@@ -70,7 +70,7 @@ attributes #1 = { nounwind readnone }
 !4 = metadata !{i32 786478, metadata !5, metadata !6, metadata !"f", metadata !"f", metadata !"", i32 3, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 (i32*, i32)* @f, null, null, metadata !12, i32 3} ; [ DW_TAG_subprogram ] [line 3] [def] [f]
 !5 = metadata !{metadata !"<stdin>", metadata !"/Volumes/Data/backedup/dev/os/llvm/debug"}
 !6 = metadata !{i32 786473, metadata !5}          ; [ DW_TAG_file_type ] [/Volumes/Data/backedup/dev/os/llvm/debug/<stdin>]
-!7 = metadata !{i32 786453, i32 0, i32 0, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
+!7 = metadata !{i32 786453, i32 0, i32 0, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, i32 0, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !8 = metadata !{metadata !9, metadata !10, metadata !11}
 !9 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
 !10 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !9} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from int]

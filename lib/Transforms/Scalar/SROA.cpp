@@ -480,7 +480,7 @@ private:
       if (!II.isVolatile())
         return markAsDead(II);
 
-      return insertUse(II, Offset, Size, /*IsSplittable=*/false);;
+      return insertUse(II, Offset, Size, /*IsSplittable=*/false);
     }
 
     // If we have seen both source and destination for a mem transfer, then
@@ -653,12 +653,6 @@ private:
   }
 };
 
-namespace {
-struct IsSliceDead {
-  bool operator()(const Slice &S) { return S.isDead(); }
-};
-}
-
 AllocaSlices::AllocaSlices(const DataLayout &DL, AllocaInst &AI)
     :
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -676,12 +670,13 @@ AllocaSlices::AllocaSlices(const DataLayout &DL, AllocaInst &AI)
     return;
   }
 
+  Slices.erase(std::remove_if(Slices.begin(), Slices.end(),
+                              std::mem_fun_ref(&Slice::isDead)),
+               Slices.end());
+
   // Sort the uses. This arranges for the offsets to be in ascending order,
   // and the sizes to be in descending order.
   std::sort(Slices.begin(), Slices.end());
-
-  Slices.erase(std::remove_if(Slices.begin(), Slices.end(), IsSliceDead()),
-               Slices.end());
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -738,12 +733,13 @@ class AllocaPromoter : public LoadAndStorePromoter {
   SmallVector<DbgValueInst *, 4> DVIs;
 
 public:
-  AllocaPromoter(const SmallVectorImpl<Instruction*> &Insts, SSAUpdater &S,
+  AllocaPromoter(const SmallVectorImpl<Instruction *> &Insts, SSAUpdater &S,
                  AllocaInst &AI, DIBuilder &DIB)
-    : LoadAndStorePromoter(Insts, S), AI(AI), DIB(DIB) {}
+      : LoadAndStorePromoter(Insts, S), AI(AI), DIB(DIB) {}
 
   void run(const SmallVectorImpl<Instruction*> &Insts) {
-    // Remember which alloca we're promoting (for isInstInList).
+    // Retain the debug information attached to the alloca for use when
+    // rewriting loads and stores.
     if (MDNode *DebugNode = MDNode::getIfExists(AI.getContext(), &AI)) {
       for (Value::use_iterator UI = DebugNode->use_begin(),
                                UE = DebugNode->use_end();
@@ -755,7 +751,9 @@ public:
     }
 
     LoadAndStorePromoter::run(Insts);
-    AI.eraseFromParent();
+
+    // While we have the debug information, clear it off of the alloca. The
+    // caller takes care of deleting the alloca.
     while (!DDIs.empty())
       DDIs.pop_back_val()->eraseFromParent();
     while (!DVIs.empty())
@@ -764,9 +762,30 @@ public:
 
   virtual bool isInstInList(Instruction *I,
                             const SmallVectorImpl<Instruction*> &Insts) const {
+    Value *Ptr;
     if (LoadInst *LI = dyn_cast<LoadInst>(I))
-      return LI->getOperand(0) == &AI;
-    return cast<StoreInst>(I)->getPointerOperand() == &AI;
+      Ptr = LI->getOperand(0);
+    else
+      Ptr = cast<StoreInst>(I)->getPointerOperand();
+
+    // Only used to detect cycles, which will be rare and quickly found as
+    // we're walking up a chain of defs rather than down through uses.
+    SmallPtrSet<Value *, 4> Visited;
+
+    do {
+      if (Ptr == &AI)
+        return true;
+
+      if (BitCastInst *BCI = dyn_cast<BitCastInst>(Ptr))
+        Ptr = BCI->getOperand(0);
+      else if (GetElementPtrInst *GEPI = dyn_cast<GetElementPtrInst>(Ptr))
+        Ptr = GEPI->getPointerOperand();
+      else
+        return false;
+
+    } while (Visited.insert(Ptr));
+
+    return false;
   }
 
   virtual void updateDebugInfo(Instruction *Inst) const {
@@ -1874,6 +1893,10 @@ class AllocaSliceRewriter : public InstVisitor<AllocaSliceRewriter, bool> {
   Use *OldUse;
   Instruction *OldPtr;
 
+  // Output members carrying state about the result of visiting and rewriting
+  // the slice of the alloca.
+  bool IsUsedByRewrittenSpeculatableInstructions;
+
   // Utility IR builder, whose name prefix is setup for each visited use, and
   // the insertion point is set to point to the user.
   IRBuilderTy IRB;
@@ -1896,7 +1919,8 @@ public:
                         DL.getTypeSizeInBits(NewAI.getAllocatedType()))
                   : 0),
         BeginOffset(), EndOffset(), IsSplittable(), IsSplit(), OldUse(),
-        OldPtr(), IRB(NewAI.getContext(), ConstantFolder()) {
+        OldPtr(), IsUsedByRewrittenSpeculatableInstructions(false),
+        IRB(NewAI.getContext(), ConstantFolder()) {
     if (VecTy) {
       assert((DL.getTypeSizeInBits(ElementTy) % 8) == 0 &&
              "Only multiple-of-8 sized vector elements are viable");
@@ -1926,6 +1950,20 @@ public:
     if (VecTy || IntTy)
       assert(CanSROA);
     return CanSROA;
+  }
+
+  /// \brief Query whether this slice is used by speculatable instructions after
+  /// rewriting.
+  ///
+  /// These instructions (PHIs and Selects currently) require the alloca slice
+  /// to run back through the rewriter. Thus, they are promotable, but not on
+  /// this iteration. This is distinct from a slice which is unpromotable for
+  /// some other reason, in which case we don't even want to perform the
+  /// speculation. This can be querried at any time and reflects whether (at
+  /// that point) a visit call has rewritten a speculatable instruction on the
+  /// current slice.
+  bool isUsedByRewrittenSpeculatableInstructions() const {
+    return IsUsedByRewrittenSpeculatableInstructions;
   }
 
 private:
@@ -2545,7 +2583,7 @@ private:
     // as local as possible to the PHI. To do that, we re-use the location of
     // the old pointer, which necessarily must be in the right position to
     // dominate the PHI.
-    IRBuilderTy PtrBuilder(cast<Instruction>(OldPtr));
+    IRBuilderTy PtrBuilder(OldPtr);
     PtrBuilder.SetNamePrefix(Twine(NewAI.getName()) + "." + Twine(BeginOffset) +
                              ".");
 
@@ -2558,10 +2596,11 @@ private:
     deleteIfTriviallyDead(OldPtr);
 
     // Check whether we can speculate this PHI node, and if so remember that
-    // fact and return that this alloca remains viable for promotion to an SSA
-    // value.
+    // fact and queue it up for another iteration after the speculation
+    // occurs.
     if (isSafePHIToSpeculate(PN, &DL)) {
       Pass.SpeculatablePHIs.insert(&PN);
+      IsUsedByRewrittenSpeculatableInstructions = true;
       return true;
     }
 
@@ -2586,10 +2625,11 @@ private:
     deleteIfTriviallyDead(OldPtr);
 
     // Check whether we can speculate this select instruction, and if so
-    // remember that fact and return that this alloca remains viable for
-    // promotion to an SSA value.
+    // remember that fact and queue it up for another iteration after the
+    // speculation occurs.
     if (isSafeSelectToSpeculate(SI, &DL)) {
       Pass.SpeculatableSelects.insert(&SI);
+      IsUsedByRewrittenSpeculatableInstructions = true;
       return true;
     }
 
@@ -3035,10 +3075,7 @@ bool SROA::rewritePartition(AllocaInst &AI, AllocaSlices &S,
   unsigned PPWOldSize = PostPromotionWorklist.size();
   unsigned SPOldSize = SpeculatablePHIs.size();
   unsigned SSOldSize = SpeculatableSelects.size();
-
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_STATS)
   unsigned NumUses = 0;
-#endif
 
   AllocaSliceRewriter Rewriter(*DL, S, *this, AI, *NewAI, BeginOffset,
                                EndOffset, IsVectorPromotable,
@@ -3050,38 +3087,34 @@ bool SROA::rewritePartition(AllocaInst &AI, AllocaSlices &S,
     DEBUG(dbgs() << "  rewriting split ");
     DEBUG(S.printSlice(dbgs(), *SUI, ""));
     Promotable &= Rewriter.visit(*SUI);
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_STATS)
     ++NumUses;
-#endif
   }
   for (AllocaSlices::iterator I = B; I != E; ++I) {
     DEBUG(dbgs() << "  rewriting ");
     DEBUG(S.printSlice(dbgs(), I, ""));
     Promotable &= Rewriter.visit(I);
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_STATS)
     ++NumUses;
-#endif
   }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_STATS)
   NumAllocaPartitionUses += NumUses;
   MaxUsesPerAllocaPartition =
       std::max<unsigned>(NumUses, MaxUsesPerAllocaPartition);
-#endif
 
-  if (Promotable && (SpeculatablePHIs.size() > SPOldSize ||
-                     SpeculatableSelects.size() > SSOldSize)) {
-    // If we have a promotable alloca except for some unspeculated loads below
-    // PHIs or Selects, iterate once. We will speculate the loads and on the
-    // next iteration rewrite them into a promotable form.
-    Worklist.insert(NewAI);
-  } else if (Promotable) {
+  if (Promotable && !Rewriter.isUsedByRewrittenSpeculatableInstructions()) {
     DEBUG(dbgs() << "  and queuing for promotion\n");
     PromotableAllocas.push_back(NewAI);
-  } else if (NewAI != &AI) {
+  } else if (NewAI != &AI ||
+             (Promotable &&
+              Rewriter.isUsedByRewrittenSpeculatableInstructions())) {
     // If we can't promote the alloca, iterate on it to check for new
     // refinements exposed by splitting the current alloca. Don't iterate on an
     // alloca which didn't actually change and didn't get promoted.
+    //
+    // Alternatively, if we could promote the alloca but have speculatable
+    // instructions then we will speculate them after finishing our processing
+    // of the original alloca. Mark the new one for re-visiting in the next
+    // iteration so the speculated operations can be rewritten.
+    //
     // FIXME: We should actually track whether the rewriter changed anything.
     Worklist.insert(NewAI);
   }
@@ -3142,10 +3175,7 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &S) {
   if (S.begin() == S.end())
     return false;
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_STATS)
   unsigned NumPartitions = 0;
-#endif
-
   bool Changed = false;
   SmallVector<AllocaSlices::iterator, 4> SplitUses;
   uint64_t MaxSplitUseEndOffset = 0;
@@ -3192,9 +3222,7 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &S) {
       // Rewrite a sequence of overlapping slices.
       Changed |=
           rewritePartition(AI, S, SI, SJ, BeginOffset, MaxEndOffset, SplitUses);
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_STATS)
       ++NumPartitions;
-#endif
 
       removeFinishedSplitUses(SplitUses, MaxSplitUseEndOffset, MaxEndOffset);
     }
@@ -3234,9 +3262,7 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &S) {
 
     Changed |= rewritePartition(AI, S, SJ, SJ, MaxEndOffset, PostSplitEndOffset,
                                 SplitUses);
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_STATS)
     ++NumPartitions;
-#endif
 
     if (SJ == SE)
       break; // Skip the rest, we don't need to do any cleanup.
@@ -3248,11 +3274,9 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &S) {
     BeginOffset = SJ->beginOffset();
   }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_STATS)
   NumAllocaPartitions += NumPartitions;
   MaxPartitionsPerAlloca =
       std::max<unsigned>(NumPartitions, MaxPartitionsPerAlloca);
-#endif
 
   return Changed;
 }
@@ -3360,6 +3384,15 @@ void SROA::deleteDeadInstructions(SmallPtrSet<AllocaInst*, 4> &DeletedAllocas) {
   }
 }
 
+static void enqueueUsersInWorklist(Instruction &I,
+                                   SmallVectorImpl<Instruction *> &Worklist,
+                                   SmallPtrSet<Instruction *, 8> &Visited) {
+  for (Value::use_iterator UI = I.use_begin(), UE = I.use_end(); UI != UE;
+       ++UI)
+    if (Visited.insert(cast<Instruction>(*UI)))
+      Worklist.push_back(cast<Instruction>(*UI));
+}
+
 /// \brief Promote the allocas, using the best available technique.
 ///
 /// This attempts to promote whatever allocas have been identified as viable in
@@ -3384,25 +3417,28 @@ bool SROA::promoteAllocas(Function &F) {
   DEBUG(dbgs() << "Promoting allocas with SSAUpdater...\n");
   SSAUpdater SSA;
   DIBuilder DIB(*F.getParent());
-  SmallVector<Instruction*, 64> Insts;
+  SmallVector<Instruction *, 64> Insts;
+
+  // We need a worklist to walk the uses of each alloca.
+  SmallVector<Instruction *, 8> Worklist;
+  SmallPtrSet<Instruction *, 8> Visited;
+  SmallVector<Instruction *, 32> DeadInsts;
 
   for (unsigned Idx = 0, Size = PromotableAllocas.size(); Idx != Size; ++Idx) {
     AllocaInst *AI = PromotableAllocas[Idx];
-    for (Value::use_iterator UI = AI->use_begin(), UE = AI->use_end();
-         UI != UE;) {
-      Instruction *I = cast<Instruction>(*UI++);
+    Insts.clear();
+    Worklist.clear();
+    Visited.clear();
+
+    enqueueUsersInWorklist(*AI, Worklist, Visited);
+
+    while (!Worklist.empty()) {
+      Instruction *I = Worklist.pop_back_val();
+
       // FIXME: Currently the SSAUpdater infrastructure doesn't reason about
       // lifetime intrinsics and so we strip them (and the bitcasts+GEPs
       // leading to them) here. Eventually it should use them to optimize the
       // scalar values produced.
-      if (isa<BitCastInst>(I) || isa<GetElementPtrInst>(I)) {
-        assert(onlyUsedByLifetimeMarkers(I) &&
-               "Found a bitcast used outside of a lifetime marker.");
-        while (!I->use_empty())
-          cast<Instruction>(*I->use_begin())->eraseFromParent();
-        I->eraseFromParent();
-        continue;
-      }
       if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(I)) {
         assert(II->getIntrinsicID() == Intrinsic::lifetime_start ||
                II->getIntrinsicID() == Intrinsic::lifetime_end);
@@ -3410,10 +3446,30 @@ bool SROA::promoteAllocas(Function &F) {
         continue;
       }
 
-      Insts.push_back(I);
+      // Push the loads and stores we find onto the list. SROA will already
+      // have validated that all loads and stores are viable candidates for
+      // promotion.
+      if (LoadInst *LI = dyn_cast<LoadInst>(I)) {
+        assert(LI->getType() == AI->getAllocatedType());
+        Insts.push_back(LI);
+        continue;
+      }
+      if (StoreInst *SI = dyn_cast<StoreInst>(I)) {
+        assert(SI->getValueOperand()->getType() == AI->getAllocatedType());
+        Insts.push_back(SI);
+        continue;
+      }
+
+      // For everything else, we know that only no-op bitcasts and GEPs will
+      // make it this far, just recurse through them and recall them for later
+      // removal.
+      DeadInsts.push_back(I);
+      enqueueUsersInWorklist(*I, Worklist, Visited);
     }
     AllocaPromoter(Insts, SSA, *AI, DIB).run(Insts);
-    Insts.clear();
+    while (!DeadInsts.empty())
+      DeadInsts.pop_back_val()->eraseFromParent();
+    AI->eraseFromParent();
   }
 
   PromotableAllocas.clear();

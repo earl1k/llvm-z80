@@ -152,6 +152,12 @@ namespace llvm {
       SETCC_DSP,
       SELECT_CC_DSP,
 
+      // Vector comparisons
+      VALL_ZERO,
+      VANY_ZERO,
+      VALL_NONZERO,
+      VANY_NONZERO,
+
       // Load/Store Left/Right nodes.
       LWL = ISD::FIRST_TARGET_MEMORY_OPCODE,
       LWR,
@@ -244,9 +250,8 @@ namespace llvm {
         Mips16RetHelperConv, NoSpecialCallingConv
       };
 
-      MipsCC(
-        CallingConv::ID CallConv, bool IsO32, CCState &Info,
-        SpecialCallingConvType SpecialCallingConv = NoSpecialCallingConv);
+      MipsCC(CallingConv::ID CallConv, bool IsO32, bool IsFP64, CCState &Info,
+             SpecialCallingConvType SpecialCallingConv = NoSpecialCallingConv);
 
 
       void analyzeCallOperands(const SmallVectorImpl<ISD::OutputArg> &Outs,
@@ -319,7 +324,7 @@ namespace llvm {
 
       CCState &CCInfo;
       CallingConv::ID CallConv;
-      bool IsO32;
+      bool IsO32, IsFP64;
       SpecialCallingConvType SpecialCallingConv;
       SmallVector<ByValArgInfo, 2> ByValArgs;
     };
@@ -432,6 +437,11 @@ namespace llvm {
     /// The operand object must already have been set up with the operand type.
     ConstraintWeight getSingleConstraintMatchWeight(
       AsmOperandInfo &info, const char *constraint) const;
+
+    /// This function parses registers that appear in inline-asm constraints.
+    /// It returns pair (0, 0) on failure.
+    std::pair<unsigned, const TargetRegisterClass *>
+    parseRegForInlineAsmConstraint(const StringRef &C, MVT VT) const;
 
     std::pair<unsigned, const TargetRegisterClass*>
               getRegForInlineAsmConstraint(const std::string &Constraint,

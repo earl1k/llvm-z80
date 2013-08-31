@@ -41,6 +41,9 @@ void RuntimeDyldImpl::resolveRelocations() {
   // Just iterate over the sections we have and resolve all the relocations
   // in them. Gross overkill, but it gets the job done.
   for (int i = 0, e = Sections.size(); i != e; ++i) {
+    // The Section here (Sections[i]) refers to the section in which the
+    // symbol for the relocation is located.  The SectionID in the relocation
+    // entry provides the section to which the relocation will be applied.
     uint64_t Addr = Sections[i].LoadAddress;
     DEBUG(dbgs() << "Resolving relocations Section #" << i
             << "\t" << format("%p", (uint8_t *)Addr)
@@ -165,6 +168,9 @@ ObjectImage *RuntimeDyldImpl::loadObject(ObjectBuffer *InputBuffer) {
 			   Stubs);
     }
   }
+
+  // Give the subclasses a chance to tie-up any loose ends.
+  finalizeLoad();
 
   return obj.take();
 }
@@ -396,7 +402,7 @@ uint8_t *RuntimeDyldImpl::createStubFunction(uint8_t *Addr) {
     StubAddr++;
     *StubAddr = NopInstr;
     return Addr;
-  } else if (Arch == Triple::ppc64) {
+  } else if (Arch == Triple::ppc64 || Arch == Triple::ppc64le) {
     // PowerPC64 stub: the address points to a function descriptor
     // instead of the function itself. Load the function address
     // on r11 and sets it to control register. Also loads the function
@@ -421,6 +427,10 @@ uint8_t *RuntimeDyldImpl::createStubFunction(uint8_t *Addr) {
     writeInt16BE(Addr+6,  0x07F1);     // brc 15,%r1
     // 8-byte address stored at Addr + 8
     return Addr;
+  } else if (Arch == Triple::x86_64) {
+    *Addr      = 0xFF; // jmp
+    *(Addr+1)  = 0x25; // rip
+    // 32-bit PC-relative address of the GOT entry will be stored at Addr+2
   }
   return Addr;
 }
@@ -470,6 +480,7 @@ void RuntimeDyldImpl::resolveExternalSymbols() {
         // MemoryManager.
         uint8_t *Addr = (uint8_t*) MemMgr->getPointerToNamedFunction(Name.data(),
                                                                    true);
+        updateGOTEntries(Name, (uint64_t)Addr);
         DEBUG(dbgs() << "Resolving relocations Name: " << Name
                 << "\t" << format("%p", Addr)
                 << "\n");

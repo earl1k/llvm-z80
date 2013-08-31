@@ -498,9 +498,109 @@ void cl::TokenizeGNUCommandLine(StringRef Src, StringSaver &Saver,
     NewArgv.push_back(Saver.SaveString(Token.c_str()));
 }
 
+/// Backslashes are interpreted in a rather complicated way in the Windows-style
+/// command line, because backslashes are used both to separate path and to
+/// escape double quote. This method consumes runs of backslashes as well as the
+/// following double quote if it's escaped.
+///
+///  * If an even number of backslashes is followed by a double quote, one
+///    backslash is output for every pair of backslashes, and the last double
+///    quote remains unconsumed. The double quote will later be interpreted as
+///    the start or end of a quoted string in the main loop outside of this
+///    function.
+///
+///  * If an odd number of backslashes is followed by a double quote, one
+///    backslash is output for every pair of backslashes, and a double quote is
+///    output for the last pair of backslash-double quote. The double quote is
+///    consumed in this case.
+///
+///  * Otherwise, backslashes are interpreted literally.
+static size_t parseBackslash(StringRef Src, size_t I, SmallString<128> &Token) {
+  size_t E = Src.size();
+  int BackslashCount = 0;
+  // Skip the backslashes.
+  do {
+    ++I;
+    ++BackslashCount;
+  } while (I != E && Src[I] == '\\');
+
+  bool FollowedByDoubleQuote = (I != E && Src[I] == '"');
+  if (FollowedByDoubleQuote) {
+    Token.append(BackslashCount / 2, '\\');
+    if (BackslashCount % 2 == 0)
+      return I - 1;
+    Token.push_back('"');
+    return I;
+  }
+  Token.append(BackslashCount, '\\');
+  return I - 1;
+}
+
 void cl::TokenizeWindowsCommandLine(StringRef Src, StringSaver &Saver,
                                     SmallVectorImpl<const char *> &NewArgv) {
-  llvm_unreachable("FIXME not implemented");
+  SmallString<128> Token;
+
+  // This is a small state machine to consume characters until it reaches the
+  // end of the source string.
+  enum { INIT, UNQUOTED, QUOTED } State = INIT;
+  for (size_t I = 0, E = Src.size(); I != E; ++I) {
+    // INIT state indicates that the current input index is at the start of
+    // the string or between tokens.
+    if (State == INIT) {
+      if (isWhitespace(Src[I]))
+        continue;
+      if (Src[I] == '"') {
+        State = QUOTED;
+        continue;
+      }
+      if (Src[I] == '\\') {
+        I = parseBackslash(Src, I, Token);
+        State = UNQUOTED;
+        continue;
+      }
+      Token.push_back(Src[I]);
+      State = UNQUOTED;
+      continue;
+    }
+
+    // UNQUOTED state means that it's reading a token not quoted by double
+    // quotes.
+    if (State == UNQUOTED) {
+      // Whitespace means the end of the token.
+      if (isWhitespace(Src[I])) {
+        NewArgv.push_back(Saver.SaveString(Token.c_str()));
+        Token.clear();
+        State = INIT;
+        continue;
+      }
+      if (Src[I] == '"') {
+        State = QUOTED;
+        continue;
+      }
+      if (Src[I] == '\\') {
+        I = parseBackslash(Src, I, Token);
+        continue;
+      }
+      Token.push_back(Src[I]);
+      continue;
+    }
+
+    // QUOTED state means that it's reading a token quoted by double quotes.
+    if (State == QUOTED) {
+      if (Src[I] == '"') {
+        State = UNQUOTED;
+        continue;
+      }
+      if (Src[I] == '\\') {
+        I = parseBackslash(Src, I, Token);
+        continue;
+      }
+      Token.push_back(Src[I]);
+    }
+  }
+  // Append the last token after hitting EOF with no whitespace.
+  if (!Token.empty())
+    NewArgv.push_back(Saver.SaveString(Token.c_str()));
 }
 
 static bool ExpandResponseFile(const char *FName, StringSaver &Saver,
@@ -563,8 +663,19 @@ bool cl::ExpandResponseFiles(StringSaver &Saver, TokenizerCallback Tokenizer,
 
 namespace {
   class StrDupSaver : public StringSaver {
+    std::vector<char*> Dups;
+  public:
+    ~StrDupSaver() {
+      for (std::vector<char *>::iterator I = Dups.begin(), E = Dups.end();
+           I != E; ++I) {
+        char *Dup = *I;
+        free(Dup);
+      }
+    }
     const char *SaveString(const char *Str) LLVM_OVERRIDE {
-      return strdup(Str);
+      char *Dup = strdup(Str);
+      Dups.push_back(Dup);
+      return Dup;
     }
   };
 }
@@ -588,20 +699,14 @@ void cl::ParseEnvironmentOptions(const char *progName, const char *envVar,
   // Get program's "name", which we wouldn't know without the caller
   // telling us.
   SmallVector<const char *, 20> newArgv;
-  newArgv.push_back(strdup(progName));
+  StrDupSaver Saver;
+  newArgv.push_back(Saver.SaveString(progName));
 
   // Parse the value of the environment variable into a "command line"
   // and hand it off to ParseCommandLineOptions().
-  StrDupSaver Saver;
   TokenizeGNUCommandLine(envValue, Saver, newArgv);
   int newArgc = static_cast<int>(newArgv.size());
   ParseCommandLineOptions(newArgc, &newArgv[0], Overview);
-
-  // Free all the strdup()ed strings.
-  for (SmallVectorImpl<const char *>::iterator i = newArgv.begin(),
-                                               e = newArgv.end();
-       i != e; ++i)
-    free(const_cast<char *>(*i));
 }
 
 void cl::ParseCommandLineOptions(int argc, const char * const *argv,
@@ -618,7 +723,7 @@ void cl::ParseCommandLineOptions(int argc, const char * const *argv,
   // Expand response files.
   SmallVector<const char *, 20> newArgv;
   for (int i = 0; i != argc; ++i)
-    newArgv.push_back(strdup(argv[i]));
+    newArgv.push_back(argv[i]);
   StrDupSaver Saver;
   ExpandResponseFiles(Saver, TokenizeGNUCommandLine, newArgv);
   argv = &newArgv[0];
@@ -913,13 +1018,6 @@ void cl::ParseCommandLineOptions(int argc, const char * const *argv,
   Opts.clear();
   PositionalOpts.clear();
   MoreHelp->clear();
-
-  // Free the memory allocated by ExpandResponseFiles.
-  // Free all the strdup()ed strings.
-  for (SmallVectorImpl<const char *>::iterator i = newArgv.begin(),
-                                               e = newArgv.end();
-       i != e; ++i)
-    free(const_cast<char *>(*i));
 
   // If we had an error processing our arguments, don't let the program execute
   if (ErrorParsing) exit(1);

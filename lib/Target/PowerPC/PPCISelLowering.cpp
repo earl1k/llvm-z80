@@ -149,28 +149,24 @@ PPCTargetLowering::PPCTargetLowering(PPCTargetMachine &TM)
         Subtarget->hasFRSQRTES() && Subtarget->hasFRES()))
     setOperationAction(ISD::FSQRT, MVT::f32, Expand);
 
-  setOperationAction(ISD::FCOPYSIGN, MVT::f64, Expand);
-  setOperationAction(ISD::FCOPYSIGN, MVT::f32, Expand);
+  if (Subtarget->hasFCPSGN()) {
+    setOperationAction(ISD::FCOPYSIGN, MVT::f64, Legal);
+    setOperationAction(ISD::FCOPYSIGN, MVT::f32, Legal);
+  } else {
+    setOperationAction(ISD::FCOPYSIGN, MVT::f64, Expand);
+    setOperationAction(ISD::FCOPYSIGN, MVT::f32, Expand);
+  }
 
   if (Subtarget->hasFPRND()) {
     setOperationAction(ISD::FFLOOR, MVT::f64, Legal);
     setOperationAction(ISD::FCEIL,  MVT::f64, Legal);
     setOperationAction(ISD::FTRUNC, MVT::f64, Legal);
+    setOperationAction(ISD::FROUND, MVT::f64, Legal);
 
     setOperationAction(ISD::FFLOOR, MVT::f32, Legal);
     setOperationAction(ISD::FCEIL,  MVT::f32, Legal);
     setOperationAction(ISD::FTRUNC, MVT::f32, Legal);
-
-    // frin does not implement "ties to even." Thus, this is safe only in
-    // fast-math mode.
-    if (TM.Options.UnsafeFPMath) {
-      setOperationAction(ISD::FNEARBYINT, MVT::f64, Legal);
-      setOperationAction(ISD::FNEARBYINT, MVT::f32, Legal);
-
-      // These need to set FE_INEXACT, and use a custom inserter.
-      setOperationAction(ISD::FRINT, MVT::f64, Legal);
-      setOperationAction(ISD::FRINT, MVT::f32, Legal);
-    }
+    setOperationAction(ISD::FROUND, MVT::f32, Legal);
   }
 
   // PowerPC does not have BSWAP, CTPOP or CTTZ
@@ -280,8 +276,13 @@ PPCTargetLowering::PPCTargetLowering(PPCTargetMachine &TM)
   } else
     setOperationAction(ISD::VAARG, MVT::Other, Expand);
 
+  if (Subtarget->isSVR4ABI() && !isPPC64)
+    // VACOPY is custom lowered with the 32-bit SVR4 ABI.
+    setOperationAction(ISD::VACOPY            , MVT::Other, Custom);
+  else
+    setOperationAction(ISD::VACOPY            , MVT::Other, Expand);
+
   // Use the default implementation.
-  setOperationAction(ISD::VACOPY            , MVT::Other, Expand);
   setOperationAction(ISD::VAEND             , MVT::Other, Expand);
   setOperationAction(ISD::STACKSAVE         , MVT::Other, Expand);
   setOperationAction(ISD::STACKRESTORE      , MVT::Other, Custom);
@@ -1650,6 +1651,18 @@ SDValue PPCTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG,
                      false, false, false, 0);
 }
 
+SDValue PPCTargetLowering::LowerVACOPY(SDValue Op, SelectionDAG &DAG,
+                                       const PPCSubtarget &Subtarget) const {
+  assert(!Subtarget.isPPC64() && "LowerVACOPY is PPC32 only");
+
+  // We have to copy the entire va_list struct:
+  // 2*sizeof(char) + 2 Byte alignment + 2*sizeof(char*) = 12 Byte
+  return DAG.getMemcpy(Op.getOperand(0), Op,
+                       Op.getOperand(1), Op.getOperand(2),
+                       DAG.getConstant(12, MVT::i32), 8, false, true,
+                       MachinePointerInfo(), MachinePointerInfo());
+}
+
 SDValue PPCTargetLowering::LowerADJUST_TRAMPOLINE(SDValue Op,
                                                   SelectionDAG &DAG) const {
   return Op.getOperand(0);
@@ -1796,6 +1809,12 @@ SDValue PPCTargetLowering::LowerVASTART(SDValue Op, SelectionDAG &DAG,
 }
 
 #include "PPCGenCallingConv.inc"
+
+// Function whose sole purpose is to kill compiler warnings 
+// stemming from unused functions included from PPCGenCallingConv.inc.
+CCAssignFn *PPCTargetLowering::useFastISelCCs(unsigned Flag) const {
+  return Flag ? CC_PPC64_ELF_FIS : RetCC_PPC64_ELF_FIS;
+}
 
 bool llvm::CC_PPC32_SVR4_Custom_Dummy(unsigned &ValNo, MVT &ValVT, MVT &LocVT,
                                       CCValAssign::LocInfo &LocInfo,
@@ -3939,7 +3958,7 @@ PPCTargetLowering::LowerCall_64SVR4(SDValue Chain, SDValue Callee,
       continue;
     }
 
-    switch (Arg.getValueType().getSimpleVT().SimpleTy) {
+    switch (Arg.getSimpleValueType().SimpleTy) {
     default: llvm_unreachable("Unexpected ValueType for argument!");
     case MVT::i32:
     case MVT::i64:
@@ -3962,7 +3981,7 @@ PPCTargetLowering::LowerCall_64SVR4(SDValue Chain, SDValue Callee,
           // must be passed right-justified in the stack doubleword, and
           // in the GPR, if one is available.
           SDValue StoreOff;
-          if (Arg.getValueType().getSimpleVT().SimpleTy == MVT::f32) {
+          if (Arg.getSimpleValueType().SimpleTy == MVT::f32) {
             SDValue ConstFour = DAG.getConstant(4, PtrOff.getValueType());
             StoreOff = DAG.getNode(ISD::ADD, dl, PtrVT, PtrOff, ConstFour);
           } else
@@ -4270,7 +4289,7 @@ PPCTargetLowering::LowerCall_Darwin(SDValue Chain, SDValue Callee,
       continue;
     }
 
-    switch (Arg.getValueType().getSimpleVT().SimpleTy) {
+    switch (Arg.getSimpleValueType().SimpleTy) {
     default: llvm_unreachable("Unexpected ValueType for argument!");
     case MVT::i32:
     case MVT::i64:
@@ -4735,7 +4754,7 @@ SDValue PPCTargetLowering::LowerFP_TO_INT(SDValue Op, SelectionDAG &DAG,
     Src = DAG.getNode(ISD::FP_EXTEND, dl, MVT::f64, Src);
 
   SDValue Tmp;
-  switch (Op.getValueType().getSimpleVT().SimpleTy) {
+  switch (Op.getSimpleValueType().SimpleTy) {
   default: llvm_unreachable("Unhandled FP_TO_INT type in custom expander!");
   case MVT::i32:
     Tmp = DAG.getNode(Op.getOpcode()==ISD::FP_TO_SINT ? PPCISD::FCTIWZ :
@@ -5715,6 +5734,9 @@ SDValue PPCTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   case ISD::VAARG:
     return LowerVAARG(Op, DAG, PPCSubTarget);
 
+  case ISD::VACOPY:
+    return LowerVACOPY(Op, DAG, PPCSubTarget);
+
   case ISD::STACKRESTORE:       return LowerSTACKRESTORE(Op, DAG, PPCSubTarget);
   case ISD::DYNAMIC_STACKALLOC:
     return LowerDYNAMIC_STACKALLOC(Op, DAG, PPCSubTarget);
@@ -6656,51 +6678,6 @@ PPCTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
 
     // Restore FPSCR value.
     BuildMI(*BB, MI, dl, TII->get(PPC::MTFSF)).addImm(1).addReg(MFFSReg);
-  } else if (MI->getOpcode() == PPC::FRINDrint ||
-             MI->getOpcode() == PPC::FRINSrint) {
-    bool isf32 = MI->getOpcode() == PPC::FRINSrint;
-    unsigned Dest = MI->getOperand(0).getReg();
-    unsigned Src = MI->getOperand(1).getReg();
-    DebugLoc dl   = MI->getDebugLoc();
-
-    MachineRegisterInfo &RegInfo = F->getRegInfo();
-    unsigned CRReg = RegInfo.createVirtualRegister(&PPC::CRRCRegClass);
-
-    // Perform the rounding.
-    BuildMI(*BB, MI, dl, TII->get(isf32 ? PPC::FRINS : PPC::FRIND), Dest)
-      .addReg(Src);
-
-    // Compare the results.
-    BuildMI(*BB, MI, dl, TII->get(isf32 ? PPC::FCMPUS : PPC::FCMPUD), CRReg)
-      .addReg(Dest).addReg(Src);
-
-    // If the results were not equal, then set the FPSCR XX bit.
-    MachineBasicBlock *midMBB = F->CreateMachineBasicBlock(LLVM_BB);
-    MachineBasicBlock *exitMBB = F->CreateMachineBasicBlock(LLVM_BB);
-    F->insert(It, midMBB);
-    F->insert(It, exitMBB);
-    exitMBB->splice(exitMBB->begin(), BB,
-                    llvm::next(MachineBasicBlock::iterator(MI)),
-                    BB->end());
-    exitMBB->transferSuccessorsAndUpdatePHIs(BB);
-
-    BuildMI(*BB, MI, dl, TII->get(PPC::BCC))
-      .addImm(PPC::PRED_EQ).addReg(CRReg).addMBB(exitMBB);
-
-    BB->addSuccessor(midMBB);
-    BB->addSuccessor(exitMBB);
-
-    BB = midMBB;
-
-    // Set the FPSCR XX bit (FE_INEXACT). Note that we cannot just set
-    // the FI bit here because that will not automatically set XX also,
-    // and XX is what libm interprets as the FE_INEXACT flag.
-    BuildMI(BB, dl, TII->get(PPC::MTFSB1)).addImm(/* 38 - 32 = */ 6);
-    BuildMI(BB, dl, TII->get(PPC::B)).addMBB(exitMBB);
-
-    BB->addSuccessor(exitMBB);
-
-    BB = exitMBB;
   } else {
     llvm_unreachable("Unexpected instr type to insert");
   }
@@ -7612,7 +7589,24 @@ PPCTargetLowering::getRegForInlineAsmConstraint(const std::string &Constraint,
     }
   }
 
-  return TargetLowering::getRegForInlineAsmConstraint(Constraint, VT);
+  std::pair<unsigned, const TargetRegisterClass*> R =
+    TargetLowering::getRegForInlineAsmConstraint(Constraint, VT);
+
+  // r[0-9]+ are used, on PPC64, to refer to the corresponding 64-bit registers
+  // (which we call X[0-9]+). If a 64-bit value has been requested, and a
+  // 32-bit GPR has been selected, then 'upgrade' it to the 64-bit parent
+  // register.
+  // FIXME: If TargetLowering::getRegForInlineAsmConstraint could somehow use
+  // the AsmName field from *RegisterInfo.td, then this would not be necessary.
+  if (R.first && VT == MVT::i64 && PPCSubTarget.isPPC64() &&
+      PPC::GPRCRegClass.contains(R.first)) {
+    const TargetRegisterInfo *TRI = getTargetMachine().getRegisterInfo();
+    return std::make_pair(TRI->getMatchingSuperReg(R.first,
+                            PPC::sub_32, &PPC::G8RCRegClass),
+                          &PPC::G8RCRegClass);
+  }
+
+  return R;
 }
 
 
@@ -7865,3 +7859,9 @@ Sched::Preference PPCTargetLowering::getSchedulingPreference(SDNode *N) const {
   return Sched::ILP;
 }
 
+// Create a fast isel object.
+FastISel *
+PPCTargetLowering::createFastISel(FunctionLoweringInfo &FuncInfo,
+                                  const TargetLibraryInfo *LibInfo) const {
+  return PPC::createFastISel(FuncInfo, LibInfo);
+}

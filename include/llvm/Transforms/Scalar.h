@@ -200,6 +200,13 @@ FunctionPass *createCFGSimplificationPass();
 
 //===----------------------------------------------------------------------===//
 //
+// FlattenCFG - flatten CFG, reduce number of conditional branches by using
+// parallel-and and parallel-or mode, etc...
+//
+FunctionPass *createFlattenCFGPass();
+
+//===----------------------------------------------------------------------===//
+//
 // CFG Structurization - Remove irreducible control flow
 //
 Pass *createStructurizeCFGPass();
@@ -346,6 +353,13 @@ extern char &InstructionSimplifierID;
 // "block_weights" metadata.
 FunctionPass *createLowerExpectIntrinsicPass();
 
+
+//===----------------------------------------------------------------------===//
+//
+// PartiallyInlineLibCalls - Tries to inline the fast path of library
+// calls such as sqrt.
+//
+FunctionPass *createPartiallyInlineLibCallsPass();
 
 } // End llvm namespace
 

@@ -13,7 +13,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPUSubtarget.h"
-#include <stdio.h>
 
 using namespace llvm;
 
@@ -96,6 +95,10 @@ AMDGPUSubtarget::getDataLayout() const {
     DataLayout.append("-p:64:64:64");
   } else {
     DataLayout.append("-p:32:32:32");
+  }
+
+  if (Gen >= AMDGPUSubtarget::SOUTHERN_ISLANDS) {
+    DataLayout.append("-p3:32:32:32");
   }
 
   return DataLayout;

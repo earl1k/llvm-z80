@@ -1,4 +1,4 @@
-; RUN: llc -filetype=obj -O0 -stack-protector-buffer-size=1 < %s
+; RUN: llc -filetype=obj -O0 < %s
 ; Test that we handle DBG_VALUEs in a register without crashing.
 ;
 ; Generated from clang with -fsanitize=address:
@@ -23,7 +23,7 @@ target triple = "x86_64-unknown-linux-gnu"
 @__asan_gen_ = private unnamed_addr constant [16 x i8] c"1 32 4 5 .addr \00", align 1
 
 ; Function Attrs: sanitize_address uwtable
-define void @_Z4funci(%struct.A* noalias sret %agg.result, i32) #0 {
+define void @_Z4funci(%struct.A* noalias sret %agg.result, i32) #0 "stack-protector-buffer-size"="1" {
 entry:
   %MyAlloca = alloca [96 x i8], align 32
   %1 = ptrtoint [96 x i8]* %MyAlloca to i64
@@ -89,7 +89,7 @@ declare void @llvm.dbg.declare(metadata, metadata) #1
 
 declare void @_ZN1AC1Ev(%struct.A*) #2
 
-define internal void @asan.module_ctor() {
+define internal void @asan.module_ctor()  "stack-protector-buffer-size"="1" {
   call void @__asan_init_v3()
   %1 = load volatile i64* @__asan_mapping_offset
   %2 = load volatile i64* @__asan_mapping_scale
@@ -153,17 +153,17 @@ attributes #2 = { "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "n
 !3 = metadata !{metadata !4}
 !4 = metadata !{i32 786478, metadata !1, metadata !5, metadata !"func", metadata !"func", metadata !"_Z4funci", i32 6, metadata !6, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%struct.A*, i32)* @_Z4funci, null, null, metadata !2, i32 6} ; [ DW_TAG_subprogram ] [line 6] [def] [func]
 !5 = metadata !{i32 786473, metadata !1}          ; [ DW_TAG_file_type ] [/tmp/crash.cpp]
-!6 = metadata !{i32 786453, i32 0, i32 0, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !7, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
+!6 = metadata !{i32 786453, i32 0, i32 0, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !7, i32 0, i32 0, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !7 = metadata !{metadata !8, metadata !21}
-!8 = metadata !{i32 786451, metadata !1, null, metadata !"A", i32 1, i64 8, i64 8, i32 0, i32 0, null, metadata !9, i32 0, null, null} ; [ DW_TAG_structure_type ] [A] [line 1, size 8, align 8, offset 0] [def] [from ]
+!8 = metadata !{i32 786451, metadata !1, null, metadata !"A", i32 1, i64 8, i64 8, i32 0, i32 0, null, metadata !9, i32 0, null, null, null} ; [ DW_TAG_structure_type ] [A] [line 1, size 8, align 8, offset 0] [def] [from ]
 !9 = metadata !{metadata !10, metadata !15}
 !10 = metadata !{i32 786478, metadata !1, metadata !8, metadata !"A", metadata !"A", metadata !"", i32 2, metadata !11, i1 false, i1 false, i32 0, i32 0, null, i32 256, i1 false, null, null, i32 0, metadata !14, i32 2} ; [ DW_TAG_subprogram ] [line 2] [A]
-!11 = metadata !{i32 786453, i32 0, i32 0, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !12, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
+!11 = metadata !{i32 786453, i32 0, i32 0, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !12, i32 0, i32 0, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !12 = metadata !{null, metadata !13}
 !13 = metadata !{i32 786447, i32 0, i32 0, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 1088, metadata !8} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from A]
 !14 = metadata !{i32 786468}
 !15 = metadata !{i32 786478, metadata !1, metadata !8, metadata !"A", metadata !"A", metadata !"", i32 3, metadata !16, i1 false, i1 false, i32 0, i32 0, null, i32 256, i1 false, null, null, i32 0, metadata !20, i32 3} ; [ DW_TAG_subprogram ] [line 3] [A]
-!16 = metadata !{i32 786453, i32 0, i32 0, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !17, i32 0, i32 0} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
+!16 = metadata !{i32 786453, i32 0, i32 0, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !17, i32 0, i32 0, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !17 = metadata !{null, metadata !13, metadata !18}
 !18 = metadata !{i32 786448, null, null, null, i32 0, i64 0, i64 0, i64 0, i32 0, metadata !19} ; [ DW_TAG_reference_type ] [line 0, size 0, align 0, offset 0] [from ]
 !19 = metadata !{i32 786470, null, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, metadata !8} ; [ DW_TAG_const_type ] [line 0, size 0, align 0, offset 0] [from A]

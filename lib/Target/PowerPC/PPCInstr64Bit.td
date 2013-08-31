@@ -506,6 +506,14 @@ defm EXTSH8 : XForm_11r<31, 922, (outs g8rc:$rA), (ins g8rc:$rS),
                         [(set i64:$rA, (sext_inreg i64:$rS, i16))]>;
 } // Interpretation64Bit
 
+// For fast-isel:
+let isCodeGenOnly = 1 in {
+def EXTSB8_32_64 : XForm_11<31, 954, (outs g8rc:$rA), (ins gprc:$rS),
+                           "extsb $rA, $rS", IntSimple, []>, isPPC64;
+def EXTSH8_32_64 : XForm_11<31, 922, (outs g8rc:$rA), (ins gprc:$rS),
+                           "extsh $rA, $rS", IntSimple, []>, isPPC64;
+} // isCodeGenOnly for fast-isel
+
 defm EXTSW  : XForm_11r<31, 986, (outs g8rc:$rA), (ins g8rc:$rS),
                         "extsw", "$rA, $rS", IntSimple,
                         [(set i64:$rA, (sext_inreg i64:$rS, i32))]>, isPPC64;
@@ -542,6 +550,9 @@ defm DIVDU : XOForm_1r<31, 457, 0, (outs g8rc:$rT), (ins g8rc:$rA, g8rc:$rB),
 defm MULLD : XOForm_1r<31, 233, 0, (outs g8rc:$rT), (ins g8rc:$rA, g8rc:$rB),
                        "mulld", "$rT, $rA, $rB", IntMulHD,
                        [(set i64:$rT, (mul i64:$rA, i64:$rB))]>, isPPC64;
+def MULLI8 : DForm_2<7, (outs g8rc:$rD), (ins g8rc:$rA, s16imm64:$imm),
+                       "mulli $rD, $rA, $imm", IntMulLI,
+                       [(set i64:$rD, (mul i64:$rA, imm64SExt16:$imm))]>;
 }
 
 let neverHasSideEffects = 1 in {
@@ -566,6 +577,14 @@ defm RLDICL : MDForm_1r<30, 0,
                         (outs g8rc:$rA), (ins g8rc:$rS, u6imm:$SH, u6imm:$MBE),
                         "rldicl", "$rA, $rS, $SH, $MBE", IntRotateDI,
                         []>, isPPC64;
+// For fast-isel:
+let isCodeGenOnly = 1 in
+def RLDICL_32_64 : MDForm_1<30, 0,
+                           (outs g8rc:$rA),
+                           (ins gprc:$rS, u6imm:$SH, u6imm:$MBE),
+                           "rldicl $rA, $rS, $SH, $MBE", IntRotateDI,
+                           []>, isPPC64;
+// End fast-isel.
 defm RLDICR : MDForm_1r<30, 1,
                         (outs g8rc:$rA), (ins g8rc:$rS, u6imm:$SH, u6imm:$MBE),
                         "rldicr", "$rA, $rS, $SH, $MBE", IntRotateDI,
@@ -617,6 +636,15 @@ def LWAX : XForm_1<31, 341, (outs g8rc:$rD), (ins memrr:$src),
                    "lwax $rD, $src", LdStLHA,
                    [(set i64:$rD, (sextloadi32 xaddr:$src))]>, isPPC64,
                    PPC970_DGroup_Cracked;
+// For fast-isel:
+let isCodeGenOnly = 1, mayLoad = 1 in {
+def LWA_32  : DSForm_1<58, 2, (outs gprc:$rD), (ins memrix:$src),
+                      "lwa $rD, $src", LdStLWA, []>, isPPC64,
+                      PPC970_DGroup_Cracked;
+def LWAX_32 : XForm_1<31, 341, (outs gprc:$rD), (ins memrr:$src),
+                     "lwax $rD, $src", LdStLHA, []>, isPPC64,
+                     PPC970_DGroup_Cracked;
+} // end fast-isel isCodeGenOnly
 
 // Update forms.
 let mayLoad = 1, neverHasSideEffects = 1 in {

@@ -208,6 +208,8 @@ void ConvergingVLIWScheduler::initialize(ScheduleDAGMI *dag) {
   Top.HazardRec = TM.getInstrInfo()->CreateTargetMIHazardRecognizer(Itin, DAG);
   Bot.HazardRec = TM.getInstrInfo()->CreateTargetMIHazardRecognizer(Itin, DAG);
 
+  delete Top.ResourceModel;
+  delete Bot.ResourceModel;
   Top.ResourceModel = new VLIWResourceModel(TM, DAG->getSchedModel());
   Bot.ResourceModel = new VLIWResourceModel(TM, DAG->getSchedModel());
 
@@ -405,11 +407,11 @@ SUnit *ConvergingVLIWScheduler::SchedBoundary::pickOnlyChoice() {
 #ifndef NDEBUG
 void ConvergingVLIWScheduler::traceCandidate(const char *Label,
                                              const ReadyQueue &Q,
-                                             SUnit *SU, PressureElement P) {
+                                             SUnit *SU, PressureChange P) {
   dbgs() << Label << " " << Q.getName() << " ";
   if (P.isValid())
-    dbgs() << DAG->TRI->getRegPressureSetName(P.PSetID) << ":" << P.UnitIncrease
-           << " ";
+    dbgs() << DAG->TRI->getRegPressureSetName(P.getPSet()) << ":"
+           << P.getUnitInc() << " ";
   else
     dbgs() << "     ";
   SU->dump(DAG);
@@ -515,8 +517,8 @@ int ConvergingVLIWScheduler::SchedulingCost(ReadyQueue &Q, SUnit *SU,
   ResCount += (NumNodesBlocking * ScaleTwo);
 
   // Factor in reg pressure as a heuristic.
-  ResCount -= (Delta.Excess.UnitIncrease*PriorityThree);
-  ResCount -= (Delta.CriticalMax.UnitIncrease*PriorityThree);
+  ResCount -= (Delta.Excess.getUnitInc()*PriorityThree);
+  ResCount -= (Delta.CriticalMax.getUnitInc()*PriorityThree);
 
   DEBUG(if (verbose) dbgs() << " Total(" << ResCount << ")");
 
