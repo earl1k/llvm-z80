@@ -36,10 +36,10 @@ SparcELFMCAsmInfo::SparcELFMCAsmInfo(StringRef TT) {
   HasLEB128 = true;
   SupportsDebugInformation = true;
 
+  ExceptionsType = ExceptionHandling::DwarfCFI;
+
   SunStyleELFSectionSwitchSyntax = true;
   UsesELFSectionDirectiveForBSS = true;
-
-  WeakRefDirective = "\t.weak\t";
 
   PrivateGlobalPrefix = ".L";
 }

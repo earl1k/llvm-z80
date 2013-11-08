@@ -28,6 +28,14 @@
 #include "llvm/IR/DataLayout.h"
 
 using namespace llvm;
+static bool allocateStack(unsigned ValNo, MVT ValVT, MVT LocVT,
+                      CCValAssign::LocInfo LocInfo,
+                      ISD::ArgFlagsTy ArgFlags, CCState &State) {
+  unsigned Offset = State.AllocateStack(ValVT.getSizeInBits() / 8, ArgFlags.getOrigAlign());
+    State.addLoc(CCValAssign::getMem(ValNo, ValVT, Offset, LocVT, LocInfo));
+
+  return true;
+}
 
 #include "AMDGPUGenCallingConv.inc"
 
@@ -64,6 +72,12 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::STORE, MVT::v4f32, Promote);
   AddPromotedToType(ISD::STORE, MVT::v4f32, MVT::v4i32);
 
+  setOperationAction(ISD::STORE, MVT::v8f32, Promote);
+  AddPromotedToType(ISD::STORE, MVT::v8f32, MVT::v8i32);
+
+  setOperationAction(ISD::STORE, MVT::v16f32, Promote);
+  AddPromotedToType(ISD::STORE, MVT::v16f32, MVT::v16i32);
+
   setOperationAction(ISD::STORE, MVT::f64, Promote);
   AddPromotedToType(ISD::STORE, MVT::f64, MVT::i64);
 
@@ -90,6 +104,12 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::LOAD, MVT::v4f32, Promote);
   AddPromotedToType(ISD::LOAD, MVT::v4f32, MVT::v4i32);
 
+  setOperationAction(ISD::LOAD, MVT::v8f32, Promote);
+  AddPromotedToType(ISD::LOAD, MVT::v8f32, MVT::v8i32);
+
+  setOperationAction(ISD::LOAD, MVT::v16f32, Promote);
+  AddPromotedToType(ISD::LOAD, MVT::v16f32, MVT::v16i32);
+
   setOperationAction(ISD::LOAD, MVT::f64, Promote);
   AddPromotedToType(ISD::LOAD, MVT::f64, MVT::i64);
 
@@ -113,6 +133,8 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
 
   setOperationAction(ISD::FNEG, MVT::v2f32, Expand);
   setOperationAction(ISD::FNEG, MVT::v4f32, Expand);
+
+  setOperationAction(ISD::UINT_TO_FP, MVT::i64, Custom);
 
   setOperationAction(ISD::MUL, MVT::i64, Expand);
 
@@ -160,6 +182,7 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM) :
     setOperationAction(ISD::FFLOOR, VT, Expand);
     setOperationAction(ISD::FMUL, VT, Expand);
     setOperationAction(ISD::FRINT, VT, Expand);
+    setOperationAction(ISD::FSQRT, VT, Expand);
     setOperationAction(ISD::FSUB, VT, Expand);
   }
 }
@@ -230,6 +253,7 @@ SDValue AMDGPUTargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG)
   case ISD::INTRINSIC_WO_CHAIN: return LowerINTRINSIC_WO_CHAIN(Op, DAG);
   case ISD::STORE: return LowerSTORE(Op, DAG);
   case ISD::UDIVREM: return LowerUDIVREM(Op, DAG);
+  case ISD::UINT_TO_FP: return LowerUINT_TO_FP(Op, DAG);
   }
   return Op;
 }
@@ -246,12 +270,18 @@ SDValue AMDGPUTargetLowering::LowerGlobalAddress(AMDGPUMachineFunction* MFI,
   assert(G->getOffset() == 0 &&
          "Do not know what to do with an non-zero offset");
 
-  unsigned Offset = MFI->LDSSize;
   const GlobalValue *GV = G->getGlobal();
-  uint64_t Size = TD->getTypeAllocSize(GV->getType()->getElementType());
 
-  // XXX: Account for alignment?
-  MFI->LDSSize += Size;
+  unsigned Offset;
+  if (MFI->LocalMemoryObjects.count(GV) == 0) {
+    uint64_t Size = TD->getTypeAllocSize(GV->getType()->getElementType());
+    Offset = MFI->LDSSize;
+    MFI->LocalMemoryObjects[GV] = Offset;
+    // XXX: Account for alignment?
+    MFI->LDSSize += Size;
+  } else {
+    Offset = MFI->LocalMemoryObjects[GV];
+  }
 
   return DAG.getConstant(Offset, getPointerTy(G->getAddressSpace()));
 }
@@ -595,13 +625,13 @@ SDValue AMDGPUTargetLowering::LowerUDIVREM(SDValue Op,
   SDValue Remainder_GE_Den = DAG.getSelectCC(DL, Remainder, Den,
                                                  DAG.getConstant(-1, VT),
                                                  DAG.getConstant(0, VT),
-                                                 ISD::SETGE);
-  // Remainder_GE_Zero = (Remainder >= 0 ? -1 : 0)
-  SDValue Remainder_GE_Zero = DAG.getSelectCC(DL, Remainder,
-                                                  DAG.getConstant(0, VT),
+                                                 ISD::SETUGE);
+  // Remainder_GE_Zero = (Num >= Num_S_Remainder ? -1 : 0)
+  SDValue Remainder_GE_Zero = DAG.getSelectCC(DL, Num,
+                                                  Num_S_Remainder,
                                                   DAG.getConstant(-1, VT),
                                                   DAG.getConstant(0, VT),
-                                                  ISD::SETGE);
+                                                  ISD::SETUGE);
   // Tmp1 = Remainder_GE_Den & Remainder_GE_Zero
   SDValue Tmp1 = DAG.getNode(ISD::AND, DL, VT, Remainder_GE_Den,
                                                Remainder_GE_Zero);
@@ -645,10 +675,61 @@ SDValue AMDGPUTargetLowering::LowerUDIVREM(SDValue Op,
   return DAG.getMergeValues(Ops, 2, DL);
 }
 
+SDValue AMDGPUTargetLowering::LowerUINT_TO_FP(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  SDValue S0 = Op.getOperand(0);
+  SDLoc DL(Op);
+  if (Op.getValueType() != MVT::f32 || S0.getValueType() != MVT::i64)
+    return SDValue();
+
+  // f32 uint_to_fp i64
+  SDValue Lo = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i32, S0,
+                           DAG.getConstant(0, MVT::i32));
+  SDValue FloatLo = DAG.getNode(ISD::UINT_TO_FP, DL, MVT::f32, Lo);
+  SDValue Hi = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i32, S0,
+                           DAG.getConstant(1, MVT::i32));
+  SDValue FloatHi = DAG.getNode(ISD::UINT_TO_FP, DL, MVT::f32, Hi);
+  FloatHi = DAG.getNode(ISD::FMUL, DL, MVT::f32, FloatHi,
+                        DAG.getConstantFP(4294967296.0f, MVT::f32)); // 2^32
+  return DAG.getNode(ISD::FADD, DL, MVT::f32, FloatLo, FloatHi);
+
+}
 
 //===----------------------------------------------------------------------===//
 // Helper functions
 //===----------------------------------------------------------------------===//
+
+void AMDGPUTargetLowering::getOriginalFunctionArgs(
+                               SelectionDAG &DAG,
+                               const Function *F,
+                               const SmallVectorImpl<ISD::InputArg> &Ins,
+                               SmallVectorImpl<ISD::InputArg> &OrigIns) const {
+
+  for (unsigned i = 0, e = Ins.size(); i < e; ++i) {
+    if (Ins[i].ArgVT == Ins[i].VT) {
+      OrigIns.push_back(Ins[i]);
+      continue;
+    }
+
+    EVT VT;
+    if (Ins[i].ArgVT.isVector() && !Ins[i].VT.isVector()) {
+      // Vector has been split into scalars.
+      VT = Ins[i].ArgVT.getVectorElementType();
+    } else if (Ins[i].VT.isVector() && Ins[i].ArgVT.isVector() &&
+               Ins[i].ArgVT.getVectorElementType() !=
+               Ins[i].VT.getVectorElementType()) {
+      // Vector elements have been promoted
+      VT = Ins[i].ArgVT;
+    } else {
+      // Vector has been spilt into smaller vectors.
+      VT = Ins[i].VT;
+    }
+
+    ISD::InputArg Arg(Ins[i].Flags, VT, VT, Ins[i].Used,
+                      Ins[i].OrigArgIndex, Ins[i].PartOffset);
+    OrigIns.push_back(Arg);
+  }
+}
 
 bool AMDGPUTargetLowering::isHWTrueValue(SDValue Op) const {
   if (ConstantFPSDNode * CFP = dyn_cast<ConstantFPSDNode>(Op)) {
@@ -718,5 +799,6 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(SAMPLED)
   NODE_NAME_CASE(SAMPLEL)
   NODE_NAME_CASE(STORE_MSKOR)
+  NODE_NAME_CASE(TBUFFER_STORE_FORMAT)
   }
 }

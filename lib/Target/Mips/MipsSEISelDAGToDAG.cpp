@@ -353,7 +353,7 @@ bool MipsSEDAGToDAGISel::selectAddrRegImm12(SDValue Addr, SDValue &Base,
     ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Addr.getOperand(1));
     if (isInt<12>(CN->getSExtValue())) {
 
-      // If the first operand is a FI, get the TargetFI Node
+      // If the first operand is a FI then get the TargetFI Node
       if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>
                                   (Addr.getOperand(0)))
         Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), ValTy);
@@ -372,6 +372,211 @@ bool MipsSEDAGToDAGISel::selectIntAddrMM(SDValue Addr, SDValue &Base,
                                          SDValue &Offset) const {
   return selectAddrRegImm12(Addr, Base, Offset) ||
     selectAddrDefault(Addr, Base, Offset);
+}
+
+// Select constant vector splats.
+//
+// Returns true and sets Imm if:
+// * MSA is enabled
+// * N is a ISD::BUILD_VECTOR representing a constant splat
+bool MipsSEDAGToDAGISel::selectVSplat(SDNode *N, APInt &Imm) const {
+  if (!Subtarget.hasMSA())
+    return false;
+
+  BuildVectorSDNode *Node = dyn_cast<BuildVectorSDNode>(N);
+
+  if (Node == NULL)
+    return false;
+
+  APInt SplatValue, SplatUndef;
+  unsigned SplatBitSize;
+  bool HasAnyUndefs;
+
+  if (!Node->isConstantSplat(SplatValue, SplatUndef, SplatBitSize,
+                             HasAnyUndefs, 8,
+                             !Subtarget.isLittle()))
+    return false;
+
+  Imm = SplatValue;
+
+  return true;
+}
+
+// Select constant vector splats.
+//
+// In addition to the requirements of selectVSplat(), this function returns
+// true and sets Imm if:
+// * The splat value is the same width as the elements of the vector
+// * The splat value fits in an integer with the specified signed-ness and
+//   width.
+//
+// This function looks through ISD::BITCAST nodes.
+// TODO: This might not be appropriate for big-endian MSA since BITCAST is
+//       sometimes a shuffle in big-endian mode.
+//
+// It's worth noting that this function is not used as part of the selection
+// of ldi.[bhwd] since it does not permit using the wrong-typed ldi.[bhwd]
+// instruction to achieve the desired bit pattern. ldi.[bhwd] is selected in
+// MipsSEDAGToDAGISel::selectNode.
+bool MipsSEDAGToDAGISel::
+selectVSplatCommon(SDValue N, SDValue &Imm, bool Signed,
+                   unsigned ImmBitSize) const {
+  APInt ImmValue;
+  EVT EltTy = N->getValueType(0).getVectorElementType();
+
+  if (N->getOpcode() == ISD::BITCAST)
+    N = N->getOperand(0);
+
+  if (selectVSplat (N.getNode(), ImmValue) &&
+      ImmValue.getBitWidth() == EltTy.getSizeInBits()) {
+    if (( Signed && ImmValue.isSignedIntN(ImmBitSize)) ||
+        (!Signed && ImmValue.isIntN(ImmBitSize))) {
+      Imm = CurDAG->getTargetConstant(ImmValue, EltTy);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Select constant vector splats.
+bool MipsSEDAGToDAGISel::
+selectVSplatUimm1(SDValue N, SDValue &Imm) const {
+  return selectVSplatCommon(N, Imm, false, 1);
+}
+
+bool MipsSEDAGToDAGISel::
+selectVSplatUimm2(SDValue N, SDValue &Imm) const {
+  return selectVSplatCommon(N, Imm, false, 2);
+}
+
+bool MipsSEDAGToDAGISel::
+selectVSplatUimm3(SDValue N, SDValue &Imm) const {
+  return selectVSplatCommon(N, Imm, false, 3);
+}
+
+// Select constant vector splats.
+bool MipsSEDAGToDAGISel::
+selectVSplatUimm4(SDValue N, SDValue &Imm) const {
+  return selectVSplatCommon(N, Imm, false, 4);
+}
+
+// Select constant vector splats.
+bool MipsSEDAGToDAGISel::
+selectVSplatUimm5(SDValue N, SDValue &Imm) const {
+  return selectVSplatCommon(N, Imm, false, 5);
+}
+
+// Select constant vector splats.
+bool MipsSEDAGToDAGISel::
+selectVSplatUimm6(SDValue N, SDValue &Imm) const {
+  return selectVSplatCommon(N, Imm, false, 6);
+}
+
+// Select constant vector splats.
+bool MipsSEDAGToDAGISel::
+selectVSplatUimm8(SDValue N, SDValue &Imm) const {
+  return selectVSplatCommon(N, Imm, false, 8);
+}
+
+// Select constant vector splats.
+bool MipsSEDAGToDAGISel::
+selectVSplatSimm5(SDValue N, SDValue &Imm) const {
+  return selectVSplatCommon(N, Imm, true, 5);
+}
+
+// Select constant vector splats whose value is a power of 2.
+//
+// In addition to the requirements of selectVSplat(), this function returns
+// true and sets Imm if:
+// * The splat value is the same width as the elements of the vector
+// * The splat value is a power of two.
+//
+// This function looks through ISD::BITCAST nodes.
+// TODO: This might not be appropriate for big-endian MSA since BITCAST is
+//       sometimes a shuffle in big-endian mode.
+bool MipsSEDAGToDAGISel::selectVSplatUimmPow2(SDValue N, SDValue &Imm) const {
+  APInt ImmValue;
+  EVT EltTy = N->getValueType(0).getVectorElementType();
+
+  if (N->getOpcode() == ISD::BITCAST)
+    N = N->getOperand(0);
+
+  if (selectVSplat (N.getNode(), ImmValue) &&
+      ImmValue.getBitWidth() == EltTy.getSizeInBits()) {
+    int32_t Log2 = ImmValue.exactLogBase2();
+
+    if (Log2 != -1) {
+      Imm = CurDAG->getTargetConstant(Log2, EltTy);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Select constant vector splats whose value only has a consecutive sequence
+// of left-most bits set (e.g. 0b11...1100...00).
+//
+// In addition to the requirements of selectVSplat(), this function returns
+// true and sets Imm if:
+// * The splat value is the same width as the elements of the vector
+// * The splat value is a consecutive sequence of left-most bits.
+//
+// This function looks through ISD::BITCAST nodes.
+// TODO: This might not be appropriate for big-endian MSA since BITCAST is
+//       sometimes a shuffle in big-endian mode.
+bool MipsSEDAGToDAGISel::selectVSplatMaskL(SDValue N, SDValue &Imm) const {
+  APInt ImmValue;
+  EVT EltTy = N->getValueType(0).getVectorElementType();
+
+  if (N->getOpcode() == ISD::BITCAST)
+    N = N->getOperand(0);
+
+  if (selectVSplat(N.getNode(), ImmValue) &&
+      ImmValue.getBitWidth() == EltTy.getSizeInBits()) {
+    // Extract the run of set bits starting with bit zero from the bitwise
+    // inverse of ImmValue, and test that the inverse of this is the same
+    // as the original value.
+    if (ImmValue == ~(~ImmValue & ~(~ImmValue + 1))) {
+
+      Imm = CurDAG->getTargetConstant(ImmValue.countPopulation(), EltTy);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Select constant vector splats whose value only has a consecutive sequence
+// of right-most bits set (e.g. 0b00...0011...11).
+//
+// In addition to the requirements of selectVSplat(), this function returns
+// true and sets Imm if:
+// * The splat value is the same width as the elements of the vector
+// * The splat value is a consecutive sequence of right-most bits.
+//
+// This function looks through ISD::BITCAST nodes.
+// TODO: This might not be appropriate for big-endian MSA since BITCAST is
+//       sometimes a shuffle in big-endian mode.
+bool MipsSEDAGToDAGISel::selectVSplatMaskR(SDValue N, SDValue &Imm) const {
+  APInt ImmValue;
+  EVT EltTy = N->getValueType(0).getVectorElementType();
+
+  if (N->getOpcode() == ISD::BITCAST)
+    N = N->getOperand(0);
+
+  if (selectVSplat(N.getNode(), ImmValue) &&
+      ImmValue.getBitWidth() == EltTy.getSizeInBits()) {
+    // Extract the run of set bits starting with bit zero, and test that the
+    // result is the same as the original value
+    if (ImmValue == (ImmValue & ~(ImmValue + 1))) {
+      Imm = CurDAG->getTargetConstant(ImmValue.countPopulation(), EltTy);
+      return true;
+    }
+  }
+
+  return false;
 }
 
 std::pair<bool, SDNode*> MipsSEDAGToDAGISel::selectNode(SDNode *Node) {
@@ -533,18 +738,81 @@ std::pair<bool, SDNode*> MipsSEDAGToDAGISel::selectNode(SDNode *Node) {
     return std::make_pair(true, ResNode.getNode());
   }
 
-  case MipsISD::InsertLOHI: {
-    unsigned RCID = Subtarget.hasDSP() ? Mips::ACC64DSPRegClassID :
-                                         Mips::ACC64RegClassID;
-    SDValue RegClass = CurDAG->getTargetConstant(RCID, MVT::i32);
-    SDValue LoIdx = CurDAG->getTargetConstant(Mips::sub_lo, MVT::i32);
-    SDValue HiIdx = CurDAG->getTargetConstant(Mips::sub_hi, MVT::i32);
-    const SDValue Ops[] = { RegClass, Node->getOperand(0), LoIdx,
-                            Node->getOperand(1), HiIdx };
-    SDNode *Res = CurDAG->getMachineNode(TargetOpcode::REG_SEQUENCE, DL,
-                                         MVT::Untyped, Ops);
+  case ISD::BUILD_VECTOR: {
+    // Select appropriate ldi.[bhwd] instructions for constant splats of
+    // 128-bit when MSA is enabled. Fixup any register class mismatches that
+    // occur as a result.
+    //
+    // This allows the compiler to use a wider range of immediates than would
+    // otherwise be allowed. If, for example, v4i32 could only use ldi.h then
+    // it would not be possible to load { 0x01010101, 0x01010101, 0x01010101,
+    // 0x01010101 } without using a constant pool. This would be sub-optimal
+    // when // 'ldi.b wd, 1' is capable of producing that bit-pattern in the
+    // same set/ of registers. Similarly, ldi.h isn't capable of producing {
+    // 0x00000000, 0x00000001, 0x00000000, 0x00000001 } but 'ldi.d wd, 1' can.
+
+    BuildVectorSDNode *BVN = cast<BuildVectorSDNode>(Node);
+    APInt SplatValue, SplatUndef;
+    unsigned SplatBitSize;
+    bool HasAnyUndefs;
+    unsigned LdiOp;
+    EVT ResVecTy = BVN->getValueType(0);
+    EVT ViaVecTy;
+
+    if (!Subtarget.hasMSA() || !BVN->getValueType(0).is128BitVector())
+      return std::make_pair(false, (SDNode*)NULL);
+
+    if (!BVN->isConstantSplat(SplatValue, SplatUndef, SplatBitSize,
+                              HasAnyUndefs, 8,
+                              !Subtarget.isLittle()))
+      return std::make_pair(false, (SDNode*)NULL);
+
+    switch (SplatBitSize) {
+    default:
+      return std::make_pair(false, (SDNode*)NULL);
+    case 8:
+      LdiOp = Mips::LDI_B;
+      ViaVecTy = MVT::v16i8;
+      break;
+    case 16:
+      LdiOp = Mips::LDI_H;
+      ViaVecTy = MVT::v8i16;
+      break;
+    case 32:
+      LdiOp = Mips::LDI_W;
+      ViaVecTy = MVT::v4i32;
+      break;
+    case 64:
+      LdiOp = Mips::LDI_D;
+      ViaVecTy = MVT::v2i64;
+      break;
+    }
+
+    if (!SplatValue.isSignedIntN(10))
+      return std::make_pair(false, (SDNode*)NULL);
+
+    SDValue Imm = CurDAG->getTargetConstant(SplatValue,
+                                            ViaVecTy.getVectorElementType());
+
+    SDNode *Res = CurDAG->getMachineNode(LdiOp, SDLoc(Node), ViaVecTy, Imm);
+
+    if (ResVecTy != ViaVecTy) {
+      // If LdiOp is writing to a different register class to ResVecTy, then
+      // fix it up here. This COPY_TO_REGCLASS should never cause a move.v
+      // since the source and destination register sets contain the same
+      // registers.
+      const TargetLowering *TLI = getTargetLowering();
+      MVT ResVecTySimple = ResVecTy.getSimpleVT();
+      const TargetRegisterClass *RC = TLI->getRegClassFor(ResVecTySimple);
+      Res = CurDAG->getMachineNode(Mips::COPY_TO_REGCLASS, SDLoc(Node),
+                                   ResVecTy, SDValue(Res, 0),
+                                   CurDAG->getTargetConstant(RC->getID(),
+                                                             MVT::i32));
+    }
+
     return std::make_pair(true, Res);
   }
+
   }
 
   return std::make_pair(false, (SDNode*)NULL);

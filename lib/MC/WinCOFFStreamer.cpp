@@ -72,12 +72,9 @@ public:
   virtual void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
                               uint64_t Size, unsigned ByteAlignment);
   virtual void EmitFileDirective(StringRef Filename);
+  virtual void EmitIdent(StringRef IdentString);
   virtual void EmitWin64EHHandlerData();
   virtual void FinishImpl();
-
-  static bool classof(const MCStreamer *S) {
-    return S->getKind() == SK_WinCOFFStreamer;
-  }
 
 private:
   virtual void EmitInstToData(const MCInst &Inst) {
@@ -134,8 +131,7 @@ private:
 
 WinCOFFStreamer::WinCOFFStreamer(MCContext &Context, MCAsmBackend &MAB,
                                  MCCodeEmitter &CE, raw_ostream &OS)
-    : MCObjectStreamer(SK_WinCOFFStreamer, Context, MAB, OS, &CE),
-      CurSymbol(NULL) {}
+    : MCObjectStreamer(Context, 0, MAB, OS, &CE), CurSymbol(NULL) {}
 
 void WinCOFFStreamer::AddCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                                       unsigned ByteAlignment, bool External) {
@@ -164,7 +160,7 @@ void WinCOFFStreamer::AddCommonSymbol(MCSymbol *Symbol, uint64_t Size,
 
   SymbolData.setExternal(External);
 
-  Symbol->setSection(*Section);
+  AssignSection(Symbol, Section);
 
   if (ByteAlignment != 1)
       new MCAlignFragment(ByteAlignment, 0, 0, ByteAlignment, &SectionData);
@@ -309,6 +305,11 @@ void WinCOFFStreamer::EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
 void WinCOFFStreamer::EmitFileDirective(StringRef Filename) {
   // Ignore for now, linkers don't care, and proper debug
   // info will be a much large effort.
+}
+
+// TODO: Implement this if you want to emit .comment section in COFF obj files.
+void WinCOFFStreamer::EmitIdent(StringRef IdentString) {
+  llvm_unreachable("unsupported directive");
 }
 
 void WinCOFFStreamer::EmitWin64EHHandlerData() {

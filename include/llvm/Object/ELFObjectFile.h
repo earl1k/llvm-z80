@@ -28,6 +28,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+#include <cctype>
 #include <limits>
 #include <utility>
 
@@ -60,7 +61,6 @@ protected:
   virtual error_code getSymbolAddress(DataRefImpl Symb, uint64_t &Res) const;
   virtual error_code getSymbolAlignment(DataRefImpl Symb, uint32_t &Res) const;
   virtual error_code getSymbolSize(DataRefImpl Symb, uint64_t &Res) const;
-  virtual error_code getSymbolNMTypeChar(DataRefImpl Symb, char &Res) const;
   virtual error_code getSymbolFlags(DataRefImpl Symb, uint32_t &Res) const;
   virtual error_code getSymbolType(DataRefImpl Symb,
                                    SymbolRef::Type &Res) const;
@@ -87,8 +87,8 @@ protected:
   virtual error_code isSectionReadOnlyData(DataRefImpl Sec, bool &Res) const;
   virtual error_code sectionContainsSymbol(DataRefImpl Sec, DataRefImpl Symb,
                                            bool &Result) const;
-  virtual relocation_iterator getSectionRelBegin(DataRefImpl Sec) const;
-  virtual relocation_iterator getSectionRelEnd(DataRefImpl Sec) const;
+  virtual relocation_iterator section_rel_begin(DataRefImpl Sec) const;
+  virtual relocation_iterator section_rel_end(DataRefImpl Sec) const;
   virtual section_iterator getRelocatedSection(DataRefImpl Sec) const;
 
   virtual error_code getRelocationNext(DataRefImpl Rel,
@@ -103,8 +103,6 @@ protected:
   getRelocationValueString(DataRefImpl Rel,
                            SmallVectorImpl<char> &Result) const;
 
-protected: // ELF specific protected members.
-  const Elf_Sym *getSymbol(DataRefImpl Symb) const;
   uint64_t getROffset(DataRefImpl Rel) const;
   StringRef getRelocationTypeName(uint32_t Type) const;
 
@@ -168,6 +166,8 @@ protected: // ELF specific protected members.
 
 public:
   ELFObjectFile(MemoryBuffer *Object, error_code &ec);
+
+  const Elf_Sym *getSymbol(DataRefImpl Symb) const;
 
   virtual symbol_iterator begin_symbols() const;
   virtual symbol_iterator end_symbols() const;
@@ -334,78 +334,6 @@ template <class ELFT>
 error_code ELFObjectFile<ELFT>::getSymbolSize(DataRefImpl Symb,
                                               uint64_t &Result) const {
   Result = toELFSymIter(Symb)->st_size;
-  return object_error::success;
-}
-
-template <class ELFT>
-error_code ELFObjectFile<ELFT>::getSymbolNMTypeChar(DataRefImpl Symb,
-                                                    char &Result) const {
-  const Elf_Sym *ESym = getSymbol(Symb);
-  const Elf_Shdr *ESec = EF.getSection(ESym);
-
-  char ret = '?';
-
-  if (ESec) {
-    switch (ESec->sh_type) {
-    case ELF::SHT_PROGBITS:
-    case ELF::SHT_DYNAMIC:
-      switch (ESec->sh_flags) {
-      case (ELF::SHF_ALLOC | ELF::SHF_EXECINSTR):
-        ret = 't';
-        break;
-      case (ELF::SHF_ALLOC | ELF::SHF_WRITE):
-        ret = 'd';
-        break;
-      case ELF::SHF_ALLOC:
-      case (ELF::SHF_ALLOC | ELF::SHF_MERGE):
-      case (ELF::SHF_ALLOC | ELF::SHF_MERGE | ELF::SHF_STRINGS):
-        ret = 'r';
-        break;
-      }
-      break;
-    case ELF::SHT_NOBITS:
-      ret = 'b';
-    }
-  }
-
-  switch (EF.getSymbolTableIndex(ESym)) {
-  case ELF::SHN_UNDEF:
-    if (ret == '?')
-      ret = 'U';
-    break;
-  case ELF::SHN_ABS:
-    ret = 'a';
-    break;
-  case ELF::SHN_COMMON:
-    ret = 'c';
-    break;
-  }
-
-  switch (ESym->getBinding()) {
-  case ELF::STB_GLOBAL:
-    ret = ::toupper(ret);
-    break;
-  case ELF::STB_WEAK:
-    if (EF.getSymbolTableIndex(ESym) == ELF::SHN_UNDEF)
-      ret = 'w';
-    else if (ESym->getType() == ELF::STT_OBJECT)
-      ret = 'V';
-    else
-      ret = 'W';
-  }
-
-  if (ret == '?' && ESym->getType() == ELF::STT_SECTION) {
-    ErrorOr<StringRef> Name = EF.getSymbolName(toELFSymIter(Symb));
-    if (!Name)
-      return Name;
-    Result = StringSwitch<char>(*Name)
-        .StartsWith(".debug", 'N')
-        .StartsWith(".note", 'n')
-        .Default('?');
-    return object_error::success;
-  }
-
-  Result = ret;
   return object_error::success;
 }
 
@@ -611,7 +539,7 @@ error_code ELFObjectFile<ELFT>::sectionContainsSymbol(DataRefImpl Sec,
 
 template <class ELFT>
 relocation_iterator
-ELFObjectFile<ELFT>::getSectionRelBegin(DataRefImpl Sec) const {
+ELFObjectFile<ELFT>::section_rel_begin(DataRefImpl Sec) const {
   DataRefImpl RelData;
   uintptr_t SHT = reinterpret_cast<uintptr_t>(EF.begin_sections().get());
   RelData.d.a = (Sec.p - SHT) / EF.getHeader()->e_shentsize;
@@ -621,7 +549,7 @@ ELFObjectFile<ELFT>::getSectionRelBegin(DataRefImpl Sec) const {
 
 template <class ELFT>
 relocation_iterator
-ELFObjectFile<ELFT>::getSectionRelEnd(DataRefImpl Sec) const {
+ELFObjectFile<ELFT>::section_rel_end(DataRefImpl Sec) const {
   DataRefImpl RelData;
   uintptr_t SHT = reinterpret_cast<uintptr_t>(EF.begin_sections().get());
   const Elf_Shdr *S = reinterpret_cast<const Elf_Shdr *>(Sec.p);

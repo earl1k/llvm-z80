@@ -176,91 +176,6 @@ static const Value *FindSingleUseIdentifiedObject(const Value *Arg) {
   return 0;
 }
 
-/// \brief Test whether the given retainable object pointer escapes.
-///
-/// This differs from regular escape analysis in that a use as an
-/// argument to a call is not considered an escape.
-///
-static bool DoesRetainableObjPtrEscape(const User *Ptr) {
-  DEBUG(dbgs() << "DoesRetainableObjPtrEscape: Target: " << *Ptr << "\n");
-
-  // Walk the def-use chains.
-  SmallVector<const Value *, 4> Worklist;
-  Worklist.push_back(Ptr);
-  // If Ptr has any operands add them as well.
-  for (User::const_op_iterator I = Ptr->op_begin(), E = Ptr->op_end(); I != E;
-       ++I) {
-    Worklist.push_back(*I);
-  }
-
-  // Ensure we do not visit any value twice.
-  SmallPtrSet<const Value *, 8> VisitedSet;
-
-  do {
-    const Value *V = Worklist.pop_back_val();
-
-    DEBUG(dbgs() << "Visiting: " << *V << "\n");
-
-    for (Value::const_use_iterator UI = V->use_begin(), UE = V->use_end();
-         UI != UE; ++UI) {
-      const User *UUser = *UI;
-
-      DEBUG(dbgs() << "User: " << *UUser << "\n");
-
-      // Special - Use by a call (callee or argument) is not considered
-      // to be an escape.
-      switch (GetBasicInstructionClass(UUser)) {
-      case IC_StoreWeak:
-      case IC_InitWeak:
-      case IC_StoreStrong:
-      case IC_Autorelease:
-      case IC_AutoreleaseRV: {
-        DEBUG(dbgs() << "User copies pointer arguments. Pointer Escapes!\n");
-        // These special functions make copies of their pointer arguments.
-        return true;
-      }
-      case IC_IntrinsicUser:
-        // Use by the use intrinsic is not an escape.
-        continue;
-      case IC_User:
-      case IC_None:
-        // Use by an instruction which copies the value is an escape if the
-        // result is an escape.
-        if (isa<BitCastInst>(UUser) || isa<GetElementPtrInst>(UUser) ||
-            isa<PHINode>(UUser) || isa<SelectInst>(UUser)) {
-
-          if (VisitedSet.insert(UUser)) {
-            DEBUG(dbgs() << "User copies value. Ptr escapes if result escapes."
-                  " Adding to list.\n");
-            Worklist.push_back(UUser);
-          } else {
-            DEBUG(dbgs() << "Already visited node.\n");
-          }
-          continue;
-        }
-        // Use by a load is not an escape.
-        if (isa<LoadInst>(UUser))
-          continue;
-        // Use by a store is not an escape if the use is the address.
-        if (const StoreInst *SI = dyn_cast<StoreInst>(UUser))
-          if (V != SI->getValueOperand())
-            continue;
-        break;
-      default:
-        // Regular calls and other stuff are not considered escapes.
-        continue;
-      }
-      // Otherwise, conservatively assume an escape.
-      DEBUG(dbgs() << "Assuming ptr escapes.\n");
-      return true;
-    }
-  } while (!Worklist.empty());
-
-  // No escapes found.
-  DEBUG(dbgs() << "Ptr does not escape.\n");
-  return false;
-}
-
 /// This is a wrapper around getUnderlyingObjCPtr along the lines of
 /// GetUnderlyingObjects except that it returns early when it sees the first
 /// alloca.
@@ -1188,13 +1103,9 @@ namespace {
     unsigned ARCAnnotationProvenanceSourceMDKind;
 #endif // ARC_ANNOATIONS
 
-    bool IsRetainBlockOptimizable(const Instruction *Inst);
-
     bool OptimizeRetainRVCall(Function &F, Instruction *RetainRV);
     void OptimizeAutoreleaseRVCall(Function &F, Instruction *AutoreleaseRV,
                                    InstructionClass &Class);
-    bool OptimizeRetainBlockCall(Function &F, Instruction *RetainBlock,
-                                 InstructionClass &Class);
     void OptimizeIndividualCalls(Function &F);
 
     void CheckForCFGHazards(const BasicBlock *BB,
@@ -1281,22 +1192,6 @@ void ObjCARCOpt::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<AliasAnalysis>();
   // ARC optimization doesn't currently split critical edges.
   AU.setPreservesCFG();
-}
-
-bool ObjCARCOpt::IsRetainBlockOptimizable(const Instruction *Inst) {
-  // Without the magic metadata tag, we have to assume this might be an
-  // objc_retainBlock call inserted to convert a block pointer to an id,
-  // in which case it really is needed.
-  if (!Inst->getMetadata(CopyOnEscapeMDKind))
-    return false;
-
-  // If the pointer "escapes" (not including being used in a call),
-  // the copy may be needed.
-  if (DoesRetainableObjPtrEscape(Inst))
-    return false;
-
-  // Otherwise, it's not needed.
-  return true;
 }
 
 /// Turn objc_retainAutoreleasedReturnValue into objc_retain if the operand is
@@ -1399,41 +1294,6 @@ ObjCARCOpt::OptimizeAutoreleaseRVCall(Function &F, Instruction *AutoreleaseRV,
 
 }
 
-// \brief Attempt to strength reduce objc_retainBlock calls to objc_retain
-// calls.
-//
-// Specifically: If an objc_retainBlock call has the copy_on_escape metadata and
-// does not escape (following the rules of block escaping), strength reduce the
-// objc_retainBlock to an objc_retain.
-//
-// TODO: If an objc_retainBlock call is dominated period by a previous
-// objc_retainBlock call, strength reduce the objc_retainBlock to an
-// objc_retain.
-bool
-ObjCARCOpt::OptimizeRetainBlockCall(Function &F, Instruction *Inst,
-                                    InstructionClass &Class) {
-  assert(GetBasicInstructionClass(Inst) == Class);
-  assert(IC_RetainBlock == Class);
-
-  // If we can not optimize Inst, return false.
-  if (!IsRetainBlockOptimizable(Inst))
-    return false;
-
-  Changed = true;
-  ++NumPeeps;
-
-  DEBUG(dbgs() << "Strength reduced retainBlock => retain.\n");
-  DEBUG(dbgs() << "Old: " << *Inst << "\n");
-  CallInst *RetainBlock = cast<CallInst>(Inst);
-  Constant *NewDecl = EP.get(ARCRuntimeEntryPoints::EPT_Retain);
-  RetainBlock->setCalledFunction(NewDecl);
-  // Remove copy_on_escape metadata.
-  RetainBlock->setMetadata(CopyOnEscapeMDKind, 0);
-  Class = IC_Retain;
-  DEBUG(dbgs() << "New: " << *Inst << "\n");
-  return true;
-}
-
 /// Visit each call, one at a time, and make simplifications without doing any
 /// additional analysis.
 void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
@@ -1510,11 +1370,6 @@ void ObjCARCOpt::OptimizeIndividualCalls(Function &F) {
       }
       break;
     }
-    case IC_RetainBlock:
-      // If we strength reduce an objc_retainBlock to an objc_retain, continue
-      // onto the objc_retain peephole optimizations. Otherwise break.
-      OptimizeRetainBlockCall(F, Inst, Class);
-      break;
     case IC_RetainRV:
       if (OptimizeRetainRVCall(F, Inst))
         continue;
@@ -2550,7 +2405,15 @@ ObjCARCOpt::ConnectTDBUTraversals(DenseMap<const BasicBlock *, BBState>
         if (Jt == Releases.end())
           return false;
         const RRInfo &NewRetainReleaseRRI = Jt->second;
-        assert(NewRetainReleaseRRI.Calls.count(NewRetain));
+
+        // If the release does not have a reference to the retain as well,
+        // something happened which is unaccounted for. Do not do anything.
+        //
+        // This can happen if we catch an additive overflow during path count
+        // merging.
+        if (!NewRetainReleaseRRI.Calls.count(NewRetain))
+          return false;
+
         if (ReleasesToMove.Calls.insert(NewRetainRelease)) {
 
           // If we overflow when we compute the path count, don't remove/move
@@ -2626,9 +2489,16 @@ ObjCARCOpt::ConnectTDBUTraversals(DenseMap<const BasicBlock *, BBState>
         if (Jt == Retains.end())
           return false;
         const RRInfo &NewReleaseRetainRRI = Jt->second;
-        assert(NewReleaseRetainRRI.Calls.count(NewRelease));
-        if (RetainsToMove.Calls.insert(NewReleaseRetain)) {
 
+        // If the retain does not have a reference to the release as well,
+        // something happened which is unaccounted for. Do not do anything.
+        //
+        // This can happen if we catch an additive overflow during path count
+        // merging.
+        if (!NewReleaseRetainRRI.Calls.count(NewRelease))
+          return false;
+
+        if (RetainsToMove.Calls.insert(NewReleaseRetain)) {
           // If we overflow when we compute the path count, don't remove/move
           // anything.
           const BBState &NRRBBState = BBStates[NewReleaseRetain->getParent()];

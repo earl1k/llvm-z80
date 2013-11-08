@@ -46,6 +46,7 @@ static int StrCmpOptionNameIgnoreCase(const char *A, const char *B) {
   return (a < b) ? -1 : 1;
 }
 
+#ifndef NDEBUG
 static int StrCmpOptionName(const char *A, const char *B) {
   if (int N = StrCmpOptionNameIgnoreCase(A, B))
     return N;
@@ -72,13 +73,11 @@ static inline bool operator<(const OptTable::Info &A, const OptTable::Info &B) {
          "Unexpected classes for options with same name.");
   return B.Kind == Option::JoinedClass;
 }
+#endif
 
 // Support lower_bound between info and an option name.
 static inline bool operator<(const OptTable::Info &I, const char *Name) {
   return StrCmpOptionNameIgnoreCase(I.Name, Name) < 0;
-}
-static inline bool operator<(const char *Name, const OptTable::Info &I) {
-  return StrCmpOptionNameIgnoreCase(Name, I.Name) < 0;
 }
 }
 }
@@ -176,13 +175,6 @@ static bool isInput(const llvm::StringSet<> &Prefixes, StringRef Arg) {
   return true;
 }
 
-// Returns true if X starts with Y, ignoring case.
-static bool startsWithIgnoreCase(StringRef X, StringRef Y) {
-  if (X.size() < Y.size())
-    return false;
-  return X.substr(0, Y.size()).equals_lower(Y);
-}
-
 /// \returns Matched size. 0 means no match.
 static unsigned matchOption(const OptTable::Info *I, StringRef Str,
                             bool IgnoreCase) {
@@ -191,7 +183,7 @@ static unsigned matchOption(const OptTable::Info *I, StringRef Str,
     if (Str.startswith(Prefix)) {
       StringRef Rest = Str.substr(Prefix.size());
       bool Matched = IgnoreCase
-          ? startsWithIgnoreCase(Rest, I->Name)
+          ? Rest.startswith_lower(I->Name)
           : Rest.startswith(I->Name);
       if (Matched)
         return Prefix.size() + StringRef(I->Name).size();

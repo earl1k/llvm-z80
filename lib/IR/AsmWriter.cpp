@@ -1394,9 +1394,6 @@ static void PrintLinkage(GlobalValue::LinkageTypes LT,
   case GlobalValue::InternalLinkage:      Out << "internal ";       break;
   case GlobalValue::LinkOnceAnyLinkage:   Out << "linkonce ";       break;
   case GlobalValue::LinkOnceODRLinkage:   Out << "linkonce_odr ";   break;
-  case GlobalValue::LinkOnceODRAutoHideLinkage:
-    Out << "linkonce_odr_auto_hide ";
-    break;
   case GlobalValue::WeakAnyLinkage:       Out << "weak ";           break;
   case GlobalValue::WeakODRLinkage:       Out << "weak_odr ";       break;
   case GlobalValue::CommonLinkage:        Out << "common ";         break;
@@ -1647,6 +1644,10 @@ void AssemblyWriter::printFunction(const Function *F) {
     Out << " align " << F->getAlignment();
   if (F->hasGC())
     Out << " gc \"" << F->getGC() << '"';
+  if (F->hasPrefixData()) {
+    Out << " prefix ";
+    writeOperand(F->getPrefixData(), true);
+  }
   if (F->isDeclaration()) {
     Out << '\n';
   } else {

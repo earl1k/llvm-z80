@@ -24,11 +24,6 @@
 
 using namespace llvm;
 
-static cl::opt<bool> NoDPLoadStore("mno-ldc1-sdc1", cl::init(false),
-                                   cl::desc("Expand double precision loads and "
-                                            "stores to their single precision "
-                                            "counterparts."));
-
 MipsSEInstrInfo::MipsSEInstrInfo(MipsTargetMachine &tm)
   : MipsInstrInfo(tm,
                   tm.getRelocationModel() == Reloc::PIC_ ? Mips::B : Mips::J),
@@ -159,6 +154,10 @@ void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     else if (Mips::FGR64RegClass.contains(DestReg))
       Opc = Mips::DMTC1;
   }
+  else if (Mips::MSA128BRegClass.contains(DestReg)) { // Copy to MSA reg
+    if (Mips::MSA128BRegClass.contains(SrcReg))
+      Opc = Mips::MOVE_V;
+  }
 
   assert(Opc && "Cannot copy registers");
 
@@ -267,6 +266,27 @@ bool MipsSEInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
   case Mips::RetRA:
     expandRetRA(MBB, MI, Mips::RET);
     break;
+  case Mips::PseudoMFHI:
+    expandPseudoMFHiLo(MBB, MI, Mips::MFHI);
+    break;
+  case Mips::PseudoMFLO:
+    expandPseudoMFHiLo(MBB, MI, Mips::MFLO);
+    break;
+  case Mips::PseudoMFHI64:
+    expandPseudoMFHiLo(MBB, MI, Mips::MFHI64);
+    break;
+  case Mips::PseudoMFLO64:
+    expandPseudoMFHiLo(MBB, MI, Mips::MFLO64);
+    break;
+  case Mips::PseudoMTLOHI:
+    expandPseudoMTLoHi(MBB, MI, Mips::MTLO, Mips::MTHI, false);
+    break;
+  case Mips::PseudoMTLOHI64:
+    expandPseudoMTLoHi(MBB, MI, Mips::MTLO64, Mips::MTHI64, false);
+    break;
+  case Mips::PseudoMTLOHI_DSP:
+    expandPseudoMTLoHi(MBB, MI, Mips::MTLO_DSP, Mips::MTHI_DSP, true);
+    break;
   case Mips::PseudoCVT_S_W:
     expandCvtFPInt(MBB, MI, Mips::CVT_S_W, Mips::MTC1, false);
     break;
@@ -293,12 +313,6 @@ bool MipsSEInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
     break;
   case Mips::ExtractElementF64_64:
     expandExtractElementF64(MBB, MI, true);
-    break;
-  case Mips::PseudoLDC1:
-    expandDPLoadStore(MBB, MI, Mips::LDC1, Mips::LWC1);
-    break;
-  case Mips::PseudoSDC1:
-    expandDPLoadStore(MBB, MI, Mips::SDC1, Mips::SWC1);
     break;
   case Mips::MIPSeh_return32:
   case Mips::MIPSeh_return64:
@@ -421,6 +435,41 @@ MipsSEInstrInfo::compareOpndSize(unsigned Opc,
   return std::make_pair(DstRegSize > SrcRegSize, DstRegSize < SrcRegSize);
 }
 
+void MipsSEInstrInfo::expandPseudoMFHiLo(MachineBasicBlock &MBB,
+                                         MachineBasicBlock::iterator I,
+                                         unsigned NewOpc) const {
+  BuildMI(MBB, I, I->getDebugLoc(), get(NewOpc), I->getOperand(0).getReg());
+}
+
+void MipsSEInstrInfo::expandPseudoMTLoHi(MachineBasicBlock &MBB,
+                                         MachineBasicBlock::iterator I,
+                                         unsigned LoOpc,
+                                         unsigned HiOpc,
+                                         bool HasExplicitDef) const {
+  // Expand
+  //  lo_hi pseudomtlohi $gpr0, $gpr1
+  // to these two instructions:
+  //  mtlo $gpr0
+  //  mthi $gpr1
+
+  DebugLoc DL = I->getDebugLoc();
+  const MachineOperand &SrcLo = I->getOperand(1), &SrcHi = I->getOperand(2);
+  MachineInstrBuilder LoInst = BuildMI(MBB, I, DL, get(LoOpc));
+  MachineInstrBuilder HiInst = BuildMI(MBB, I, DL, get(HiOpc));
+  LoInst.addReg(SrcLo.getReg(), getKillRegState(SrcLo.isKill()));
+  HiInst.addReg(SrcHi.getReg(), getKillRegState(SrcHi.isKill()));
+
+  // Add lo/hi registers if the mtlo/hi instructions created have explicit
+  // def registers.
+  if (HasExplicitDef) {
+    unsigned DstReg = I->getOperand(0).getReg();
+    unsigned DstLo = getRegisterInfo().getSubReg(DstReg, Mips::sub_lo);
+    unsigned DstHi = getRegisterInfo().getSubReg(DstReg, Mips::sub_hi);
+    LoInst.addReg(DstLo, RegState::Define);
+    HiInst.addReg(DstHi, RegState::Define);
+  }
+}
+
 void MipsSEInstrInfo::expandCvtFPInt(MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator I,
                                      unsigned CvtOpc, unsigned MovOpc,
@@ -482,56 +531,6 @@ void MipsSEInstrInfo::expandBuildPairF64(MachineBasicBlock &MBB,
   else
     BuildMI(MBB, I, dl, Mtc1Tdd, TRI.getSubReg(DstReg, Mips::sub_hi))
       .addReg(HiReg);
-}
-
-/// Add 4 to the displacement of operand MO.
-static void fixDisp(MachineOperand &MO) {
-  switch (MO.getType()) {
-  default:
-    llvm_unreachable("Unhandled operand type.");
-  case MachineOperand::MO_Immediate:
-    MO.setImm(MO.getImm() + 4);
-    break;
-  case MachineOperand::MO_GlobalAddress:
-  case MachineOperand::MO_ConstantPoolIndex:
-  case MachineOperand::MO_BlockAddress:
-  case MachineOperand::MO_TargetIndex:
-  case MachineOperand::MO_ExternalSymbol:
-    MO.setOffset(MO.getOffset() + 4);
-    break;
-  }
-}
-
-void MipsSEInstrInfo::expandDPLoadStore(MachineBasicBlock &MBB,
-                                        MachineBasicBlock::iterator I,
-                                        unsigned OpcD, unsigned OpcS) const {
-  // If NoDPLoadStore is false, just change the opcode.
-  if (!NoDPLoadStore) {
-    genInstrWithNewOpc(OpcD, I);
-    return;
-  }
-
-  // Expand a double precision FP load or store to two single precision
-  // instructions.
-
-  const TargetRegisterInfo &TRI = getRegisterInfo();
-  const MachineOperand &ValReg = I->getOperand(0);
-  unsigned LoReg = TRI.getSubReg(ValReg.getReg(), Mips::sub_lo);
-  unsigned HiReg = TRI.getSubReg(ValReg.getReg(), Mips::sub_hi);
-
-  if (!TM.getSubtarget<MipsSubtarget>().isLittle())
-    std::swap(LoReg, HiReg);
-
-  // Create an instruction which loads from or stores to the lower memory
-  // address.
-  MachineInstrBuilder MIB = genInstrWithNewOpc(OpcS, I);
-  MIB->getOperand(0).setReg(LoReg);
-
-  // Create an instruction which loads from or stores to the higher memory
-  // address.
-  MIB = genInstrWithNewOpc(OpcS, I);
-  MIB->getOperand(0).setReg(HiReg);
-  fixDisp(MIB->getOperand(2));
 }
 
 void MipsSEInstrInfo::expandEhReturn(MachineBasicBlock &MBB,

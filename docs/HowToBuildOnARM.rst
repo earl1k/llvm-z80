@@ -6,7 +6,11 @@ Introduction
 ============
 
 This document contains information about building/testing LLVM and
-Clang on ARM.
+Clang on an ARM machine.
+
+This document is *NOT* tailored to help you cross-compile LLVM/Clang
+to ARM on another architecture, for example an x86_64 machine. To find
+out more about cross-compiling, please check :doc:`HowToCrossCompileLLVM`.
 
 Notes On Building LLVM/Clang on ARM
 =====================================
@@ -17,7 +21,7 @@ on the ARMv6 and ARMv7 architectures and may be inapplicable to older chips.
 #. If you are building LLVM/Clang on an ARM board with 1G of memory or less,
    please use ``gold`` rather then GNU ``ld``.
    Building LLVM/Clang with ``--enable-optimized``
-   is prefered since it consumes less memory. Otherwise, the building
+   is preferred since it consumes less memory. Otherwise, the building
    process will very likely fail due to insufficient memory. In any
    case it is probably a good idea to set up a swap partition.
 

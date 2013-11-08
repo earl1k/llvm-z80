@@ -449,23 +449,18 @@ void replace_extension(SmallVectorImpl<char> &path, const Twine &extension) {
 }
 
 void native(const Twine &path, SmallVectorImpl<char> &result) {
+  assert((!path.isSingleStringRef() ||
+          path.getSingleStringRef().data() != result.data()) &&
+         "path and result are not allowed to overlap!");
   // Clear result.
   result.clear();
-#ifdef LLVM_ON_WIN32
-  SmallString<128> path_storage;
-  StringRef p = path.toStringRef(path_storage);
-  result.reserve(p.size());
-  for (StringRef::const_iterator i = p.begin(),
-                                 e = p.end();
-                                 i != e;
-                                 ++i) {
-    if (*i == '/')
-      result.push_back('\\');
-    else
-      result.push_back(*i);
-  }
-#else
   path.toVector(result);
+  native(result);
+}
+
+void native(SmallVectorImpl<char> &path) {
+#ifdef LLVM_ON_WIN32
+  std::replace(path.begin(), path.end(), '/', '\\');
 #endif
 }
 
@@ -852,6 +847,14 @@ error_code has_magic(const Twine &path, const Twine &magic, bool &result) {
   if (Magic.size() < 4)
     return file_magic::unknown;
   switch ((unsigned char)Magic[0]) {
+    case 0x00: {
+      // Windows resource file
+      const char Expected[] = { 0, 0, 0, 0, '\x20', 0, 0, 0, '\xff' };
+      if (Magic.size() >= sizeof(Expected) &&
+          memcmp(Magic.data(), Expected, sizeof(Expected)) == 0)
+        return file_magic::windows_resource;
+      break;
+    }
     case 0xDE:  // 0x0B17C0DE = BC wraper
       if (Magic[1] == (char)0xC0 && Magic[2] == (char)0x17 &&
           Magic[3] == (char)0x0B)

@@ -272,7 +272,8 @@ void MCELFStreamer::EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                                                          ELF::SHF_WRITE |
                                                          ELF::SHF_ALLOC,
                                                          SectionKind::getBSS());
-    Symbol->setSection(*Section);
+
+    AssignSection(Symbol, Section);
 
     struct LocalCommon L = {&SD, Size, ByteAlignment};
     LocalCommons.push_back(L);
@@ -315,20 +316,29 @@ void MCELFStreamer::EmitValueToAlignment(unsigned ByteAlignment,
                                          ValueSize, MaxBytesToEmit);
 }
 
-
-// Add a symbol for the file name of this module. This is the second
-// entry in the module's symbol table (the first being the null symbol).
+// Add a symbol for the file name of this module. They start after the
+// null symbol and don't count as normal symbol, i.e. a non-STT_FILE symbol
+// with the same name may appear.
 void MCELFStreamer::EmitFileDirective(StringRef Filename) {
-  MCSymbol *Symbol = getAssembler().getContext().GetOrCreateSymbol(Filename);
-  Symbol->setSection(*getCurrentSection().first);
-  Symbol->setAbsolute();
-
-  MCSymbolData &SD = getAssembler().getOrCreateSymbolData(*Symbol);
-
-  SD.setFlags(ELF_STT_File | ELF_STB_Local | ELF_STV_Default);
+  getAssembler().addFileName(Filename);
 }
 
-void  MCELFStreamer::fixSymbolsInTLSFixups(const MCExpr *expr) {
+void MCELFStreamer::EmitIdent(StringRef IdentString) {
+  const MCSection *Comment = getAssembler().getContext().getELFSection(
+      ".comment", ELF::SHT_PROGBITS, ELF::SHF_MERGE | ELF::SHF_STRINGS,
+      SectionKind::getReadOnly(), 1, "");
+  PushSection();
+  SwitchSection(Comment);
+  if (!SeenIdent) {
+    EmitIntValue(0, 1);
+    SeenIdent = true;
+  }
+  EmitBytes(IdentString);
+  EmitIntValue(0, 1);
+  PopSection();
+}
+
+void MCELFStreamer::fixSymbolsInTLSFixups(const MCExpr *expr) {
   switch (expr->getKind()) {
   case MCExpr::Target:
     cast<MCTargetExpr>(expr)->fixELFSymbolsInTLSFixups(getAssembler());
@@ -527,9 +537,7 @@ void MCELFStreamer::EmitBundleUnlock() {
   SD->setBundleLockState(MCSectionData::NotBundleLocked);
 }
 
-void MCELFStreamer::FinishImpl() {
-  EmitFrames(true);
-
+void MCELFStreamer::Flush() {
   for (std::vector<LocalCommon>::const_iterator i = LocalCommons.begin(),
                                                 e = LocalCommons.end();
        i != e; ++i) {
@@ -550,17 +558,23 @@ void MCELFStreamer::FinishImpl() {
       SectData.setAlignment(ByteAlignment);
   }
 
-  this->MCObjectStreamer::FinishImpl();
-}
-void MCELFStreamer::EmitTCEntry(const MCSymbol &S) {
-  // Creates a R_PPC64_TOC relocation
-  MCObjectStreamer::EmitSymbolValue(&S, 8);
+  LocalCommons.clear();
 }
 
-MCStreamer *llvm::createELFStreamer(MCContext &Context, MCAsmBackend &MAB,
-                                    raw_ostream &OS, MCCodeEmitter *CE,
-                                    bool RelaxAll, bool NoExecStack) {
-  MCELFStreamer *S = new MCELFStreamer(Context, MAB, OS, CE);
+void MCELFStreamer::FinishImpl() {
+  EmitFrames(NULL, true);
+
+  Flush();
+
+  this->MCObjectStreamer::FinishImpl();
+}
+
+MCStreamer *llvm::createELFStreamer(MCContext &Context,
+                                    MCTargetStreamer *Streamer,
+                                    MCAsmBackend &MAB, raw_ostream &OS,
+                                    MCCodeEmitter *CE, bool RelaxAll,
+                                    bool NoExecStack) {
+  MCELFStreamer *S = new MCELFStreamer(Context, Streamer, MAB, OS, CE);
   if (RelaxAll)
     S->getAssembler().setRelaxAll(true);
   if (NoExecStack)

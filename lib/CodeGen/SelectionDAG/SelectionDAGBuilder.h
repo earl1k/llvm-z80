@@ -84,7 +84,7 @@ class SelectionDAGBuilder {
   const Instruction *CurInst;
 
   DenseMap<const Value*, SDValue> NodeMap;
-  
+
   /// UnusedArgNodeMap - Maps argument value for unused arguments. This is used
   /// to preserve debug information for incoming arguments.
   DenseMap<const Value*, SDValue> UnusedArgNodeMap;
@@ -182,6 +182,17 @@ private:
 
   typedef std::vector<CaseRec> CaseRecVector;
 
+  /// The comparison function for sorting the switch case values in the vector.
+  /// WARNING: Case ranges should be disjoint!
+  struct CaseCmp {
+    bool operator()(const Case &C1, const Case &C2) {
+      assert(isa<ConstantInt>(C1.Low) && isa<ConstantInt>(C2.High));
+      const ConstantInt* CI1 = cast<const ConstantInt>(C1.Low);
+      const ConstantInt* CI2 = cast<const ConstantInt>(C2.High);
+      return CI1->getValue().slt(CI2->getValue());
+    }
+  };
+
   struct CaseBitsCmp {
     bool operator()(const CaseBits &C1, const CaseBits &C2) {
       return C1.Bits > C2.Bits;
@@ -224,7 +235,7 @@ private:
   struct JumpTable {
     JumpTable(unsigned R, unsigned J, MachineBasicBlock *M,
               MachineBasicBlock *D): Reg(R), JTI(J), MBB(M), Default(D) {}
-  
+
     /// Reg - the virtual register containing the index of the jump table entry
     //. to jump to.
     unsigned Reg;
@@ -503,9 +514,9 @@ public:
   FunctionLoweringInfo &FuncInfo;
 
   /// OptLevel - What optimization level we're generating code for.
-  /// 
+  ///
   CodeGenOpt::Level OptLevel;
-  
+
   /// GFI - Garbage collection metadata for the function.
   GCFunctionInfo *GFI;
 
@@ -587,7 +598,7 @@ public:
     assert(N.getNode() == 0 && "Already set a value for this node!");
     N = NewN;
   }
-  
+
   void setUnusedArgValue(const Value *V, SDValue NewN) {
     SDValue &N = UnusedArgNodeMap[V];
     assert(N.getNode() == 0 && "Already set a value for this node!");
@@ -607,6 +618,11 @@ public:
   void ExportFromCurrentBlock(const Value *V);
   void LowerCallTo(ImmutableCallSite CS, SDValue Callee, bool IsTailCall,
                    MachineBasicBlock *LandingPad = NULL);
+
+  std::pair<SDValue, SDValue> LowerCallOperands(const CallInst &CI,
+                                                unsigned ArgIdx,
+                                                unsigned NumArgs,
+                                                SDValue Callee);
 
   /// UpdateSplitBlock - When an MBB was split during scheduling, update the
   /// references that ned to refer to the last resulting block.
@@ -662,7 +678,7 @@ public:
   void visitJumpTable(JumpTable &JT);
   void visitJumpTableHeader(JumpTable &JT, JumpTableHeader &JTH,
                             MachineBasicBlock *SwitchBB);
-  
+
 private:
   // These all get lowered before this pass.
   void visitInvoke(const InvokeInst &I);
@@ -741,6 +757,8 @@ private:
   void visitVAArg(const VAArgInst &I);
   void visitVAEnd(const CallInst &I);
   void visitVACopy(const CallInst &I);
+  void visitStackmap(const CallInst &I);
+  void visitPatchpoint(const CallInst &I);
 
   void visitUserOp1(const Instruction &I) {
     llvm_unreachable("UserOp1 should not exist at instruction selection time!");
@@ -755,7 +773,7 @@ private:
   void HandlePHINodesInSuccessorBlocks(const BasicBlock *LLVMBB);
 
   /// EmitFuncArgumentDbgValue - If V is an function argument then create
-  /// corresponding DBG_VALUE machine instruction for it now. At the end of 
+  /// corresponding DBG_VALUE machine instruction for it now. At the end of
   /// instruction selection, they will be inserted to the entry BB.
   bool EmitFuncArgumentDbgValue(const Value *V, MDNode *Variable,
                                 int64_t Offset, const SDValue &N);

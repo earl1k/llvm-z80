@@ -25,10 +25,12 @@ namespace llvm {
 class MCStreamer;
 class MachineInstr;
 class MachineBasicBlock;
+class MipsTargetStreamer;
 class Module;
 class raw_ostream;
 
 class LLVM_LIBRARY_VISIBILITY MipsAsmPrinter : public AsmPrinter {
+  MipsTargetStreamer &getTargetStreamer();
 
   void EmitInstrWithMacroNoAT(const MachineInstr *MI);
 
@@ -40,6 +42,16 @@ private:
   // lowerOperand - Convert a MachineOperand into the equivalent MCOperand.
   bool lowerOperand(const MachineOperand &MO, MCOperand &MCOp);
 
+  /// MCP - Keep a pointer to constantpool entries of the current
+  /// MachineFunction.
+  const MachineConstantPool *MCP;
+
+  /// InConstantPool - Maintain state when emitting a sequence of constant
+  /// pool entries so we can properly mark them as data regions.
+  bool InConstantPool;
+
+  bool UsingConstantPools;
+
 public:
 
   const MipsSubtarget *Subtarget;
@@ -47,8 +59,11 @@ public:
   MipsMCInstLower MCInstLowering;
 
   explicit MipsAsmPrinter(TargetMachine &TM,  MCStreamer &Streamer)
-    : AsmPrinter(TM, Streamer), MCInstLowering(*this) {
+    : AsmPrinter(TM, Streamer), MCP(0), InConstantPool(false),
+      MCInstLowering(*this) {
     Subtarget = &TM.getSubtarget<MipsSubtarget>();
+    UsingConstantPools =
+      (Subtarget->inMips16Mode() && Subtarget->useConstantIslands());
   }
 
   virtual const char *getPassName() const {
@@ -56,6 +71,12 @@ public:
   }
 
   virtual bool runOnMachineFunction(MachineFunction &MF);
+
+  virtual void EmitConstantPool() LLVM_OVERRIDE {
+    if (!UsingConstantPools)
+      AsmPrinter::EmitConstantPool();
+    // we emit constant pools customly!
+  }
 
   void EmitInstruction(const MachineInstr *MI);
   void printSavedRegsBitmask(raw_ostream &O);

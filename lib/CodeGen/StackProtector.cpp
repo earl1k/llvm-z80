@@ -15,11 +15,11 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "stack-protector"
+#include "llvm/CodeGen/StackProtector.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Attributes.h"
@@ -29,13 +29,12 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Target/TargetLowering.h"
 #include <cstdlib>
 using namespace llvm;
 
@@ -43,83 +42,20 @@ STATISTIC(NumFunProtected, "Number of functions protected");
 STATISTIC(NumAddrTaken, "Number of local variables that have their address"
                         " taken.");
 
-static cl::opt<bool>
-EnableSelectionDAGSP("enable-selectiondag-sp", cl::init(true),
-                     cl::Hidden);
-
-namespace {
-  class StackProtector : public FunctionPass {
-    const TargetMachine *TM;
-
-    /// TLI - Keep a pointer of a TargetLowering to consult for determining
-    /// target type sizes.
-    const TargetLoweringBase *TLI;
-    const Triple Trip;
-
-    Function *F;
-    Module *M;
-
-    DominatorTree *DT;
-
-    /// \brief The minimum size of buffers that will receive stack smashing
-    /// protection when -fstack-protection is used.
-    unsigned SSPBufferSize;
-
-    /// VisitedPHIs - The set of PHI nodes visited when determining
-    /// if a variable's reference has been taken.  This set
-    /// is maintained to ensure we don't visit the same PHI node multiple
-    /// times.
-    SmallPtrSet<const PHINode*, 16> VisitedPHIs;
-
-    /// InsertStackProtectors - Insert code into the prologue and epilogue of
-    /// the function.
-    ///
-    ///  - The prologue code loads and stores the stack guard onto the stack.
-    ///  - The epilogue checks the value stored in the prologue against the
-    ///    original value. It calls __stack_chk_fail if they differ.
-    bool InsertStackProtectors();
-
-    /// CreateFailBB - Create a basic block to jump to when the stack protector
-    /// check fails.
-    BasicBlock *CreateFailBB();
-
-    /// ContainsProtectableArray - Check whether the type either is an array or
-    /// contains an array of sufficient size so that we need stack protectors
-    /// for it.
-    bool ContainsProtectableArray(Type *Ty, bool Strong = false,
-                                  bool InStruct = false) const;
-
-    /// \brief Check whether a stack allocation has its address taken.
-    bool HasAddressTaken(const Instruction *AI);
-
-    /// RequiresStackProtector - Check whether or not this function needs a
-    /// stack protector based upon the stack protector level.
-    bool RequiresStackProtector();
-  public:
-    static char ID;             // Pass identification, replacement for typeid.
-    StackProtector() : FunctionPass(ID), TM(0), TLI(0), SSPBufferSize(0) {
-      initializeStackProtectorPass(*PassRegistry::getPassRegistry());
-    }
-    StackProtector(const TargetMachine *TM)
-      : FunctionPass(ID), TM(TM), TLI(0), Trip(TM->getTargetTriple()),
-        SSPBufferSize(8) {
-      initializeStackProtectorPass(*PassRegistry::getPassRegistry());
-    }
-
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-      AU.addPreserved<DominatorTree>();
-    }
-
-    virtual bool runOnFunction(Function &Fn);
-  };
-} // end anonymous namespace
+static cl::opt<bool> EnableSelectionDAGSP("enable-selectiondag-sp",
+                                          cl::init(true), cl::Hidden);
 
 char StackProtector::ID = 0;
-INITIALIZE_PASS(StackProtector, "stack-protector",
-                "Insert stack protectors", false, false)
+INITIALIZE_PASS(StackProtector, "stack-protector", "Insert stack protectors",
+                false, true)
 
 FunctionPass *llvm::createStackProtectorPass(const TargetMachine *TM) {
   return new StackProtector(TM);
+}
+
+StackProtector::SSPLayoutKind
+StackProtector::getSSPLayout(const AllocaInst *AI) const {
+  return AI ? Layout.lookup(AI) : SSPLK_None;
 }
 
 bool StackProtector::runOnFunction(Function &Fn) {
@@ -128,56 +64,71 @@ bool StackProtector::runOnFunction(Function &Fn) {
   DT = getAnalysisIfAvailable<DominatorTree>();
   TLI = TM->getTargetLowering();
 
-  if (!RequiresStackProtector()) return false;
+  if (!RequiresStackProtector())
+    return false;
 
-  Attribute Attr =
-    Fn.getAttributes().getAttribute(AttributeSet::FunctionIndex,
-                                    "stack-protector-buffer-size");
+  Attribute Attr = Fn.getAttributes().getAttribute(
+      AttributeSet::FunctionIndex, "stack-protector-buffer-size");
   if (Attr.isStringAttribute())
-    SSPBufferSize = atoi(Attr.getValueAsString().data());
+    Attr.getValueAsString().getAsInteger(10, SSPBufferSize);
 
   ++NumFunProtected;
   return InsertStackProtectors();
 }
 
-/// ContainsProtectableArray - Check whether the type either is an array or
-/// contains a char array of sufficient size so that we need stack protectors
-/// for it.
-bool StackProtector::ContainsProtectableArray(Type *Ty, bool Strong,
+/// \param [out] IsLarge is set to true if a protectable array is found and
+/// it is "large" ( >= ssp-buffer-size).  In the case of a structure with
+/// multiple arrays, this gets set if any of them is large.
+bool StackProtector::ContainsProtectableArray(Type *Ty, bool &IsLarge,
+                                              bool Strong,
                                               bool InStruct) const {
-  if (!Ty) return false;
+  if (!Ty)
+    return false;
   if (ArrayType *AT = dyn_cast<ArrayType>(Ty)) {
-    // In strong mode any array, regardless of type and size, triggers a
-    // protector
-    if (Strong)
-      return true;
     if (!AT->getElementType()->isIntegerTy(8)) {
       // If we're on a non-Darwin platform or we're inside of a structure, don't
       // add stack protectors unless the array is a character array.
-      if (InStruct || !Trip.isOSDarwin())
-          return false;
+      // However, in strong mode any array, regardless of type and size,
+      // triggers a protector.
+      if (!Strong && (InStruct || !Trip.isOSDarwin()))
+        return false;
     }
 
     // If an array has more than SSPBufferSize bytes of allocated space, then we
     // emit stack protectors.
-    if (SSPBufferSize <= TLI->getDataLayout()->getTypeAllocSize(AT))
+    if (SSPBufferSize <= TLI->getDataLayout()->getTypeAllocSize(AT)) {
+      IsLarge = true;
+      return true;
+    }
+
+    if (Strong)
+      // Require a protector for all arrays in strong mode
       return true;
   }
 
   const StructType *ST = dyn_cast<StructType>(Ty);
-  if (!ST) return false;
+  if (!ST)
+    return false;
 
+  bool NeedsProtector = false;
   for (StructType::element_iterator I = ST->element_begin(),
-         E = ST->element_end(); I != E; ++I)
-    if (ContainsProtectableArray(*I, Strong, true))
-      return true;
+                                    E = ST->element_end();
+       I != E; ++I)
+    if (ContainsProtectableArray(*I, IsLarge, Strong, true)) {
+      // If the element is a protectable array and is large (>= SSPBufferSize)
+      // then we are done.  If the protectable array is not large, then
+      // keep looking in case a subsequent element is a large array.
+      if (IsLarge)
+        return true;
+      NeedsProtector = true;
+    }
 
-  return false;
+  return NeedsProtector;
 }
 
 bool StackProtector::HasAddressTaken(const Instruction *AI) {
   for (Value::const_use_iterator UI = AI->use_begin(), UE = AI->use_end();
-        UI != UE; ++UI) {
+       UI != UE; ++UI) {
     const User *U = *UI;
     if (const StoreInst *SI = dyn_cast<StoreInst>(U)) {
       if (AI == SI->getValueOperand())
@@ -224,11 +175,13 @@ bool StackProtector::HasAddressTaken(const Instruction *AI) {
 /// address taken.
 bool StackProtector::RequiresStackProtector() {
   bool Strong = false;
+  bool NeedsProtector = false;
   if (F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::StackProtectReq))
-    return true;
-  else if (F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                           Attribute::StackProtectStrong))
+                                      Attribute::StackProtectReq)) {
+    NeedsProtector = true;
+    Strong = true; // Use the same heuristic as strong to determine SSPLayout
+  } else if (F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
+                                             Attribute::StackProtectStrong))
     Strong = true;
   else if (!F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
                                             Attribute::StackProtect))
@@ -237,8 +190,8 @@ bool StackProtector::RequiresStackProtector() {
   for (Function::iterator I = F->begin(), E = F->end(); I != E; ++I) {
     BasicBlock *BB = I;
 
-    for (BasicBlock::iterator
-           II = BB->begin(), IE = BB->end(); II != IE; ++II) {
+    for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE;
+         ++II) {
       if (AllocaInst *AI = dyn_cast<AllocaInst>(II)) {
         if (AI->isArrayAllocation()) {
           // SSP-Strong: Enable protectors for any call to alloca, regardless
@@ -247,34 +200,48 @@ bool StackProtector::RequiresStackProtector() {
             return true;
 
           if (const ConstantInt *CI =
-               dyn_cast<ConstantInt>(AI->getArraySize())) {
-            if (CI->getLimitedValue(SSPBufferSize) >= SSPBufferSize)
+                  dyn_cast<ConstantInt>(AI->getArraySize())) {
+            if (CI->getLimitedValue(SSPBufferSize) >= SSPBufferSize) {
               // A call to alloca with size >= SSPBufferSize requires
               // stack protectors.
-              return true;
+              Layout.insert(std::make_pair(AI, SSPLK_LargeArray));
+              NeedsProtector = true;
+            } else if (Strong) {
+              // Require protectors for all alloca calls in strong mode.
+              Layout.insert(std::make_pair(AI, SSPLK_SmallArray));
+              NeedsProtector = true;
+            }
           } else {
             // A call to alloca with a variable size requires protectors.
-            return true;
+            Layout.insert(std::make_pair(AI, SSPLK_LargeArray));
+            NeedsProtector = true;
           }
+          continue;
         }
 
-        if (ContainsProtectableArray(AI->getAllocatedType(), Strong))
-          return true;
+        bool IsLarge = false;
+        if (ContainsProtectableArray(AI->getAllocatedType(), IsLarge, Strong)) {
+          Layout.insert(std::make_pair(AI, IsLarge ? SSPLK_LargeArray
+                                                   : SSPLK_SmallArray));
+          NeedsProtector = true;
+          continue;
+        }
 
         if (Strong && HasAddressTaken(AI)) {
           ++NumAddrTaken;
-          return true;
+          Layout.insert(std::make_pair(AI, SSPLK_AddrOf));
+          NeedsProtector = true;
         }
       }
     }
   }
 
-  return false;
+  return NeedsProtector;
 }
 
 static bool InstructionWillNotHaveChain(const Instruction *I) {
   return !I->mayHaveSideEffects() && !I->mayReadFromMemory() &&
-    isSafeToSpeculativelyExecute(I);
+         isSafeToSpeculativelyExecute(I);
 }
 
 /// Identify if RI has a previous instruction in the "Tail Position" and return
@@ -294,7 +261,8 @@ static CallInst *FindPotentialTailCall(BasicBlock *BB, ReturnInst *RI,
   const unsigned MaxSearch = 4;
   bool NoInterposingChain = true;
 
-  for (BasicBlock::reverse_iterator I = llvm::next(BB->rbegin()), E = BB->rend();
+  for (BasicBlock::reverse_iterator I = llvm::next(BB->rbegin()),
+                                    E = BB->rend();
        I != E && SearchCounter < MaxSearch; ++I) {
     Instruction *Inst = &*I;
 
@@ -324,7 +292,8 @@ static CallInst *FindPotentialTailCall(BasicBlock *BB, ReturnInst *RI,
 
     // If we did not find a call see if we have an instruction that may create
     // an interposing chain.
-    NoInterposingChain = NoInterposingChain && InstructionWillNotHaveChain(Inst);
+    NoInterposingChain =
+        NoInterposingChain && InstructionWillNotHaveChain(Inst);
 
     // Increment max search.
     SearchCounter++;
@@ -351,30 +320,24 @@ static bool CreatePrologue(Function *F, Module *M, ReturnInst *RI,
   unsigned AddressSpace, Offset;
   if (TLI->getStackCookieLocation(AddressSpace, Offset)) {
     Constant *OffsetVal =
-      ConstantInt::get(Type::getInt32Ty(RI->getContext()), Offset);
+        ConstantInt::get(Type::getInt32Ty(RI->getContext()), Offset);
 
-    StackGuardVar = ConstantExpr::getIntToPtr(OffsetVal,
-                                              PointerType::get(PtrTy,
-                                                               AddressSpace));
+    StackGuardVar = ConstantExpr::getIntToPtr(
+        OffsetVal, PointerType::get(PtrTy, AddressSpace));
   } else if (Trip.getOS() == llvm::Triple::OpenBSD) {
     StackGuardVar = M->getOrInsertGlobal("__guard_local", PtrTy);
     cast<GlobalValue>(StackGuardVar)
-      ->setVisibility(GlobalValue::HiddenVisibility);
+        ->setVisibility(GlobalValue::HiddenVisibility);
   } else {
     SupportsSelectionDAGSP = true;
     StackGuardVar = M->getOrInsertGlobal("__stack_chk_guard", PtrTy);
   }
 
-  BasicBlock &Entry = F->getEntryBlock();
-  Instruction *InsPt = &Entry.front();
-
-  AI = new AllocaInst(PtrTy, "StackGuardSlot", InsPt);
-  LoadInst *LI = new LoadInst(StackGuardVar, "StackGuard", false, InsPt);
-
-  Value *Args[] = { LI, AI };
-  CallInst::
-    Create(Intrinsic::getDeclaration(M, Intrinsic::stackprotector),
-           Args, "", InsPt);
+  IRBuilder<> B(&F->getEntryBlock().front());
+  AI = B.CreateAlloca(PtrTy, 0, "StackGuardSlot");
+  LoadInst *LI = B.CreateLoad(StackGuardVar, "StackGuard");
+  B.CreateCall2(Intrinsic::getDeclaration(M, Intrinsic::stackprotector), LI,
+                AI);
 
   return SupportsSelectionDAGSP;
 }
@@ -388,11 +351,11 @@ static bool CreatePrologue(Function *F, Module *M, ReturnInst *RI,
 bool StackProtector::InsertStackProtectors() {
   bool HasPrologue = false;
   bool SupportsSelectionDAGSP =
-    EnableSelectionDAGSP && !TM->Options.EnableFastISel;
-  AllocaInst *AI = 0;           // Place on stack that stores the stack guard.
-  Value *StackGuardVar = 0;     // The stack guard variable.
+      EnableSelectionDAGSP && !TM->Options.EnableFastISel;
+  AllocaInst *AI = 0;       // Place on stack that stores the stack guard.
+  Value *StackGuardVar = 0; // The stack guard variable.
 
-  for (Function::iterator I = F->begin(), E = F->end(); I != E; ) {
+  for (Function::iterator I = F->begin(), E = F->end(); I != E;) {
     BasicBlock *BB = I++;
     ReturnInst *RI = dyn_cast<ReturnInst>(BB->getTerminator());
     if (!RI)
@@ -400,8 +363,8 @@ bool StackProtector::InsertStackProtectors() {
 
     if (!HasPrologue) {
       HasPrologue = true;
-      SupportsSelectionDAGSP &= CreatePrologue(F, M, RI, TLI, Trip, AI,
-                                               StackGuardVar);
+      SupportsSelectionDAGSP &=
+          CreatePrologue(F, M, RI, TLI, Trip, AI, StackGuardVar);
     }
 
     if (SupportsSelectionDAGSP) {
@@ -415,13 +378,12 @@ bool StackProtector::InsertStackProtectors() {
         // At this point we know that BB has a return statement so it *DOES*
         // have a terminator.
         assert(InsertionPt != 0 && "BB must have a terminator instruction at "
-               "this point.");
+                                   "this point.");
       }
 
       Function *Intrinsic =
-        Intrinsic::getDeclaration(M, Intrinsic::stackprotectorcheck);
-      Value *Args[] = { StackGuardVar };
-      CallInst::Create(Intrinsic, Args, "", InsertionPt);
+          Intrinsic::getDeclaration(M, Intrinsic::stackprotectorcheck);
+      CallInst::Create(Intrinsic, StackGuardVar, "", InsertionPt);
 
     } else {
       // If we do not support SelectionDAG based tail calls, generate IR level
@@ -471,10 +433,11 @@ bool StackProtector::InsertStackProtectors() {
       NewBB->moveAfter(BB);
 
       // Generate the stack protector instructions in the old basic block.
-      LoadInst *LI1 = new LoadInst(StackGuardVar, "", false, BB);
-      LoadInst *LI2 = new LoadInst(AI, "", true, BB);
-      ICmpInst *Cmp = new ICmpInst(*BB, CmpInst::ICMP_EQ, LI1, LI2, "");
-      BranchInst::Create(NewBB, FailBB, Cmp, BB);
+      IRBuilder<> B(BB);
+      LoadInst *LI1 = B.CreateLoad(StackGuardVar);
+      LoadInst *LI2 = B.CreateLoad(AI);
+      Value *Cmp = B.CreateICmpEQ(LI1, LI2);
+      B.CreateCondBr(Cmp, NewBB, FailBB);
     }
   }
 
@@ -491,29 +454,18 @@ bool StackProtector::InsertStackProtectors() {
 BasicBlock *StackProtector::CreateFailBB() {
   LLVMContext &Context = F->getContext();
   BasicBlock *FailBB = BasicBlock::Create(Context, "CallStackCheckFailBlk", F);
+  IRBuilder<> B(FailBB);
   if (Trip.getOS() == llvm::Triple::OpenBSD) {
     Constant *StackChkFail = M->getOrInsertFunction(
         "__stack_smash_handler", Type::getVoidTy(Context),
         Type::getInt8PtrTy(Context), NULL);
 
-    Constant *NameStr = ConstantDataArray::getString(Context, F->getName());
-    Constant *FuncName =
-        new GlobalVariable(*M, NameStr->getType(), true,
-                           GlobalVariable::PrivateLinkage, NameStr, "SSH");
-
-    SmallVector<Constant *, 2> IdxList;
-    IdxList.push_back(ConstantInt::get(Type::getInt8Ty(Context), 0));
-    IdxList.push_back(ConstantInt::get(Type::getInt8Ty(Context), 0));
-
-    SmallVector<Value *, 1> Args;
-    Args.push_back(ConstantExpr::getGetElementPtr(FuncName, IdxList));
-
-    CallInst::Create(StackChkFail, Args, "", FailBB);
+    B.CreateCall(StackChkFail, B.CreateGlobalStringPtr(F->getName(), "SSH"));
   } else {
     Constant *StackChkFail = M->getOrInsertFunction(
         "__stack_chk_fail", Type::getVoidTy(Context), NULL);
-    CallInst::Create(StackChkFail, "", FailBB);
+    B.CreateCall(StackChkFail);
   }
-  new UnreachableInst(Context, FailBB);
+  B.CreateUnreachable();
   return FailBB;
 }

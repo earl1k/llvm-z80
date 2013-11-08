@@ -17,6 +17,7 @@
 #include "llvm/Transforms/Utils/SimplifyLibCalls.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
@@ -116,6 +117,21 @@ static bool callHasFloatingPointArgument(const CallInst *CI) {
       return true;
   }
   return false;
+}
+
+/// \brief Check whether the overloaded unary floating point function
+/// corresponing to \a Ty is available.
+static bool hasUnaryFloatFn(const TargetLibraryInfo *TLI, Type *Ty,
+                            LibFunc::Func DoubleFn, LibFunc::Func FloatFn,
+                            LibFunc::Func LongDoubleFn) {
+  switch (Ty->getTypeID()) {
+  case Type::FloatTyID:
+    return TLI->has(FloatFn);
+  case Type::DoubleTyID:
+    return TLI->has(DoubleFn);
+  default:
+    return TLI->has(LongDoubleFn);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -774,7 +790,7 @@ struct StrPBrkOpt : public LibCallOptimization {
     // Constant folding.
     if (HasS1 && HasS2) {
       size_t I = S1.find_first_of(S2);
-      if (I == std::string::npos) // No match.
+      if (I == StringRef::npos) // No match.
         return Constant::getNullValue(CI->getType());
 
       return B.CreateGEP(CI->getArgOperand(0), B.getInt64(I), "strpbrk");
@@ -912,7 +928,7 @@ struct StrStrOpt : public LibCallOptimization {
 
     // If both strings are known, constant fold it.
     if (HasStr1 && HasStr2) {
-      std::string::size_type Offset = SearchStr.find(ToFindStr);
+      size_t Offset = SearchStr.find(ToFindStr);
 
       if (Offset == StringRef::npos) // strstr("foo", "bar") -> null
         return Constant::getNullValue(CI->getType());
@@ -1137,7 +1153,9 @@ struct PowOpt : public UnsafeFPLibCallOptimization {
       if (Op1C->isExactlyValue(1.0))
         return Op1C;
       // pow(2.0, x) -> exp2(x)
-      if (Op1C->isExactlyValue(2.0) && TLI->has(LibFunc::exp2))
+      if (Op1C->isExactlyValue(2.0) &&
+          hasUnaryFloatFn(TLI, Op1->getType(), LibFunc::exp2, LibFunc::exp2f,
+                          LibFunc::exp2l))
         return EmitUnaryFloatFnCall(Op2, "exp2", B, Callee->getAttributes());
     }
 
@@ -1148,7 +1166,10 @@ struct PowOpt : public UnsafeFPLibCallOptimization {
       return ConstantFP::get(CI->getType(), 1.0);
 
     if (Op2C->isExactlyValue(0.5) &&
-        TLI->has(LibFunc::sqrt) && TLI->has(LibFunc::fabs)) {
+        hasUnaryFloatFn(TLI, Op2->getType(), LibFunc::sqrt, LibFunc::sqrtf,
+                        LibFunc::sqrtl) &&
+        hasUnaryFloatFn(TLI, Op2->getType(), LibFunc::fabs, LibFunc::fabsf,
+                        LibFunc::fabsl)) {
       // Expand pow(x, 0.5) to (x == -infinity ? +infinity : fabs(sqrt(x))).
       // This is faster than calling pow, and still handles negative zero
       // and negative infinity correctly.
@@ -1181,7 +1202,7 @@ struct Exp2Opt : public UnsafeFPLibCallOptimization {
   virtual Value *callOptimizer(Function *Callee, CallInst *CI, IRBuilder<> &B) {
     Value *Ret = NULL;
     if (UnsafeFPShrink && Callee->getName() == "exp2" &&
-        TLI->has(LibFunc::exp2)) {
+        TLI->has(LibFunc::exp2f)) {
       UnaryDoubleFPOpt UnsafeUnaryDoubleFP(true);
       Ret = UnsafeUnaryDoubleFP.callOptimizer(Callee, CI, B);
     }
@@ -1230,6 +1251,155 @@ struct Exp2Opt : public UnsafeFPLibCallOptimization {
     }
     return Ret;
   }
+};
+
+struct SinCosPiOpt : public LibCallOptimization {
+  SinCosPiOpt() {}
+
+  virtual Value *callOptimizer(Function *Callee, CallInst *CI, IRBuilder<> &B) {
+    // Make sure the prototype is as expected, otherwise the rest of the
+    // function is probably invalid and likely to abort.
+    if (!isTrigLibCall(CI))
+      return 0;
+
+    Value *Arg = CI->getArgOperand(0);
+    SmallVector<CallInst *, 1> SinCalls;
+    SmallVector<CallInst *, 1> CosCalls;
+    SmallVector<CallInst *, 1> SinCosCalls;
+
+    bool IsFloat = Arg->getType()->isFloatTy();
+
+    // Look for all compatible sinpi, cospi and sincospi calls with the same
+    // argument. If there are enough (in some sense) we can make the
+    // substitution.
+    for (Value::use_iterator UI = Arg->use_begin(), UE = Arg->use_end();
+         UI != UE; ++UI)
+      classifyArgUse(*UI, CI->getParent(), IsFloat, SinCalls, CosCalls,
+                     SinCosCalls);
+
+    // It's only worthwhile if both sinpi and cospi are actually used.
+    if (SinCosCalls.empty() && (SinCalls.empty() || CosCalls.empty()))
+      return 0;
+
+    Value *Sin, *Cos, *SinCos;
+    insertSinCosCall(B, CI->getCalledFunction(), Arg, IsFloat, Sin, Cos,
+                     SinCos);
+
+    replaceTrigInsts(SinCalls, Sin);
+    replaceTrigInsts(CosCalls, Cos);
+    replaceTrigInsts(SinCosCalls, SinCos);
+
+    return 0;
+  }
+
+  bool isTrigLibCall(CallInst *CI) {
+    Function *Callee = CI->getCalledFunction();
+    FunctionType *FT = Callee->getFunctionType();
+
+    // We can only hope to do anything useful if we can ignore things like errno
+    // and floating-point exceptions.
+    bool AttributesSafe = CI->hasFnAttr(Attribute::NoUnwind) &&
+                          CI->hasFnAttr(Attribute::ReadNone);
+
+    // Other than that we need float(float) or double(double)
+    return AttributesSafe && FT->getNumParams() == 1 &&
+           FT->getReturnType() == FT->getParamType(0) &&
+           (FT->getParamType(0)->isFloatTy() ||
+            FT->getParamType(0)->isDoubleTy());
+  }
+
+  void classifyArgUse(Value *Val, BasicBlock *BB, bool IsFloat,
+                      SmallVectorImpl<CallInst *> &SinCalls,
+                      SmallVectorImpl<CallInst *> &CosCalls,
+                      SmallVectorImpl<CallInst *> &SinCosCalls) {
+    CallInst *CI = dyn_cast<CallInst>(Val);
+
+    if (!CI)
+      return;
+
+    Function *Callee = CI->getCalledFunction();
+    StringRef FuncName = Callee->getName();
+    LibFunc::Func Func;
+    if (!TLI->getLibFunc(FuncName, Func) || !TLI->has(Func) ||
+        !isTrigLibCall(CI))
+      return;
+
+    if (IsFloat) {
+      if (Func == LibFunc::sinpif)
+        SinCalls.push_back(CI);
+      else if (Func == LibFunc::cospif)
+        CosCalls.push_back(CI);
+      else if (Func == LibFunc::sincospi_stretf)
+        SinCosCalls.push_back(CI);
+    } else {
+      if (Func == LibFunc::sinpi)
+        SinCalls.push_back(CI);
+      else if (Func == LibFunc::cospi)
+        CosCalls.push_back(CI);
+      else if (Func == LibFunc::sincospi_stret)
+        SinCosCalls.push_back(CI);
+    }
+  }
+
+  void replaceTrigInsts(SmallVectorImpl<CallInst*> &Calls, Value *Res) {
+    for (SmallVectorImpl<CallInst*>::iterator I = Calls.begin(),
+           E = Calls.end();
+         I != E; ++I) {
+      LCS->replaceAllUsesWith(*I, Res);
+    }
+  }
+
+  void insertSinCosCall(IRBuilder<> &B, Function *OrigCallee, Value *Arg,
+                        bool UseFloat, Value *&Sin, Value *&Cos,
+                        Value *&SinCos) {
+    Type *ArgTy = Arg->getType();
+    Type *ResTy;
+    StringRef Name;
+
+    Triple T(OrigCallee->getParent()->getTargetTriple());
+    if (UseFloat) {
+      Name = "__sincospi_stretf";
+
+      assert(T.getArch() != Triple::x86 && "x86 messy and unsupported for now");
+      // x86_64 can't use {float, float} since that would be returned in both
+      // xmm0 and xmm1, which isn't what a real struct would do.
+      ResTy = T.getArch() == Triple::x86_64
+                  ? static_cast<Type *>(VectorType::get(ArgTy, 2))
+                  : static_cast<Type *>(StructType::get(ArgTy, ArgTy, NULL));
+    } else {
+      Name = "__sincospi_stret";
+      ResTy = StructType::get(ArgTy, ArgTy, NULL);
+    }
+
+    Module *M = OrigCallee->getParent();
+    Value *Callee = M->getOrInsertFunction(Name, OrigCallee->getAttributes(),
+                                           ResTy, ArgTy, NULL);
+
+    if (Instruction *ArgInst = dyn_cast<Instruction>(Arg)) {
+      // If the argument is an instruction, it must dominate all uses so put our
+      // sincos call there.
+      BasicBlock::iterator Loc = ArgInst;
+      B.SetInsertPoint(ArgInst->getParent(), ++Loc);
+    } else {
+      // Otherwise (e.g. for a constant) the beginning of the function is as
+      // good a place as any.
+      BasicBlock &EntryBB = B.GetInsertBlock()->getParent()->getEntryBlock();
+      B.SetInsertPoint(&EntryBB, EntryBB.begin());
+    }
+
+    SinCos = B.CreateCall(Callee, Arg, "sincospi");
+
+    if (SinCos->getType()->isStructTy()) {
+      Sin = B.CreateExtractValue(SinCos, 0, "sinpi");
+      Cos = B.CreateExtractValue(SinCos, 1, "cospi");
+    } else {
+      Sin = B.CreateExtractElement(SinCos, ConstantInt::get(B.getInt32Ty(), 0),
+                                   "sinpi");
+      Cos = B.CreateExtractElement(SinCos, ConstantInt::get(B.getInt32Ty(), 1),
+                                   "cospi");
+    }
+  }
+
 };
 
 //===----------------------------------------------------------------------===//
@@ -1364,7 +1534,7 @@ struct PrintFOpt : public LibCallOptimization {
 
     // printf("foo\n") --> puts("foo")
     if (FormatStr[FormatStr.size()-1] == '\n' &&
-        FormatStr.find('%') == std::string::npos) {  // no format characters.
+        FormatStr.find('%') == StringRef::npos) { // No format characters.
       // Create a string literal with no \n on it.  We expect the constant merge
       // pass to be run after this pass, to merge duplicate strings.
       FormatStr = FormatStr.drop_back();
@@ -1744,6 +1914,7 @@ static MemSetOpt MemSet;
 // Math library call optimizations.
 static UnaryDoubleFPOpt UnaryDoubleFP(false);
 static UnaryDoubleFPOpt UnsafeUnaryDoubleFP(true);
+static SinCosPiOpt SinCosPi;
 
   // Integer library call optimizations.
 static FFSOpt FFS;
@@ -1828,6 +1999,11 @@ LibCallOptimization *LibCallSimplifierImpl::lookupOptimization(CallInst *CI) {
       case LibFunc::cos:
       case LibFunc::cosl:
         return &Cos;
+      case LibFunc::sinpif:
+      case LibFunc::sinpi:
+      case LibFunc::cospif:
+      case LibFunc::cospi:
+        return &SinCosPi;
       case LibFunc::powf:
       case LibFunc::pow:
       case LibFunc::powl:

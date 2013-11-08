@@ -109,6 +109,25 @@ public:
 
   SDNode* Select(SDNode*);
 private:
+  /// Select NEON load intrinsics.  NumVecs should be 1, 2, 3 or 4.
+  SDNode *SelectVLD(SDNode *N, unsigned NumVecs, bool isUpdating,
+                    const uint16_t *Opcode);
+
+  /// Select NEON store intrinsics.  NumVecs should be 1, 2, 3 or 4.
+  SDNode *SelectVST(SDNode *N, unsigned NumVecs, bool isUpdating,
+                    const uint16_t *Opcodes);
+
+  // Form pairs of consecutive 64-bit/128-bit registers.
+  SDNode *createDPairNode(SDValue V0, SDValue V1);
+  SDNode *createQPairNode(SDValue V0, SDValue V1);
+
+  // Form sequences of 3 consecutive 64-bit/128-bit registers.
+  SDNode *createDTripleNode(SDValue V0, SDValue V1, SDValue V2);
+  SDNode *createQTripleNode(SDValue V0, SDValue V1, SDValue V2);
+
+  // Form sequences of 4 consecutive 64-bit/128-bit registers.
+  SDNode *createDQuadNode(SDValue V0, SDValue V1, SDValue V2, SDValue V3);
+  SDNode *createQQuadNode(SDValue V0, SDValue V1, SDValue V2, SDValue V3);
 };
 }
 
@@ -390,12 +409,332 @@ SDNode *AArch64DAGToDAGISel::SelectAtomic(SDNode *Node, unsigned Op8,
                               &Ops[0], Ops.size());
 }
 
+SDNode *AArch64DAGToDAGISel::createDPairNode(SDValue V0, SDValue V1) {
+  SDLoc dl(V0.getNode());
+  SDValue RegClass =
+      CurDAG->getTargetConstant(AArch64::DPairRegClassID, MVT::i32);
+  SDValue SubReg0 = CurDAG->getTargetConstant(AArch64::dsub_0, MVT::i32);
+  SDValue SubReg1 = CurDAG->getTargetConstant(AArch64::dsub_1, MVT::i32);
+  const SDValue Ops[] = { RegClass, V0, SubReg0, V1, SubReg1 };
+  return CurDAG->getMachineNode(TargetOpcode::REG_SEQUENCE, dl, MVT::v2i64,
+                                Ops);
+}
+
+SDNode *AArch64DAGToDAGISel::createQPairNode(SDValue V0, SDValue V1) {
+  SDLoc dl(V0.getNode());
+  SDValue RegClass =
+      CurDAG->getTargetConstant(AArch64::QPairRegClassID, MVT::i32);
+  SDValue SubReg0 = CurDAG->getTargetConstant(AArch64::qsub_0, MVT::i32);
+  SDValue SubReg1 = CurDAG->getTargetConstant(AArch64::qsub_1, MVT::i32);
+  const SDValue Ops[] = { RegClass, V0, SubReg0, V1, SubReg1 };
+  return CurDAG->getMachineNode(TargetOpcode::REG_SEQUENCE, dl, MVT::v4i64,
+                                Ops);
+}
+
+SDNode *AArch64DAGToDAGISel::createDTripleNode(SDValue V0, SDValue V1,
+                                               SDValue V2) {
+  SDLoc dl(V0.getNode());
+  SDValue RegClass =
+      CurDAG->getTargetConstant(AArch64::DTripleRegClassID, MVT::i32);
+  SDValue SubReg0 = CurDAG->getTargetConstant(AArch64::dsub_0, MVT::i32);
+  SDValue SubReg1 = CurDAG->getTargetConstant(AArch64::dsub_1, MVT::i32);
+  SDValue SubReg2 = CurDAG->getTargetConstant(AArch64::dsub_2, MVT::i32);
+  const SDValue Ops[] = { RegClass, V0, SubReg0, V1, SubReg1, V2, SubReg2 };
+  return CurDAG->getMachineNode(TargetOpcode::REG_SEQUENCE, dl, MVT::Untyped,
+                                Ops);
+}
+
+SDNode *AArch64DAGToDAGISel::createQTripleNode(SDValue V0, SDValue V1,
+                                               SDValue V2) {
+  SDLoc dl(V0.getNode());
+  SDValue RegClass =
+      CurDAG->getTargetConstant(AArch64::QTripleRegClassID, MVT::i32);
+  SDValue SubReg0 = CurDAG->getTargetConstant(AArch64::qsub_0, MVT::i32);
+  SDValue SubReg1 = CurDAG->getTargetConstant(AArch64::qsub_1, MVT::i32);
+  SDValue SubReg2 = CurDAG->getTargetConstant(AArch64::qsub_2, MVT::i32);
+  const SDValue Ops[] = { RegClass, V0, SubReg0, V1, SubReg1, V2, SubReg2 };
+  return CurDAG->getMachineNode(TargetOpcode::REG_SEQUENCE, dl, MVT::Untyped,
+                                Ops);
+}
+
+SDNode *AArch64DAGToDAGISel::createDQuadNode(SDValue V0, SDValue V1, SDValue V2,
+                                             SDValue V3) {
+  SDLoc dl(V0.getNode());
+  SDValue RegClass =
+      CurDAG->getTargetConstant(AArch64::DQuadRegClassID, MVT::i32);
+  SDValue SubReg0 = CurDAG->getTargetConstant(AArch64::dsub_0, MVT::i32);
+  SDValue SubReg1 = CurDAG->getTargetConstant(AArch64::dsub_1, MVT::i32);
+  SDValue SubReg2 = CurDAG->getTargetConstant(AArch64::dsub_2, MVT::i32);
+  SDValue SubReg3 = CurDAG->getTargetConstant(AArch64::dsub_3, MVT::i32);
+  const SDValue Ops[] = { RegClass, V0, SubReg0, V1, SubReg1, V2, SubReg2,  V3,
+                          SubReg3 };
+  return CurDAG->getMachineNode(TargetOpcode::REG_SEQUENCE, dl, MVT::v4i64,
+                                Ops);
+}
+
+SDNode *AArch64DAGToDAGISel::createQQuadNode(SDValue V0, SDValue V1, SDValue V2,
+                                             SDValue V3) {
+  SDLoc dl(V0.getNode());
+  SDValue RegClass =
+      CurDAG->getTargetConstant(AArch64::QQuadRegClassID, MVT::i32);
+  SDValue SubReg0 = CurDAG->getTargetConstant(AArch64::qsub_0, MVT::i32);
+  SDValue SubReg1 = CurDAG->getTargetConstant(AArch64::qsub_1, MVT::i32);
+  SDValue SubReg2 = CurDAG->getTargetConstant(AArch64::qsub_2, MVT::i32);
+  SDValue SubReg3 = CurDAG->getTargetConstant(AArch64::qsub_3, MVT::i32);
+  const SDValue Ops[] = { RegClass, V0, SubReg0, V1, SubReg1, V2, SubReg2,  V3,
+                          SubReg3 };
+  return CurDAG->getMachineNode(TargetOpcode::REG_SEQUENCE, dl, MVT::v8i64,
+                                Ops);
+}
+
+// Get the register stride update opcode of a VLD/VST instruction that
+// is otherwise equivalent to the given fixed stride updating instruction.
+static unsigned getVLDSTRegisterUpdateOpcode(unsigned Opc) {
+  switch (Opc) {
+  default: break;
+  case AArch64::LD1WB_8B_fixed: return AArch64::LD1WB_8B_register;
+  case AArch64::LD1WB_4H_fixed: return AArch64::LD1WB_4H_register;
+  case AArch64::LD1WB_2S_fixed: return AArch64::LD1WB_2S_register;
+  case AArch64::LD1WB_1D_fixed: return AArch64::LD1WB_1D_register;
+  case AArch64::LD1WB_16B_fixed: return AArch64::LD1WB_16B_register;
+  case AArch64::LD1WB_8H_fixed: return AArch64::LD1WB_8H_register;
+  case AArch64::LD1WB_4S_fixed: return AArch64::LD1WB_4S_register;
+  case AArch64::LD1WB_2D_fixed: return AArch64::LD1WB_2D_register;
+
+  case AArch64::LD2WB_8B_fixed: return AArch64::LD2WB_8B_register;
+  case AArch64::LD2WB_4H_fixed: return AArch64::LD2WB_4H_register;
+  case AArch64::LD2WB_2S_fixed: return AArch64::LD2WB_2S_register;
+  case AArch64::LD1WB2V_1D_fixed: return AArch64::LD1WB2V_1D_register;
+  case AArch64::LD2WB_16B_fixed: return AArch64::LD2WB_16B_register;
+  case AArch64::LD2WB_8H_fixed: return AArch64::LD2WB_8H_register;
+  case AArch64::LD2WB_4S_fixed: return AArch64::LD2WB_4S_register;
+  case AArch64::LD2WB_2D_fixed: return AArch64::LD2WB_2D_register;
+
+  case AArch64::LD3WB_8B_fixed: return AArch64::LD3WB_8B_register;
+  case AArch64::LD3WB_4H_fixed: return AArch64::LD3WB_4H_register;
+  case AArch64::LD3WB_2S_fixed: return AArch64::LD3WB_2S_register;
+  case AArch64::LD1WB3V_1D_fixed: return AArch64::LD1WB3V_1D_register;
+  case AArch64::LD3WB_16B_fixed: return AArch64::LD3WB_16B_register;
+  case AArch64::LD3WB_8H_fixed: return AArch64::LD3WB_8H_register;
+  case AArch64::LD3WB_4S_fixed: return AArch64::LD3WB_4S_register;
+  case AArch64::LD3WB_2D_fixed: return AArch64::LD3WB_2D_register;
+
+  case AArch64::LD4WB_8B_fixed: return AArch64::LD4WB_8B_register;
+  case AArch64::LD4WB_4H_fixed: return AArch64::LD4WB_4H_register;
+  case AArch64::LD4WB_2S_fixed: return AArch64::LD4WB_2S_register;
+  case AArch64::LD1WB4V_1D_fixed: return AArch64::LD1WB4V_1D_register;
+  case AArch64::LD4WB_16B_fixed: return AArch64::LD4WB_16B_register;
+  case AArch64::LD4WB_8H_fixed: return AArch64::LD4WB_8H_register;
+  case AArch64::LD4WB_4S_fixed: return AArch64::LD4WB_4S_register;
+  case AArch64::LD4WB_2D_fixed: return AArch64::LD4WB_2D_register;
+
+  case AArch64::ST1WB_8B_fixed: return AArch64::ST1WB_8B_register;
+  case AArch64::ST1WB_4H_fixed: return AArch64::ST1WB_4H_register;
+  case AArch64::ST1WB_2S_fixed: return AArch64::ST1WB_2S_register;
+  case AArch64::ST1WB_1D_fixed: return AArch64::ST1WB_1D_register;
+  case AArch64::ST1WB_16B_fixed: return AArch64::ST1WB_16B_register;
+  case AArch64::ST1WB_8H_fixed: return AArch64::ST1WB_8H_register;
+  case AArch64::ST1WB_4S_fixed: return AArch64::ST1WB_4S_register;
+  case AArch64::ST1WB_2D_fixed: return AArch64::ST1WB_2D_register;
+
+  case AArch64::ST2WB_8B_fixed: return AArch64::ST2WB_8B_register;
+  case AArch64::ST2WB_4H_fixed: return AArch64::ST2WB_4H_register;
+  case AArch64::ST2WB_2S_fixed: return AArch64::ST2WB_2S_register;
+  case AArch64::ST1WB2V_1D_fixed: return AArch64::ST1WB2V_1D_register;
+  case AArch64::ST2WB_16B_fixed: return AArch64::ST2WB_16B_register;
+  case AArch64::ST2WB_8H_fixed: return AArch64::ST2WB_8H_register;
+  case AArch64::ST2WB_4S_fixed: return AArch64::ST2WB_4S_register;
+  case AArch64::ST2WB_2D_fixed: return AArch64::ST2WB_2D_register;
+
+  case AArch64::ST3WB_8B_fixed: return AArch64::ST3WB_8B_register;
+  case AArch64::ST3WB_4H_fixed: return AArch64::ST3WB_4H_register;
+  case AArch64::ST3WB_2S_fixed: return AArch64::ST3WB_2S_register;
+  case AArch64::ST1WB3V_1D_fixed: return AArch64::ST1WB3V_1D_register;
+  case AArch64::ST3WB_16B_fixed: return AArch64::ST3WB_16B_register;
+  case AArch64::ST3WB_8H_fixed: return AArch64::ST3WB_8H_register;
+  case AArch64::ST3WB_4S_fixed: return AArch64::ST3WB_4S_register;
+  case AArch64::ST3WB_2D_fixed: return AArch64::ST3WB_2D_register;
+
+  case AArch64::ST4WB_8B_fixed: return AArch64::ST4WB_8B_register;
+  case AArch64::ST4WB_4H_fixed: return AArch64::ST4WB_4H_register;
+  case AArch64::ST4WB_2S_fixed: return AArch64::ST4WB_2S_register;
+  case AArch64::ST1WB4V_1D_fixed: return AArch64::ST1WB4V_1D_register;
+  case AArch64::ST4WB_16B_fixed: return AArch64::ST4WB_16B_register;
+  case AArch64::ST4WB_8H_fixed: return AArch64::ST4WB_8H_register;
+  case AArch64::ST4WB_4S_fixed: return AArch64::ST4WB_4S_register;
+  case AArch64::ST4WB_2D_fixed: return AArch64::ST4WB_2D_register;
+  }
+  return Opc; // If not one we handle, return it unchanged.
+}
+
+SDNode *AArch64DAGToDAGISel::SelectVLD(SDNode *N, unsigned NumVecs,
+                                       bool isUpdating,
+                                       const uint16_t *Opcodes) {
+  assert(NumVecs >= 1 && NumVecs <= 4 && "VLD NumVecs out-of-range");
+
+  EVT VT = N->getValueType(0);
+  unsigned OpcodeIndex;
+  switch (VT.getSimpleVT().SimpleTy) {
+  default: llvm_unreachable("unhandled vector load type");
+  case MVT::v8i8:  OpcodeIndex = 0; break;
+  case MVT::v4i16: OpcodeIndex = 1; break;
+  case MVT::v2f32:
+  case MVT::v2i32: OpcodeIndex = 2; break;
+  case MVT::v1f64:
+  case MVT::v1i64: OpcodeIndex = 3; break;
+  case MVT::v16i8: OpcodeIndex = 4; break;
+  case MVT::v8f16:
+  case MVT::v8i16: OpcodeIndex = 5; break;
+  case MVT::v4f32:
+  case MVT::v4i32: OpcodeIndex = 6; break;
+  case MVT::v2f64:
+  case MVT::v2i64: OpcodeIndex = 7; break;
+  }
+  unsigned Opc = Opcodes[OpcodeIndex];
+
+  SmallVector<SDValue, 2> Ops;
+  unsigned AddrOpIdx = isUpdating ? 1 : 2;
+  Ops.push_back(N->getOperand(AddrOpIdx)); // Push back the Memory Address
+
+  if (isUpdating) {
+    SDValue Inc = N->getOperand(AddrOpIdx + 1);
+    if (!isa<ConstantSDNode>(Inc.getNode())) // Increment in Register
+      Opc = getVLDSTRegisterUpdateOpcode(Opc);
+    Ops.push_back(Inc);
+  }
+
+  Ops.push_back(N->getOperand(0)); // Push back the Chain
+
+  std::vector<EVT> ResTys;
+  bool is64BitVector = VT.is64BitVector();
+
+  if (NumVecs == 1)
+    ResTys.push_back(VT);
+  else if (NumVecs == 3)
+    ResTys.push_back(MVT::Untyped);
+  else {
+    EVT ResTy = EVT::getVectorVT(*CurDAG->getContext(), MVT::i64,
+                                 is64BitVector ? NumVecs : NumVecs * 2);
+    ResTys.push_back(ResTy);
+  }
+
+  if (isUpdating)
+    ResTys.push_back(MVT::i64); // Type of the updated register
+  ResTys.push_back(MVT::Other); // Type of the Chain
+  SDLoc dl(N);
+  SDNode *VLd = CurDAG->getMachineNode(Opc, dl, ResTys, Ops);
+
+  // Transfer memoperands.
+  MachineSDNode::mmo_iterator MemOp = MF->allocateMemRefsArray(1);
+  MemOp[0] = cast<MemIntrinsicSDNode>(N)->getMemOperand();
+  cast<MachineSDNode>(VLd)->setMemRefs(MemOp, MemOp + 1);
+
+  if (NumVecs == 1)
+    return VLd;
+
+  // If NumVecs > 1, the return result is a super register containing 2-4
+  // consecutive vector registers.
+  SDValue SuperReg = SDValue(VLd, 0);
+
+  unsigned Sub0 = is64BitVector ? AArch64::dsub_0 : AArch64::qsub_0;
+  for (unsigned Vec = 0; Vec < NumVecs; ++Vec)
+    ReplaceUses(SDValue(N, Vec),
+                CurDAG->getTargetExtractSubreg(Sub0 + Vec, dl, VT, SuperReg));
+  // Update users of the Chain
+  ReplaceUses(SDValue(N, NumVecs), SDValue(VLd, 1));
+  if (isUpdating)
+    ReplaceUses(SDValue(N, NumVecs + 1), SDValue(VLd, 2));
+
+  return NULL;
+}
+
+SDNode *AArch64DAGToDAGISel::SelectVST(SDNode *N, unsigned NumVecs,
+                                       bool isUpdating,
+                                       const uint16_t *Opcodes) {
+  assert(NumVecs >= 1 && NumVecs <= 4 && "VST NumVecs out-of-range");
+  SDLoc dl(N);
+
+  MachineSDNode::mmo_iterator MemOp = MF->allocateMemRefsArray(1);
+  MemOp[0] = cast<MemIntrinsicSDNode>(N)->getMemOperand();
+
+  unsigned AddrOpIdx = isUpdating ? 1 : 2;
+  unsigned Vec0Idx = 3; // AddrOpIdx + (isUpdating ? 2 : 1)
+  EVT VT = N->getOperand(Vec0Idx).getValueType();
+  unsigned OpcodeIndex;
+  switch (VT.getSimpleVT().SimpleTy) {
+  default: llvm_unreachable("unhandled vector store type");
+  case MVT::v8i8:  OpcodeIndex = 0; break;
+  case MVT::v4i16: OpcodeIndex = 1; break;
+  case MVT::v2f32:
+  case MVT::v2i32: OpcodeIndex = 2; break;
+  case MVT::v1f64:
+  case MVT::v1i64: OpcodeIndex = 3; break;
+  case MVT::v16i8: OpcodeIndex = 4; break;
+  case MVT::v8f16:
+  case MVT::v8i16: OpcodeIndex = 5; break;
+  case MVT::v4f32:
+  case MVT::v4i32: OpcodeIndex = 6; break;
+  case MVT::v2f64:
+  case MVT::v2i64: OpcodeIndex = 7; break;
+  }
+  unsigned Opc = Opcodes[OpcodeIndex];
+
+  std::vector<EVT> ResTys;
+  if (isUpdating)
+    ResTys.push_back(MVT::i64);
+  ResTys.push_back(MVT::Other); // Type for the Chain
+
+  SmallVector<SDValue, 6> Ops;
+  Ops.push_back(N->getOperand(AddrOpIdx)); // Push back the Memory Address
+
+  if (isUpdating) {
+    SDValue Inc = N->getOperand(AddrOpIdx + 1);
+    if (!isa<ConstantSDNode>(Inc.getNode())) // Increment in Register
+      Opc = getVLDSTRegisterUpdateOpcode(Opc);
+    Ops.push_back(Inc);
+  }
+  bool is64BitVector = VT.is64BitVector();
+
+  SDValue V0 = N->getOperand(Vec0Idx + 0);
+  SDValue SrcReg;
+  if (NumVecs == 1)
+    SrcReg = V0;
+  else {
+    SDValue V1 = N->getOperand(Vec0Idx + 1);
+    if (NumVecs == 2)
+      SrcReg = is64BitVector ? SDValue(createDPairNode(V0, V1), 0)
+                             : SDValue(createQPairNode(V0, V1), 0);
+    else {
+      SDValue V2 = N->getOperand(Vec0Idx + 2);
+      if (NumVecs == 3)
+        SrcReg = is64BitVector ? SDValue(createDTripleNode(V0, V1, V2), 0)
+                               : SDValue(createQTripleNode(V0, V1, V2), 0);
+      else {
+        SDValue V3 = N->getOperand(Vec0Idx + 3);
+        SrcReg = is64BitVector ? SDValue(createDQuadNode(V0, V1, V2, V3), 0)
+                               : SDValue(createQQuadNode(V0, V1, V2, V3), 0);
+      }
+    }
+  }
+  Ops.push_back(SrcReg);
+
+  // Push back the Chain
+  Ops.push_back(N->getOperand(0));
+
+  // Transfer memoperands.
+  SDNode *VSt = CurDAG->getMachineNode(Opc, dl, ResTys, Ops);
+  cast<MachineSDNode>(VSt)->setMemRefs(MemOp, MemOp + 1);
+
+  return VSt;
+}
+
 SDNode *AArch64DAGToDAGISel::Select(SDNode *Node) {
   // Dump information about the Node being selected
   DEBUG(dbgs() << "Selecting: "; Node->dump(CurDAG); dbgs() << "\n");
 
   if (Node->isMachineOpcode()) {
     DEBUG(dbgs() << "== "; Node->dump(CurDAG); dbgs() << "\n");
+    Node->setNodeId(-1);
     return NULL;
   }
 
@@ -533,6 +872,144 @@ SDNode *AArch64DAGToDAGISel::Select(SDNode *Node) {
     // We want to continue selection at this point since the litpool access
     // generated used generic nodes for simplicity.
     Node = ResNode;
+    break;
+  }
+  case AArch64ISD::NEON_LD1_UPD: {
+    static const uint16_t Opcodes[] = {
+      AArch64::LD1WB_8B_fixed,  AArch64::LD1WB_4H_fixed,
+      AArch64::LD1WB_2S_fixed,  AArch64::LD1WB_1D_fixed,
+      AArch64::LD1WB_16B_fixed, AArch64::LD1WB_8H_fixed,
+      AArch64::LD1WB_4S_fixed,  AArch64::LD1WB_2D_fixed
+    };
+    return SelectVLD(Node, 1, true, Opcodes);
+  }
+  case AArch64ISD::NEON_LD2_UPD: {
+    static const uint16_t Opcodes[] = {
+      AArch64::LD2WB_8B_fixed,  AArch64::LD2WB_4H_fixed,
+      AArch64::LD2WB_2S_fixed,  AArch64::LD1WB2V_1D_fixed,
+      AArch64::LD2WB_16B_fixed, AArch64::LD2WB_8H_fixed,
+      AArch64::LD2WB_4S_fixed,  AArch64::LD2WB_2D_fixed
+    };
+    return SelectVLD(Node, 2, true, Opcodes);
+  }
+  case AArch64ISD::NEON_LD3_UPD: {
+    static const uint16_t Opcodes[] = {
+      AArch64::LD3WB_8B_fixed,  AArch64::LD3WB_4H_fixed,
+      AArch64::LD3WB_2S_fixed,  AArch64::LD1WB3V_1D_fixed,
+      AArch64::LD3WB_16B_fixed, AArch64::LD3WB_8H_fixed,
+      AArch64::LD3WB_4S_fixed,  AArch64::LD3WB_2D_fixed
+    };
+    return SelectVLD(Node, 3, true, Opcodes);
+  }
+  case AArch64ISD::NEON_LD4_UPD: {
+    static const uint16_t Opcodes[] = {
+      AArch64::LD4WB_8B_fixed,  AArch64::LD4WB_4H_fixed,
+      AArch64::LD4WB_2S_fixed,  AArch64::LD1WB4V_1D_fixed,
+      AArch64::LD4WB_16B_fixed, AArch64::LD4WB_8H_fixed,
+      AArch64::LD4WB_4S_fixed,  AArch64::LD4WB_2D_fixed
+    };
+    return SelectVLD(Node, 4, true, Opcodes);
+  }
+  case AArch64ISD::NEON_ST1_UPD: {
+    static const uint16_t Opcodes[] = {
+      AArch64::ST1WB_8B_fixed,  AArch64::ST1WB_4H_fixed,
+      AArch64::ST1WB_2S_fixed,  AArch64::ST1WB_1D_fixed,
+      AArch64::ST1WB_16B_fixed, AArch64::ST1WB_8H_fixed,
+      AArch64::ST1WB_4S_fixed,  AArch64::ST1WB_2D_fixed
+    };
+    return SelectVST(Node, 1, true, Opcodes);
+  }
+  case AArch64ISD::NEON_ST2_UPD: {
+    static const uint16_t Opcodes[] = {
+      AArch64::ST2WB_8B_fixed,  AArch64::ST2WB_4H_fixed,
+      AArch64::ST2WB_2S_fixed,  AArch64::ST1WB2V_1D_fixed,
+      AArch64::ST2WB_16B_fixed, AArch64::ST2WB_8H_fixed,
+      AArch64::ST2WB_4S_fixed,  AArch64::ST2WB_2D_fixed
+    };
+    return SelectVST(Node, 2, true, Opcodes);
+  }
+  case AArch64ISD::NEON_ST3_UPD: {
+    static const uint16_t Opcodes[] = {
+      AArch64::ST3WB_8B_fixed,  AArch64::ST3WB_4H_fixed,
+      AArch64::ST3WB_2S_fixed,  AArch64::ST1WB3V_1D_fixed,
+      AArch64::ST3WB_16B_fixed, AArch64::ST3WB_8H_fixed,
+      AArch64::ST3WB_4S_fixed,  AArch64::ST3WB_2D_fixed
+    };
+    return SelectVST(Node, 3, true, Opcodes);
+  }
+  case AArch64ISD::NEON_ST4_UPD: {
+    static const uint16_t Opcodes[] = {
+      AArch64::ST4WB_8B_fixed,  AArch64::ST4WB_4H_fixed,
+      AArch64::ST4WB_2S_fixed,  AArch64::ST1WB4V_1D_fixed,
+      AArch64::ST4WB_16B_fixed, AArch64::ST4WB_8H_fixed,
+      AArch64::ST4WB_4S_fixed,  AArch64::ST4WB_2D_fixed
+    };
+    return SelectVST(Node, 4, true, Opcodes);
+  }
+  case ISD::INTRINSIC_VOID:
+  case ISD::INTRINSIC_W_CHAIN: {
+    unsigned IntNo = cast<ConstantSDNode>(Node->getOperand(1))->getZExtValue();
+    switch (IntNo) {
+    default:
+      break;
+
+    case Intrinsic::arm_neon_vld1: {
+      static const uint16_t Opcodes[] = { AArch64::LD1_8B,  AArch64::LD1_4H,
+                                          AArch64::LD1_2S,  AArch64::LD1_1D,
+                                          AArch64::LD1_16B, AArch64::LD1_8H,
+                                          AArch64::LD1_4S,  AArch64::LD1_2D };
+      return SelectVLD(Node, 1, false, Opcodes);
+    }
+    case Intrinsic::arm_neon_vld2: {
+      static const uint16_t Opcodes[] = { AArch64::LD2_8B,  AArch64::LD2_4H,
+                                          AArch64::LD2_2S,  AArch64::LD1_2V_1D,
+                                          AArch64::LD2_16B, AArch64::LD2_8H,
+                                          AArch64::LD2_4S,  AArch64::LD2_2D };
+      return SelectVLD(Node, 2, false, Opcodes);
+    }
+    case Intrinsic::arm_neon_vld3: {
+      static const uint16_t Opcodes[] = { AArch64::LD3_8B,  AArch64::LD3_4H,
+                                          AArch64::LD3_2S,  AArch64::LD1_3V_1D,
+                                          AArch64::LD3_16B, AArch64::LD3_8H,
+                                          AArch64::LD3_4S,  AArch64::LD3_2D };
+      return SelectVLD(Node, 3, false, Opcodes);
+    }
+    case Intrinsic::arm_neon_vld4: {
+      static const uint16_t Opcodes[] = { AArch64::LD4_8B,  AArch64::LD4_4H,
+                                          AArch64::LD4_2S,  AArch64::LD1_4V_1D,
+                                          AArch64::LD4_16B, AArch64::LD4_8H,
+                                          AArch64::LD4_4S,  AArch64::LD4_2D };
+      return SelectVLD(Node, 4, false, Opcodes);
+    }
+    case Intrinsic::arm_neon_vst1: {
+      static const uint16_t Opcodes[] = { AArch64::ST1_8B,  AArch64::ST1_4H,
+                                          AArch64::ST1_2S,  AArch64::ST1_1D,
+                                          AArch64::ST1_16B, AArch64::ST1_8H,
+                                          AArch64::ST1_4S,  AArch64::ST1_2D };
+      return SelectVST(Node, 1, false, Opcodes);
+    }
+    case Intrinsic::arm_neon_vst2: {
+      static const uint16_t Opcodes[] = { AArch64::ST2_8B,  AArch64::ST2_4H,
+                                          AArch64::ST2_2S,  AArch64::ST1_2V_1D,
+                                          AArch64::ST2_16B, AArch64::ST2_8H,
+                                          AArch64::ST2_4S,  AArch64::ST2_2D };
+      return SelectVST(Node, 2, false, Opcodes);
+    }
+    case Intrinsic::arm_neon_vst3: {
+      static const uint16_t Opcodes[] = { AArch64::ST3_8B,  AArch64::ST3_4H,
+                                          AArch64::ST3_2S,  AArch64::ST1_3V_1D,
+                                          AArch64::ST3_16B, AArch64::ST3_8H,
+                                          AArch64::ST3_4S,  AArch64::ST3_2D };
+      return SelectVST(Node, 3, false, Opcodes);
+    }
+    case Intrinsic::arm_neon_vst4: {
+      static const uint16_t Opcodes[] = { AArch64::ST4_8B,  AArch64::ST4_4H,
+                                          AArch64::ST4_2S,  AArch64::ST1_4V_1D,
+                                          AArch64::ST4_16B, AArch64::ST4_8H,
+                                          AArch64::ST4_4S,  AArch64::ST4_2D };
+      return SelectVST(Node, 4, false, Opcodes);
+    }
+    }
     break;
   }
   default:

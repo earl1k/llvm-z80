@@ -368,12 +368,16 @@ let Predicates = [IsFP64bit, HasStdEnc], DecoderNamespace = "Mips64" in {
 }
 
 let Predicates = [NotFP64bit, HasStdEnc] in {
-  let isPseudo = 1, isCodeGenOnly = 1 in {
-    def PseudoLDC1 : LW_FT<"", AFGR64Opnd, IIFLoad, load>;
-    def PseudoSDC1 : SW_FT<"", AFGR64Opnd, IIFStore, store>;
-  }
-  def LDC1 : LW_FT<"ldc1", AFGR64Opnd, IIFLoad>, LW_FM<0x35>;
-  def SDC1 : SW_FT<"sdc1", AFGR64Opnd, IIFStore>, LW_FM<0x3d>;
+  def LDC1 : LW_FT<"ldc1", AFGR64Opnd, IIFLoad, load>, LW_FM<0x35>;
+  def SDC1 : SW_FT<"sdc1", AFGR64Opnd, IIFStore, store>, LW_FM<0x3d>;
+}
+
+/// Cop2 Memory Instructions
+let Predicates = [HasStdEnc] in {
+  def LWC2 : LW_FT<"lwc2", COP2Opnd, NoItinerary, load>, LW_FM<0x32>;
+  def SWC2 : SW_FT<"swc2", COP2Opnd, NoItinerary, store>, LW_FM<0x3a>;
+  def LDC2 : LW_FT<"ldc2", COP2Opnd, NoItinerary, load>, LW_FM<0x36>;
+  def SDC2 : SW_FT<"sdc2", COP2Opnd, NoItinerary, store>, LW_FM<0x3e>;
 }
 
 // Indexed loads and stores.
@@ -595,7 +599,7 @@ let AddedComplexity = 40 in {
   }
 
   let Predicates = [NotFP64bit, HasStdEnc] in {
-    def : LoadRegImmPat<PseudoLDC1, f64, load>;
-    def : StoreRegImmPat<PseudoSDC1, f64>;
+    def : LoadRegImmPat<LDC1, f64, load>;
+    def : StoreRegImmPat<SDC1, f64>;
   }
 }

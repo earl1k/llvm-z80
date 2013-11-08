@@ -45,23 +45,73 @@ class TestingProgressDisplay(object):
         if self.progressBar:
             self.progressBar.clear()
 
-        print('%s: %s (%d of %d)' % (test.result.code.name, test.getFullName(),
+        # Show the test result line.
+        test_name = test.getFullName()
+        print('%s: %s (%d of %d)' % (test.result.code.name, test_name,
                                      self.completed, self.numTests))
 
+        # Show the test failure output, if requested.
         if test.result.code.isFailure and self.opts.showOutput:
             print("%s TEST '%s' FAILED %s" % ('*'*20, test.getFullName(),
                                               '*'*20))
             print(test.result.output)
             print("*" * 20)
 
+        # Report test metrics, if present.
+        if test.result.metrics:
+            print("%s TEST '%s' RESULTS %s" % ('*'*10, test.getFullName(),
+                                               '*'*10))
+            items = sorted(test.result.metrics.items())
+            for metric_name, value in items:
+                print('%s: %s ' % (metric_name, value.format()))
+            print("*" * 10)
+
+        # Ensure the output is flushed.
         sys.stdout.flush()
 
+def write_test_results(run, lit_config, testing_time, output_path):
+    try:
+        import json
+    except ImportError:
+        lit_config.fatal('test output unsupported with Python 2.5')
+
+    # Construct the data we will write.
+    data = {}
+    # Encode the current lit version as a schema version.
+    data['__version__'] = lit.__versioninfo__
+    data['elapsed'] = testing_time
+    # FIXME: Record some information on the lit configuration used?
+    # FIXME: Record information from the individual test suites?
+
+    # Encode the tests.
+    data['tests'] = tests_data = []
+    for test in run.tests:
+        test_data = {
+            'name' : test.getFullName(),
+            'code' : test.result.code.name,
+            'output' : test.result.output,
+            'elapsed' : test.result.elapsed }
+
+        # Add test metrics, if present.
+        if test.result.metrics:
+            test_data['metrics'] = metrics_data = {}
+            for key, value in test.result.metrics.items():
+                metrics_data[key] = value.todata()
+
+        tests_data.append(test_data)
+
+    # Write the output.
+    f = open(output_path, 'w')
+    try:
+        json.dump(data, f, indent=2, sort_keys=True)
+        f.write('\n')
+    finally:
+        f.close()
+
 def main(builtinParameters = {}):
-    # Bump the GIL check interval, its more important to get any one thread to a
-    # blocking operation (hopefully exec) than to try and unblock other threads.
-    #
-    # FIXME: This is a hack.
-    sys.setcheckinterval(1000)
+    # Use processes by default on Unix platforms.
+    isWindows = platform.system() == 'Windows'
+    useProcessesIsDefault = not isWindows
 
     global options
     from optparse import OptionParser, OptionGroup
@@ -90,6 +140,9 @@ def main(builtinParameters = {}):
     group.add_option("-v", "--verbose", dest="showOutput",
                      help="Show all test output",
                      action="store_true", default=False)
+    group.add_option("-o", "--output", dest="output_path",
+                     help="Write test results to the provided path",
+                     action="store", type=str, metavar="PATH")
     group.add_option("", "--no-progress-bar", dest="useProgressBar",
                      help="Do not use curses based progress bar",
                      action="store_false", default=True)
@@ -144,10 +197,10 @@ def main(builtinParameters = {}):
                       action="store_true", default=False)
     group.add_option("", "--use-processes", dest="useProcesses",
                       help="Run tests in parallel with processes (not threads)",
-                      action="store_true", default=False)
+                      action="store_true", default=useProcessesIsDefault)
     group.add_option("", "--use-threads", dest="useProcesses",
                       help="Run tests in parallel with threads (not processes)",
-                      action="store_false", default=False)
+                      action="store_false", default=useProcessesIsDefault)
     parser.add_option_group(group)
 
     (opts, args) = parser.parse_args()
@@ -186,7 +239,7 @@ def main(builtinParameters = {}):
         valgrindArgs = opts.valgrindArgs,
         noExecute = opts.noExecute,
         debug = opts.debug,
-        isWindows = (platform.system()=='Windows'),
+        isWindows = isWindows,
         params = userParams,
         config_prefix = opts.configPrefix)
 
@@ -276,8 +329,13 @@ def main(builtinParameters = {}):
         sys.exit(2)
     display.finish()
 
+    testing_time = time.time() - startTime
     if not opts.quiet:
-        print('Testing Time: %.2fs'%(time.time() - startTime))
+        print('Testing Time: %.2fs' % (testing_time,))
+
+    # Write out the test data, if requested.
+    if opts.output_path is not None:
+        write_test_results(run, litConfig, testing_time, opts.output_path)
 
     # List test results organized by kind.
     hasFailures = False

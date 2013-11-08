@@ -41,9 +41,9 @@ static int StrCmpOptionName(const char *A, const char *B) {
   return (a < b) ? -1 : 1;
 }
 
-static int CompareOptionRecords(const void *Av, const void *Bv) {
-  const Record *A = *(const Record*const*) Av;
-  const Record *B = *(const Record*const*) Bv;
+static int CompareOptionRecords(Record *const *Av, Record *const *Bv) {
+  const Record *A = *Av;
+  const Record *B = *Bv;
 
   // Sentinel options precede all others and are only ordered by precedence.
   bool ASent = A->getValueAsDef("Kind")->getValueAsBit("Sentinel");
@@ -79,7 +79,7 @@ static int CompareOptionRecords(const void *Av, const void *Bv) {
   if (APrec == BPrec &&
       A->getValueAsListOfStrings("Prefixes") ==
       B->getValueAsListOfStrings("Prefixes")) {
-    PrintError(A->getLoc(), Twine("Option is equivilent to"));
+    PrintError(A->getLoc(), Twine("Option is equivalent to"));
     PrintError(B->getLoc(), Twine("Other defined here"));
     PrintFatalError("Equivalent Options found.");
   }

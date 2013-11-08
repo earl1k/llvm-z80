@@ -41,6 +41,7 @@ namespace llvm {
   class MCAsmInfo;
   class MCCFIInstruction;
   class MCContext;
+  class MCInstrInfo;
   class MCSection;
   class MCStreamer;
   class MCSymbol;
@@ -64,6 +65,7 @@ namespace llvm {
     ///
     const MCAsmInfo *MAI;
 
+    const MCInstrInfo *MII;
     /// OutContext - This is the context for the output file that we are
     /// streaming.  This owns all of the global MC-related objects for the
     /// generated translation unit.
@@ -143,6 +145,7 @@ namespace llvm {
     /// getCurrentSection() - Return the current section we are emitting to.
     const MCSection *getCurrentSection() const;
 
+    MCSymbol *getSymbol(const GlobalValue *GV) const;
 
     //===------------------------------------------------------------------===//
     // MachineFunctionPass Implementation.
@@ -284,6 +287,10 @@ namespace llvm {
     virtual bool
     isBlockOnlyReachableByFallthrough(const MachineBasicBlock *MBB) const;
 
+    /// emitImplicitDef - Targets can override this to customize the output of
+    /// IMPLICIT_DEF instructions in verbose mode.
+    virtual void emitImplicitDef(const MachineInstr *MI) const;
+
     //===------------------------------------------------------------------===//
     // Symbol Lowering Routines.
     //===------------------------------------------------------------------===//
@@ -359,14 +366,14 @@ namespace llvm {
     /// where the size in bytes of the directive is specified by Size and Label
     /// specifies the label.  This implicitly uses .set if it is available.
     void EmitLabelPlusOffset(const MCSymbol *Label, uint64_t Offset,
-                                   unsigned Size, 
-                                   bool IsSectionRelative = false) const;
+                             unsigned Size,
+                             bool IsSectionRelative = false) const;
 
     /// EmitLabelReference - Emit something like ".long Label"
     /// where the size in bytes of the directive is specified by Size and Label
     /// specifies the label.
-    void EmitLabelReference(const MCSymbol *Label, unsigned Size, 
-        bool IsSectionRelative = false) const {
+    void EmitLabelReference(const MCSymbol *Label, unsigned Size,
+                            bool IsSectionRelative = false) const {
       EmitLabelPlusOffset(Label, 0, Size, IsSectionRelative);
     }
 
@@ -451,8 +458,7 @@ namespace llvm {
     /// return true if the operand is erroneous.
     virtual bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
                                        unsigned AsmVariant,
-                                       const char *ExtraCode,
-                                       raw_ostream &OS);
+                                       const char *ExtraCode, raw_ostream &OS);
 
   private:
     /// Private state for PrintSpecial()
@@ -464,7 +470,8 @@ namespace llvm {
 
     /// EmitInlineAsm - Emit a blob of inline asm to the output streamer.
     void EmitInlineAsm(StringRef Str, const MDNode *LocMDNode = 0,
-                    InlineAsm::AsmDialect AsmDialect = InlineAsm::AD_ATT) const;
+                       InlineAsm::AsmDialect AsmDialect =
+                           InlineAsm::AD_ATT) const;
 
     /// EmitInlineAsm - This method formats and emits the specified machine
     /// instruction that is an inline asm.
@@ -479,12 +486,13 @@ namespace llvm {
     void EmitVisibility(MCSymbol *Sym, unsigned Visibility,
                         bool IsDefinition = true) const;
 
-    void EmitLinkage(unsigned Linkage, MCSymbol *GVSym) const;
+    void EmitLinkage(const GlobalValue *GV, MCSymbol *GVSym) const;
 
     void EmitJumpTableEntry(const MachineJumpTableInfo *MJTI,
-                            const MachineBasicBlock *MBB,
-                            unsigned uid) const;
+                            const MachineBasicBlock *MBB, unsigned uid) const;
     void EmitLLVMUsedList(const ConstantArray *InitList);
+    /// Emit llvm.ident metadata in an '.ident' directive.
+    void EmitModuleIdents(Module &M);
     void EmitXXStructorList(const Constant *List, bool isCtor);
     GCMetadataPrinter *GetOrCreateGCPrinter(GCStrategy *C);
   };

@@ -38,6 +38,45 @@ class TargetLowering;
 class TargetSelectionDAGInfo;
 class TargetTransformInfo;
 
+class SDVTListNode : public FoldingSetNode {
+  friend struct FoldingSetTrait<SDVTListNode>;
+  /// FastID - A reference to an Interned FoldingSetNodeID for this node.
+  /// The Allocator in SelectionDAG holds the data.
+  /// SDVTList contains all types which are frequently accessed in SelectionDAG.
+  /// The size of this list is not expected big so it won't introduce memory penalty.
+  FoldingSetNodeIDRef FastID;
+  const EVT *VTs;
+  unsigned int NumVTs;
+  /// The hash value for SDVTList is fixed so cache it to avoid hash calculation
+  unsigned HashValue;
+public:
+  SDVTListNode(const FoldingSetNodeIDRef ID, const EVT *VT, unsigned int Num) :
+      FastID(ID), VTs(VT), NumVTs(Num) {
+    HashValue = ID.ComputeHash();
+  }
+  SDVTList getSDVTList() {
+    SDVTList result = {VTs, NumVTs};
+    return result;
+  }
+};
+
+// Specialize FoldingSetTrait for SDVTListNode
+// To avoid computing temp FoldingSetNodeID and hash value.
+template<> struct FoldingSetTrait<SDVTListNode> : DefaultFoldingSetTrait<SDVTListNode> {
+  static void Profile(const SDVTListNode &X, FoldingSetNodeID& ID) {
+    ID = X.FastID;
+  }
+  static bool Equals(const SDVTListNode &X, const FoldingSetNodeID &ID,
+                     unsigned IDHash, FoldingSetNodeID &TempID) {
+    if (X.HashValue != IDHash)
+      return false;
+    return ID == X.FastID;
+  }
+  static unsigned ComputeHash(const SDVTListNode &X, FoldingSetNodeID &TempID) {
+    return X.HashValue;
+  }
+};
+
 template<> struct ilist_traits<SDNode> : public ilist_default_traits<SDNode> {
 private:
   mutable ilist_half_node<SDNode> Sentinel;
@@ -677,6 +716,13 @@ public:
                     AtomicOrdering Ordering,
                     SynchronizationScope SynchScope);
 
+  /// getAtomic - Gets a node for an atomic op, produces result and chain and
+  /// takes N operands.
+  SDValue getAtomic(unsigned Opcode, SDLoc dl, EVT MemVT, SDVTList VTList,
+                    SDValue* Ops, unsigned NumOps, MachineMemOperand *MMO,
+                    AtomicOrdering Ordering,
+                    SynchronizationScope SynchScope);
+
   /// getMemIntrinsicNode - Creates a MemIntrinsicNode that may produce a
   /// result and takes a list of operands. Opcode may be INTRINSIC_VOID,
   /// INTRINSIC_W_CHAIN, or a target-specific opcode with a value not
@@ -708,11 +754,16 @@ public:
                   MachinePointerInfo PtrInfo, bool isVolatile,
                   bool isNonTemporal, bool isInvariant, unsigned Alignment,
                   const MDNode *TBAAInfo = 0, const MDNode *Ranges = 0);
+  SDValue getLoad(EVT VT, SDLoc dl, SDValue Chain, SDValue Ptr,
+                  MachineMemOperand *MMO);
   SDValue getExtLoad(ISD::LoadExtType ExtType, SDLoc dl, EVT VT,
                      SDValue Chain, SDValue Ptr, MachinePointerInfo PtrInfo,
                      EVT MemVT, bool isVolatile,
                      bool isNonTemporal, unsigned Alignment,
                      const MDNode *TBAAInfo = 0);
+  SDValue getExtLoad(ISD::LoadExtType ExtType, SDLoc dl, EVT VT,
+                     SDValue Chain, SDValue Ptr, EVT MemVT,
+                     MachineMemOperand *MMO);
   SDValue getIndexedLoad(SDValue OrigLoad, SDLoc dl, SDValue Base,
                          SDValue Offset, ISD::MemIndexedMode AM);
   SDValue getLoad(ISD::MemIndexedMode AM, ISD::LoadExtType ExtType,
@@ -1086,7 +1137,7 @@ private:
   void allnodes_clear();
 
   /// VTList - List of non-single value types.
-  std::vector<SDVTList> VTList;
+  FoldingSet<SDVTListNode> VTListMap;
 
   /// CondCodeNodes - Maps to auto-CSE operations.
   std::vector<CondCodeSDNode*> CondCodeNodes;

@@ -148,9 +148,10 @@ public:
 
   bool isBigEndian() const { return !IsLittleEndian; }
   bool isLittleEndian() const { return IsLittleEndian; }
-  // Return the pointer type for the given address space, defaults to
-  // the pointer type from the data layout.
-  // FIXME: The default needs to be removed once all the code is updated.
+
+  /// Return the pointer type for the given address space, defaults to
+  /// the pointer type from the data layout.
+  /// FIXME: The default needs to be removed once all the code is updated.
   virtual MVT getPointerTy(uint32_t /*AS*/ = 0) const;
   unsigned getPointerSizeInBits(uint32_t AS = 0) const;
   unsigned getPointerTypeSizeInBits(Type *Ty) const;
@@ -520,13 +521,12 @@ public:
   LegalizeAction
   getCondCodeAction(ISD::CondCode CC, MVT VT) const {
     assert((unsigned)CC < array_lengthof(CondCodeActions) &&
-           (unsigned)VT.SimpleTy < sizeof(CondCodeActions[0])*4 &&
+           ((unsigned)VT.SimpleTy >> 4) < array_lengthof(CondCodeActions[0]) &&
            "Table isn't big enough!");
-    /// The lower 5 bits of the SimpleTy index into Nth 2bit set from the 64bit
-    /// value and the upper 27 bits index into the second dimension of the
-    /// array to select what 64bit value to use.
-    LegalizeAction Action = (LegalizeAction)
-      ((CondCodeActions[CC][VT.SimpleTy >> 5] >> (2*(VT.SimpleTy & 0x1F))) & 3);
+    // See setCondCodeAction for how this is encoded.
+    uint32_t Shift = 2 * (VT.SimpleTy & 0xF);
+    uint32_t Value = CondCodeActions[CC][VT.SimpleTy >> 4];
+    LegalizeAction Action = (LegalizeAction) ((Value >> Shift) & 0x3);
     assert(Action != Promote && "Can't promote condition code!");
     return Action;
   }
@@ -570,14 +570,18 @@ public:
   /// otherwise it will assert.
   EVT getValueType(Type *Ty, bool AllowUnknown = false) const {
     // Lower scalar pointers to native pointer types.
-    if (Ty->isPointerTy()) return getPointerTy(Ty->getPointerAddressSpace());
+    if (PointerType *PTy = dyn_cast<PointerType>(Ty))
+      return getPointerTy(PTy->getAddressSpace());
 
     if (Ty->isVectorTy()) {
       VectorType *VTy = cast<VectorType>(Ty);
       Type *Elm = VTy->getElementType();
       // Lower vectors of pointers to native pointer types.
-      if (Elm->isPointerTy()) 
-        Elm = EVT(PointerTy).getTypeForEVT(Ty->getContext());
+      if (PointerType *PT = dyn_cast<PointerType>(Elm)) {
+        EVT PointerTy(getPointerTy(PT->getAddressSpace()));
+        Elm = PointerTy.getTypeForEVT(Ty->getContext());
+      }
+
       return EVT::getVectorVT(Ty->getContext(), EVT::getEVT(Elm, false),
                        VTy->getNumElements());
     }
@@ -1016,13 +1020,12 @@ protected:
     assert(VT < MVT::LAST_VALUETYPE &&
            (unsigned)CC < array_lengthof(CondCodeActions) &&
            "Table isn't big enough!");
-    /// The lower 5 bits of the SimpleTy index into Nth 2bit set from the 64bit
-    /// value and the upper 27 bits index into the second dimension of the
-    /// array to select what 64bit value to use.
-    CondCodeActions[(unsigned)CC][VT.SimpleTy >> 5]
-      &= ~(uint64_t(3UL)  << (VT.SimpleTy & 0x1F)*2);
-    CondCodeActions[(unsigned)CC][VT.SimpleTy >> 5]
-      |= (uint64_t)Action << (VT.SimpleTy & 0x1F)*2;
+    /// The lower 5 bits of the SimpleTy index into Nth 2bit set from the 32-bit
+    /// value and the upper 27 bits index into the second dimension of the array
+    /// to select what 32-bit value to use.
+    uint32_t Shift = 2 * (VT.SimpleTy & 0xF);
+    CondCodeActions[CC][VT.SimpleTy >> 4] &= ~((uint32_t)0x3 << Shift);
+    CondCodeActions[CC][VT.SimpleTy >> 4] |= (uint32_t)Action << Shift;
   }
 
   /// If Opc/OrigVT is specified as being promoted, the promotion code defaults
@@ -1183,6 +1186,37 @@ public:
     return false;
   }
 
+  /// Return true if the target supplies and combines to a paired load
+  /// two loaded values of type LoadedType next to each other in memory.
+  /// RequiredAlignment gives the minimal alignment constraints that must be met
+  /// to be able to select this paired load.
+  ///
+  /// This information is *not* used to generate actual paired loads, but it is
+  /// used to generate a sequence of loads that is easier to combine into a
+  /// paired load.
+  /// For instance, something like this:
+  /// a = load i64* addr
+  /// b = trunc i64 a to i32
+  /// c = lshr i64 a, 32
+  /// d = trunc i64 c to i32
+  /// will be optimized into:
+  /// b = load i32* addr1
+  /// d = load i32* addr2
+  /// Where addr1 = addr2 +/- sizeof(i32).
+  ///
+  /// In other words, unless the target performs a post-isel load combining,
+  /// this information should not be provided because it will generate more
+  /// loads.
+  virtual bool hasPairedLoad(Type * /*LoadedType*/,
+                             unsigned & /*RequiredAligment*/) const {
+    return false;
+  }
+
+  virtual bool hasPairedLoad(EVT /*LoadedType*/,
+                             unsigned & /*RequiredAligment*/) const {
+    return false;
+  }
+
   /// Return true if zero-extending the specific node Val to type VT2 is free
   /// (either because it's implicitly zero-extended such as ARM ldrb / ldrh or
   /// because it's folded such as X86 zero-extending loads).
@@ -1263,10 +1297,6 @@ private:
   const TargetMachine &TM;
   const DataLayout *TD;
   const TargetLoweringObjectFile &TLOF;
-
-  /// The type to use for pointers for the default address space, usually i32 or
-  /// i64.
-  MVT PointerTy;
 
   /// True if this is a little endian target.
   bool IsLittleEndian;
@@ -1416,9 +1446,9 @@ private:
   /// indicates how instruction selection should deal with the condition code.
   ///
   /// Because each CC action takes up 2 bits, we need to have the array size be
-  /// large enough to fit all of the value types. This can be done by dividing
-  /// the MVT::LAST_VALUETYPE by 32 and adding one.
-  uint64_t CondCodeActions[ISD::SETCC_INVALID][(MVT::LAST_VALUETYPE / 32) + 1];
+  /// large enough to fit all of the value types. This can be done by rounding
+  /// up the MVT::LAST_VALUETYPE value to the next multiple of 16.
+  uint32_t CondCodeActions[ISD::SETCC_INVALID][(MVT::LAST_VALUETYPE + 15) / 16];
 
   ValueTypeActionImpl ValueTypeActions;
 
@@ -1473,10 +1503,12 @@ public:
     if (NumElts == 1)
       return LegalizeKind(TypeScalarizeVector, EltVT);
 
-    // Try to widen vector elements until a legal type is found.
+    // Try to widen vector elements until the element type is a power of two and
+    // promote it to a legal type later on, for example:
+    // <3 x i8> -> <4 x i8> -> <4 x i32>
     if (EltVT.isInteger()) {
       // Vectors with a number of elements that is not a power of two are always
-      // widened, for example <3 x float> -> <4 x float>.
+      // widened, for example <3 x i8> -> <4 x i8>.
       if (!VT.isPow2VectorType()) {
         NumElts = (unsigned)NextPowerOf2(NumElts);
         EVT NVT = EVT::getVectorVT(Context, EltVT, NumElts);
@@ -1505,7 +1537,8 @@ public:
 
         // Stop trying when getting a non-simple element type.
         // Note that vector elements may be greater than legal vector element
-        // types. Example: X86 XMM registers hold 64bit element on 32bit systems.
+        // types. Example: X86 XMM registers hold 64bit element on 32bit
+        // systems.
         if (!EltVT.isSimple()) break;
 
         // Build a new vector type and check if it is legal.
@@ -1666,7 +1699,8 @@ public:
   /// by reference if this node can be combined with a load / store to form a
   /// post-indexed load / store.
   virtual bool getPostIndexedAddressParts(SDNode * /*N*/, SDNode * /*Op*/,
-                                          SDValue &/*Base*/, SDValue &/*Offset*/,
+                                          SDValue &/*Base*/,
+                                          SDValue &/*Offset*/,
                                           ISD::MemIndexedMode &/*AM*/,
                                           SelectionDAG &/*DAG*/) const {
     return false;
@@ -1887,6 +1921,8 @@ public:
     ArgListEntry() : isSExt(false), isZExt(false), isInReg(false),
       isSRet(false), isNest(false), isByVal(false), isReturned(false),
       Alignment(0) { }
+
+    void setAttributes(ImmutableCallSite *CS, unsigned AttrIdx);
   };
   typedef std::vector<ArgListEntry> ArgListTy;
 
@@ -2216,12 +2252,12 @@ public:
   // Instruction Emitting Hooks
   //
 
-  // This method should be implemented by targets that mark instructions with
-  // the 'usesCustomInserter' flag.  These instructions are special in various
-  // ways, which require special support to insert.  The specified MachineInstr
-  // is created but not inserted into any basic blocks, and this method is
-  // called to expand it into a sequence of instructions, potentially also
-  // creating new basic blocks and control flow.
+  /// This method should be implemented by targets that mark instructions with
+  /// the 'usesCustomInserter' flag.  These instructions are special in various
+  /// ways, which require special support to insert.  The specified MachineInstr
+  /// is created but not inserted into any basic blocks, and this method is
+  /// called to expand it into a sequence of instructions, potentially also
+  /// creating new basic blocks and control flow.
   virtual MachineBasicBlock *
     EmitInstrWithCustomInserter(MachineInstr *MI, MachineBasicBlock *MBB) const;
 

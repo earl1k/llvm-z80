@@ -50,7 +50,7 @@ protected:
   };
 
   enum X86ProcFamilyEnum {
-    Others, IntelAtom
+    Others, IntelAtom, IntelSLM
   };
 
   /// X86ProcFamily - X86 processor family: Intel Atom, and others
@@ -97,6 +97,9 @@ protected:
   /// HasXOP - Target has XOP instructions
   bool HasXOP;
 
+  /// HasTBM - Target has TBM instructions.
+  bool HasTBM;
+
   /// HasMOVBE - True if the processor has the MOVBE instruction.
   bool HasMOVBE;
 
@@ -126,6 +129,9 @@ protected:
 
   /// HasADX - Processor has ADX instructions.
   bool HasADX;
+
+  /// HasSHA - Processor has SHA instructions.
+  bool HasSHA;
 
   /// HasPRFCHW - Processor has PRFCHW instructions.
   bool HasPRFCHW;
@@ -271,6 +277,7 @@ public:
   // FIXME: Favor FMA when both are enabled. Is this the right thing to do?
   bool hasFMA4() const { return HasFMA4 && !HasFMA; }
   bool hasXOP() const { return HasXOP; }
+  bool hasTBM() const { return HasTBM; }
   bool hasMOVBE() const { return HasMOVBE; }
   bool hasRDRAND() const { return HasRDRAND; }
   bool hasF16C() const { return HasF16C; }
@@ -281,6 +288,7 @@ public:
   bool hasRTM() const { return HasRTM; }
   bool hasHLE() const { return HasHLE; }
   bool hasADX() const { return HasADX; }
+  bool hasSHA() const { return HasSHA; }
   bool hasPRFCHW() const { return HasPRFCHW; }
   bool hasRDSEED() const { return HasRDSEED; }
   bool isBTMemSlow() const { return IsBTMemSlow; }
@@ -324,6 +332,8 @@ public:
             TargetTriple.isOSBinFormatCOFF());
   }
   bool isTargetEnvMacho() const { return TargetTriple.isEnvironmentMachO(); }
+
+  bool isOSWindows() const { return TargetTriple.isOSWindows(); }
 
   bool isTargetWin64() const {
     return In64BitMode && TargetTriple.isOSWindows();
@@ -375,10 +385,13 @@ public:
   /// memset with zero passed as the second argument. Otherwise it
   /// returns null.
   const char *getBZeroEntry() const;
-  
+
   /// This function returns true if the target has sincos() routine in its
   /// compiler runtime or math libraries.
   bool hasSinCos() const;
+
+  /// Enable the MachineScheduler pass for all X86 subtargets.
+  bool enableMachineScheduler() const LLVM_OVERRIDE { return true; }
 
   /// enablePostRAScheduler - run for Atom optimization.
   bool enablePostRAScheduler(CodeGenOpt::Level OptLevel,

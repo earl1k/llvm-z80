@@ -21,6 +21,11 @@ def FeatureDumpCode : SubtargetFeature <"DumpCode",
         "true",
         "Dump MachineInstrs in the CodeEmitter">;
 
+def FeatureIRStructurizer : SubtargetFeature <"EnableIRStructurizer",
+        "EnableIRStructurizer",
+        "true",
+        "Enable IR Structurizer">;
+
 // Target features
 
 def FeatureFP64     : SubtargetFeature<"fp64",
@@ -82,6 +87,8 @@ def FeatureNorthernIslands : SubtargetFeatureGeneration<"NORTHERN_ISLANDS",
 def FeatureSouthernIslands : SubtargetFeatureGeneration<"SOUTHERN_ISLANDS",
         [Feature64BitPtr, FeatureFP64]>;
 
+def FeatureSeaIslands : SubtargetFeatureGeneration<"SEA_ISLANDS",
+        [Feature64BitPtr, FeatureFP64]>;
 //===----------------------------------------------------------------------===//
 
 def AMDGPUInstrInfo : InstrInfo {

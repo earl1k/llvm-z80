@@ -13,6 +13,7 @@
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCParser/MCAsmLexer.h"
@@ -174,6 +175,7 @@ struct PPCOperand;
 class PPCAsmParser : public MCTargetAsmParser {
   MCSubtargetInfo &STI;
   MCAsmParser &Parser;
+  const MCInstrInfo &MII;
   bool IsPPC64;
 
   MCAsmParser &getParser() const { return Parser; }
@@ -218,8 +220,9 @@ class PPCAsmParser : public MCTargetAsmParser {
 
 
 public:
-  PPCAsmParser(MCSubtargetInfo &_STI, MCAsmParser &_Parser)
-    : MCTargetAsmParser(), STI(_STI), Parser(_Parser) {
+  PPCAsmParser(MCSubtargetInfo &_STI, MCAsmParser &_Parser,
+               const MCInstrInfo &_MII)
+      : MCTargetAsmParser(), STI(_STI), Parser(_Parser), MII(_MII) {
     // Check for 64-bit vs. 32-bit pointer mode.
     Triple TheTriple(STI.getTargetTriple());
     IsPPC64 = (TheTriple.getArch() == Triple::ppc64 ||
@@ -904,19 +907,19 @@ MatchRegisterName(const AsmToken &Tok, unsigned &RegNo, int64_t &IntVal) {
       RegNo = PPC::VRSAVE;
       IntVal = 256;
       return false;
-    } else if (Name.substr(0, 1).equals_lower("r") &&
+    } else if (Name.startswith_lower("r") &&
                !Name.substr(1).getAsInteger(10, IntVal) && IntVal < 32) {
       RegNo = isPPC64()? XRegs[IntVal] : RRegs[IntVal];
       return false;
-    } else if (Name.substr(0, 1).equals_lower("f") &&
+    } else if (Name.startswith_lower("f") &&
                !Name.substr(1).getAsInteger(10, IntVal) && IntVal < 32) {
       RegNo = FRegs[IntVal];
       return false;
-    } else if (Name.substr(0, 1).equals_lower("v") &&
+    } else if (Name.startswith_lower("v") &&
                !Name.substr(1).getAsInteger(10, IntVal) && IntVal < 32) {
       RegNo = VRegs[IntVal];
       return false;
-    } else if (Name.substr(0, 2).equals_lower("cr") &&
+    } else if (Name.startswith_lower("cr") &&
                !Name.substr(2).getAsInteger(10, IntVal) && IntVal < 8) {
       RegNo = CRRegs[IntVal];
       return false;
@@ -1357,6 +1360,8 @@ unsigned PPCAsmParser::validateTargetOperandClass(MCParsedAsmOperand *AsmOp,
   switch (Kind) {
     case MCK_0: ImmVal = 0; break;
     case MCK_1: ImmVal = 1; break;
+    case MCK_2: ImmVal = 2; break;
+    case MCK_3: ImmVal = 3; break;
     default: return Match_InvalidOperand;
   }
 

@@ -29,6 +29,7 @@ FunctionPass *createR600VectorRegMerger(TargetMachine &tm);
 FunctionPass *createR600TextureIntrinsicsReplacer();
 FunctionPass *createR600ExpandSpecialInstrsPass(TargetMachine &tm);
 FunctionPass *createR600EmitClauseMarkers(TargetMachine &tm);
+FunctionPass *createR600ClauseMergePass(TargetMachine &tm);
 FunctionPass *createR600Packetizer(TargetMachine &tm);
 FunctionPass *createR600ControlFlowFinalizer(TargetMachine &tm);
 FunctionPass *createAMDGPUCFGStructurizerPass(TargetMachine &tm);
@@ -44,7 +45,6 @@ FunctionPass *createSIInsertWaits(TargetMachine &tm);
 // Passes common to R600 and SI
 Pass *createAMDGPUStructurizeCFGPass();
 FunctionPass *createAMDGPUConvertToISAPass(TargetMachine &tm);
-FunctionPass *createAMDGPUIndirectAddressingPass(TargetMachine &tm);
 FunctionPass *createAMDGPUISelDag(TargetMachine &tm);
 
 /// \brief Creates an AMDGPU-specific Target Transformation Info pass.

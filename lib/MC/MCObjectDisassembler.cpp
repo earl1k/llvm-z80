@@ -135,11 +135,13 @@ void MCObjectDisassembler::buildSectionAtoms(MCModule *Module) {
           Text->addInst(Inst, InstSize);
           InvalidData = 0;
         } else {
+          assert(InstSize && "getInstruction() consumed no bytes");
           if (!InvalidData) {
             Text = 0;
-            InvalidData = Module->createDataAtom(CurAddr, EndAddr);
+            InvalidData = Module->createDataAtom(CurAddr, CurAddr+InstSize - 1);
           }
-          InvalidData->addData(Contents[Index]);
+          for (uint64_t I = 0; I < InstSize; ++I)
+            InvalidData->addData(Contents[Index+I]);
         }
       }
     } else {
@@ -537,10 +539,10 @@ uint64_t MCMachOObjectDisassembler::getEntrypoint() {
 
   // Look for LC_MAIN.
   {
-    uint32_t LoadCommandCount = MOOF.getHeader().NumLoadCommands;
+    uint32_t LoadCommandCount = MOOF.getHeader().ncmds;
     MachOObjectFile::LoadCommandInfo Load = MOOF.getFirstLoadCommandInfo();
     for (unsigned I = 0;; ++I) {
-      if (Load.C.Type == MachO::LC_MAIN) {
+      if (Load.C.cmd == MachO::LC_MAIN) {
         EntryFileOffset =
             ((const MachO::entry_point_command *)Load.Ptr)->entryoff;
         break;

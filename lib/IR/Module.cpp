@@ -245,7 +245,7 @@ GlobalVariable *Module::getGlobalVariable(StringRef Name, bool AllowLocal) {
 ///   1. If it does not exist, add a declaration of the global and return it.
 ///   2. Else, the global exists but has the wrong type: return the function
 ///      with a constantexpr cast to the right type.
-///   3. Finally, if the existing global is the correct delclaration, return the
+///   3. Finally, if the existing global is the correct declaration, return the
 ///      existing global.
 Constant *Module::getOrInsertGlobal(StringRef Name, Type *Ty) {
   // See if we have a definition for the specified global already.
@@ -260,8 +260,10 @@ Constant *Module::getOrInsertGlobal(StringRef Name, Type *Ty) {
 
   // If the variable exists but has the wrong type, return a bitcast to the
   // right type.
-  if (GV->getType() != PointerType::getUnqual(Ty))
-    return ConstantExpr::getBitCast(GV, PointerType::getUnqual(Ty));
+  Type *GVTy = GV->getType();
+  PointerType *PTy = PointerType::get(Ty, GVTy->getPointerAddressSpace());
+  if (GVTy != PTy)
+    return ConstantExpr::getBitCast(GV, PTy);
 
   // Otherwise, we just found the existing function or a prototype.
   return GV;
@@ -399,9 +401,15 @@ bool Module::isDematerializable(const GlobalValue *GV) const {
 }
 
 bool Module::Materialize(GlobalValue *GV, std::string *ErrInfo) {
-  if (Materializer)
-    return Materializer->Materialize(GV, ErrInfo);
-  return false;
+  if (!Materializer)
+    return false;
+
+  error_code EC = Materializer->Materialize(GV);
+  if (!EC)
+    return false;
+  if (ErrInfo)
+    *ErrInfo = EC.message();
+  return true;
 }
 
 void Module::Dematerialize(GlobalValue *GV) {
@@ -412,7 +420,12 @@ void Module::Dematerialize(GlobalValue *GV) {
 bool Module::MaterializeAll(std::string *ErrInfo) {
   if (!Materializer)
     return false;
-  return Materializer->MaterializeModule(this, ErrInfo);
+  error_code EC = Materializer->MaterializeModule(this);
+  if (!EC)
+    return false;
+  if (ErrInfo)
+    *ErrInfo = EC.message();
+  return true;
 }
 
 bool Module::MaterializeAllPermanently(std::string *ErrInfo) {

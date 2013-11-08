@@ -43,12 +43,23 @@ def COND_EQ : PatLeaf <
                      case ISD::SETEQ: return true;}}}]
 >;
 
+def COND_OEQ : PatLeaf <
+  (cond),
+  [{return N->get() == ISD::SETOEQ || N->get() == ISD::SETEQ;}]
+>;
+
 def COND_NE : PatLeaf <
   (cond),
   [{switch(N->get()){{default: return false;
                      case ISD::SETONE: case ISD::SETUNE:
                      case ISD::SETNE: return true;}}}]
 >;
+
+def COND_UNE : PatLeaf <
+  (cond),
+  [{return N->get() == ISD::SETUNE || N->get() == ISD::SETNE;}]
+>;
+
 def COND_GT : PatLeaf <
   (cond),
   [{switch(N->get()){{default: return false;
@@ -56,11 +67,21 @@ def COND_GT : PatLeaf <
                      case ISD::SETGT: return true;}}}]
 >;
 
+def COND_OGT : PatLeaf <
+  (cond),
+  [{return N->get() == ISD::SETOGT || N->get() == ISD::SETGT;}]
+>;
+
 def COND_GE : PatLeaf <
   (cond),
   [{switch(N->get()){{default: return false;
                      case ISD::SETOGE: case ISD::SETUGE:
                      case ISD::SETGE: return true;}}}]
+>;
+
+def COND_OGE : PatLeaf <
+  (cond),
+  [{return N->get() == ISD::SETOGE || N->get() == ISD::SETGE;}]
 >;
 
 def COND_LT : PatLeaf <
@@ -191,6 +212,16 @@ def local_load : PatFrag<(ops node:$ptr), (load node:$ptr), [{
     return isLocalLoad(dyn_cast<LoadSDNode>(N));
 }]>;
 
+def atomic_load_add_local : PatFrag<(ops node:$ptr, node:$value),
+                                    (atomic_load_add node:$ptr, node:$value), [{
+  return dyn_cast<MemSDNode>(N)->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
+}]>;
+
+def atomic_load_sub_local : PatFrag<(ops node:$ptr, node:$value),
+                                    (atomic_load_sub node:$ptr, node:$value), [{
+  return dyn_cast<MemSDNode>(N)->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
+}]>;
+
 def mskor_global : PatFrag<(ops node:$val, node:$ptr),
                             (AMDGPUstore_mskor node:$val, node:$ptr), [{
   return dyn_cast<MemSDNode>(N)->getAddressSpace() == AMDGPUAS::GLOBAL_ADDRESS;
@@ -200,7 +231,7 @@ class Constants {
 int TWO_PI = 0x40c90fdb;
 int PI = 0x40490fdb;
 int TWO_PI_INV = 0x3e22f983;
-int FP_UINT_MAX_PLUS_1 = 0x4f800000;	// 1 << 32 in floating point encoding
+int FP_UINT_MAX_PLUS_1 = 0x4f800000;    // 1 << 32 in floating point encoding
 }
 def CONST : Constants;
 

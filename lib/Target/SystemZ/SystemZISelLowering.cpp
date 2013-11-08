@@ -23,7 +23,22 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 
+#include <cctype>
+
 using namespace llvm;
+
+namespace {
+// Represents a sequence for extracting a 0/1 value from an IPM result:
+// (((X ^ XORValue) + AddValue) >> Bit)
+struct IPMConversion {
+  IPMConversion(unsigned xorValue, int64_t addValue, unsigned bit)
+    : XORValue(xorValue), AddValue(addValue), Bit(bit) {}
+
+  int64_t XORValue;
+  int64_t AddValue;
+  unsigned Bit;
+};
+}
 
 // Classify VT as either 32 or 64 bit.
 static bool is32Bit(EVT VT) {
@@ -51,7 +66,10 @@ SystemZTargetLowering::SystemZTargetLowering(SystemZTargetMachine &tm)
   MVT PtrVT = getPointerTy();
 
   // Set up the register classes.
-  addRegisterClass(MVT::i32,  &SystemZ::GR32BitRegClass);
+  if (Subtarget.hasHighWord())
+    addRegisterClass(MVT::i32, &SystemZ::GRX32BitRegClass);
+  else
+    addRegisterClass(MVT::i32, &SystemZ::GR32BitRegClass);
   addRegisterClass(MVT::i64,  &SystemZ::GR64BitRegClass);
   addRegisterClass(MVT::f32,  &SystemZ::FP32BitRegClass);
   addRegisterClass(MVT::f64,  &SystemZ::FP64BitRegClass);
@@ -83,8 +101,8 @@ SystemZTargetLowering::SystemZTargetLowering(SystemZTargetMachine &tm)
        ++I) {
     MVT VT = MVT::SimpleValueType(I);
     if (isTypeLegal(VT)) {
-      // Expand SETCC(X, Y, COND) into SELECT_CC(X, Y, 1, 0, COND).
-      setOperationAction(ISD::SETCC, VT, Expand);
+      // Lower SET_CC into an IPM-based sequence.
+      setOperationAction(ISD::SETCC, VT, Custom);
 
       // Expand SELECT(C, A, B) into SELECT_CC(X, 0, A, B, NE).
       setOperationAction(ISD::SELECT, VT, Expand);
@@ -261,8 +279,13 @@ SystemZTargetLowering::SystemZTargetLowering(SystemZTargetMachine &tm)
   MaxStoresPerMemsetOptSize = 0;
 }
 
-bool
-SystemZTargetLowering::isFMAFasterThanFMulAndFAdd(EVT VT) const {
+EVT SystemZTargetLowering::getSetCCResultType(LLVMContext &, EVT VT) const {
+  if (!VT.isVector())
+    return MVT::i32;
+  return VT.changeVectorElementTypeToInteger();
+}
+
+bool SystemZTargetLowering::isFMAFasterThanFMulAndFAdd(EVT VT) const {
   VT = VT.getScalarType();
 
   if (!VT.isSimple())
@@ -338,6 +361,7 @@ SystemZTargetLowering::getConstraintType(const std::string &Constraint) const {
     case 'a': // Address register
     case 'd': // Data register (equivalent to 'r')
     case 'f': // Floating-point register
+    case 'h': // High-part register
     case 'r': // General-purpose register
       return C_RegisterClass;
 
@@ -380,6 +404,7 @@ getSingleConstraintMatchWeight(AsmOperandInfo &info,
 
   case 'a': // Address register
   case 'd': // Data register (equivalent to 'r')
+  case 'h': // High-part register
   case 'r': // General-purpose register
     if (CallOperandVal->getType()->isIntegerTy())
       weight = CW_Register;
@@ -459,6 +484,9 @@ getRegForInlineAsmConstraint(const std::string &Constraint, MVT VT) const {
       else if (VT == MVT::i128)
         return std::make_pair(0U, &SystemZ::ADDR128BitRegClass);
       return std::make_pair(0U, &SystemZ::ADDR32BitRegClass);
+
+    case 'h': // High-part register (an LLVM extension)
+      return std::make_pair(0U, &SystemZ::GRH32BitRegClass);
 
     case 'f': // Floating-point register
       if (VT == MVT::f64)
@@ -733,7 +761,7 @@ static bool canUseSiblingCall(CCState ArgCCInfo,
     if (!VA.isRegLoc())
       return false;
     unsigned Reg = VA.getLocReg();
-    if (Reg == SystemZ::R6W || Reg == SystemZ::R6D)
+    if (Reg == SystemZ::R6H || Reg == SystemZ::R6L || Reg == SystemZ::R6D)
       return false;
   }
   return true;
@@ -970,6 +998,73 @@ static unsigned CCMaskForCondCode(ISD::CondCode CC) {
 #undef CONV
 }
 
+// Return a sequence for getting a 1 from an IPM result when CC has a
+// value in CCMask and a 0 when CC has a value in CCValid & ~CCMask.
+// The handling of CC values outside CCValid doesn't matter.
+static IPMConversion getIPMConversion(unsigned CCValid, unsigned CCMask) {
+  // Deal with cases where the result can be taken directly from a bit
+  // of the IPM result.
+  if (CCMask == (CCValid & (SystemZ::CCMASK_1 | SystemZ::CCMASK_3)))
+    return IPMConversion(0, 0, SystemZ::IPM_CC);
+  if (CCMask == (CCValid & (SystemZ::CCMASK_2 | SystemZ::CCMASK_3)))
+    return IPMConversion(0, 0, SystemZ::IPM_CC + 1);
+
+  // Deal with cases where we can add a value to force the sign bit
+  // to contain the right value.  Putting the bit in 31 means we can
+  // use SRL rather than RISBG(L), and also makes it easier to get a
+  // 0/-1 value, so it has priority over the other tests below.
+  //
+  // These sequences rely on the fact that the upper two bits of the
+  // IPM result are zero.
+  uint64_t TopBit = uint64_t(1) << 31;
+  if (CCMask == (CCValid & SystemZ::CCMASK_0))
+    return IPMConversion(0, -(1 << SystemZ::IPM_CC), 31);
+  if (CCMask == (CCValid & (SystemZ::CCMASK_0 | SystemZ::CCMASK_1)))
+    return IPMConversion(0, -(2 << SystemZ::IPM_CC), 31);
+  if (CCMask == (CCValid & (SystemZ::CCMASK_0
+                            | SystemZ::CCMASK_1
+                            | SystemZ::CCMASK_2)))
+    return IPMConversion(0, -(3 << SystemZ::IPM_CC), 31);
+  if (CCMask == (CCValid & SystemZ::CCMASK_3))
+    return IPMConversion(0, TopBit - (3 << SystemZ::IPM_CC), 31);
+  if (CCMask == (CCValid & (SystemZ::CCMASK_1
+                            | SystemZ::CCMASK_2
+                            | SystemZ::CCMASK_3)))
+    return IPMConversion(0, TopBit - (1 << SystemZ::IPM_CC), 31);
+
+  // Next try inverting the value and testing a bit.  0/1 could be
+  // handled this way too, but we dealt with that case above.
+  if (CCMask == (CCValid & (SystemZ::CCMASK_0 | SystemZ::CCMASK_2)))
+    return IPMConversion(-1, 0, SystemZ::IPM_CC);
+
+  // Handle cases where adding a value forces a non-sign bit to contain
+  // the right value.
+  if (CCMask == (CCValid & (SystemZ::CCMASK_1 | SystemZ::CCMASK_2)))
+    return IPMConversion(0, 1 << SystemZ::IPM_CC, SystemZ::IPM_CC + 1);
+  if (CCMask == (CCValid & (SystemZ::CCMASK_0 | SystemZ::CCMASK_3)))
+    return IPMConversion(0, -(1 << SystemZ::IPM_CC), SystemZ::IPM_CC + 1);
+
+  // The remaing cases are 1, 2, 0/1/3 and 0/2/3.  All these are
+  // can be done by inverting the low CC bit and applying one of the
+  // sign-based extractions above.
+  if (CCMask == (CCValid & SystemZ::CCMASK_1))
+    return IPMConversion(1 << SystemZ::IPM_CC, -(1 << SystemZ::IPM_CC), 31);
+  if (CCMask == (CCValid & SystemZ::CCMASK_2))
+    return IPMConversion(1 << SystemZ::IPM_CC,
+                         TopBit - (3 << SystemZ::IPM_CC), 31);
+  if (CCMask == (CCValid & (SystemZ::CCMASK_0
+                            | SystemZ::CCMASK_1
+                            | SystemZ::CCMASK_3)))
+    return IPMConversion(1 << SystemZ::IPM_CC, -(3 << SystemZ::IPM_CC), 31);
+  if (CCMask == (CCValid & (SystemZ::CCMASK_0
+                            | SystemZ::CCMASK_2
+                            | SystemZ::CCMASK_3)))
+    return IPMConversion(1 << SystemZ::IPM_CC,
+                         TopBit - (1 << SystemZ::IPM_CC), 31);
+
+  llvm_unreachable("Unexpected CC combination");
+}
+
 // If a comparison described by IsUnsigned, CCMask, CmpOp0 and CmpOp1
 // can be converted to a comparison against zero, adjust the operands
 // as necessary.
@@ -1069,73 +1164,33 @@ static void adjustSubwordCmp(SelectionDAG &DAG, bool &IsUnsigned,
     CmpOp1 = DAG.getConstant(Value, MVT::i32);
 }
 
-// Return true if a comparison described by CCMask, CmpOp0 and CmpOp1
-// is an equality comparison that is better implemented using unsigned
-// rather than signed comparison instructions.
-static bool preferUnsignedComparison(SDValue CmpOp0, SDValue CmpOp1,
-                                     unsigned CCMask) {
-  // The test must be for equality or inequality.
-  if (CCMask != SystemZ::CCMASK_CMP_EQ && CCMask != SystemZ::CCMASK_CMP_NE)
-    return false;
-
-  if (CmpOp1.getOpcode() == ISD::Constant) {
-    uint64_t Value = cast<ConstantSDNode>(CmpOp1)->getSExtValue();
-
-    // If we're comparing with memory, prefer unsigned comparisons for
-    // values that are in the unsigned 16-bit range but not the signed
-    // 16-bit range.  We want to use CLFHSI and CLGHSI.
-    if (CmpOp0.hasOneUse() &&
-        ISD::isNormalLoad(CmpOp0.getNode()) &&
-        (Value >= 32768 && Value < 65536))
-      return true;
-
-    // Use unsigned comparisons for values that are in the CLGFI range
-    // but not in the CGFI range.
-    if (CmpOp0.getValueType() == MVT::i64 && (Value >> 31) == 1)
-      return true;
-
-    return false;
-  }
-
-  // Prefer CL for zero-extended loads.
-  if (CmpOp1.getOpcode() == ISD::ZERO_EXTEND ||
-      ISD::isZEXTLoad(CmpOp1.getNode()))
-    return true;
-
-  // ...and for "in-register" zero extensions.
-  if (CmpOp1.getOpcode() == ISD::AND && CmpOp1.getValueType() == MVT::i64) {
-    SDValue Mask = CmpOp1.getOperand(1);
-    if (Mask.getOpcode() == ISD::Constant &&
-        cast<ConstantSDNode>(Mask)->getZExtValue() == 0xffffffff)
-      return true;
-  }
-
-  return false;
-}
-
-// Return true if Op is either an unextended load, or a load with the
-// extension type given by IsUnsigned.
-static bool isNaturalMemoryOperand(SDValue Op, bool IsUnsigned) {
+// Return true if Op is either an unextended load, or a load suitable
+// for integer register-memory comparisons of type ICmpType.
+static bool isNaturalMemoryOperand(SDValue Op, unsigned ICmpType) {
   LoadSDNode *Load = dyn_cast<LoadSDNode>(Op.getNode());
-  if (Load)
+  if (Load) {
+    // There are no instructions to compare a register with a memory byte.
+    if (Load->getMemoryVT() == MVT::i8)
+      return false;
+    // Otherwise decide on extension type.
     switch (Load->getExtensionType()) {
     case ISD::NON_EXTLOAD:
-    case ISD::EXTLOAD:
       return true;
     case ISD::SEXTLOAD:
-      return !IsUnsigned;
+      return ICmpType != SystemZICMP::UnsignedOnly;
     case ISD::ZEXTLOAD:
-      return IsUnsigned;
+      return ICmpType != SystemZICMP::SignedOnly;
     default:
       break;
     }
+  }
   return false;
 }
 
 // Return true if it is better to swap comparison operands Op0 and Op1.
-// IsUnsigned says whether an integer comparison is signed or unsigned.
+// ICmpType is the type of an integer comparison.
 static bool shouldSwapCmpOperands(SDValue Op0, SDValue Op1,
-                                  bool IsUnsigned) {
+                                  unsigned ICmpType) {
   // Leave f128 comparisons alone, since they have no memory forms.
   if (Op0.getValueType() == MVT::f128)
     return false;
@@ -1154,42 +1209,151 @@ static bool shouldSwapCmpOperands(SDValue Op0, SDValue Op1,
 
   // Look for cases where Cmp0 is a single-use load and Cmp1 isn't.
   // In that case we generally prefer the memory to be second.
-  if ((isNaturalMemoryOperand(Op0, IsUnsigned) && Op0.hasOneUse()) &&
-      !(isNaturalMemoryOperand(Op1, IsUnsigned) && Op1.hasOneUse())) {
+  if ((isNaturalMemoryOperand(Op0, ICmpType) && Op0.hasOneUse()) &&
+      !(isNaturalMemoryOperand(Op1, ICmpType) && Op1.hasOneUse())) {
     // The only exceptions are when the second operand is a constant and
     // we can use things like CHHSI.
     if (!COp1)
       return true;
-    if (IsUnsigned) {
-      // The memory-immediate instructions require 16-bit unsigned integers.
-      if (isUInt<16>(COp1->getZExtValue()))
-        return false;
-    } else {
-      // There are no comparisons between integers and signed memory bytes.
-      // The others require 16-bit signed integers.
-      if (cast<LoadSDNode>(Op0.getNode())->getMemoryVT() == MVT::i8 ||
-          isInt<16>(COp1->getSExtValue()))
-        return false;
-    }
+    // The unsigned memory-immediate instructions can handle 16-bit
+    // unsigned integers.
+    if (ICmpType != SystemZICMP::SignedOnly &&
+        isUInt<16>(COp1->getZExtValue()))
+      return false;
+    // The signed memory-immediate instructions can handle 16-bit
+    // signed integers.
+    if (ICmpType != SystemZICMP::UnsignedOnly &&
+        isInt<16>(COp1->getSExtValue()))
+      return false;
     return true;
   }
   return false;
 }
 
-// See whether the comparison (Opcode CmpOp0, CmpOp1) can be implemented
-// as a TEST UNDER MASK instruction when the condition being tested is
-// as described by CCValid and CCMask.  Update the arguments with the
-// TM version if so.
-static void adjustForTestUnderMask(unsigned &Opcode, SDValue &CmpOp0,
-                                   SDValue &CmpOp1, unsigned &CCValid,
-                                   unsigned &CCMask) {
-  // For now we just handle equality and inequality with zero.
-  if (CCMask != SystemZ::CCMASK_CMP_EQ &&
-      (CCMask ^ CCValid) != SystemZ::CCMASK_CMP_EQ)
-    return;
+// Return true if shift operation N has an in-range constant shift value.
+// Store it in ShiftVal if so.
+static bool isSimpleShift(SDValue N, unsigned &ShiftVal) {
+  ConstantSDNode *Shift = dyn_cast<ConstantSDNode>(N.getOperand(1));
+  if (!Shift)
+    return false;
+
+  uint64_t Amount = Shift->getZExtValue();
+  if (Amount >= N.getValueType().getSizeInBits())
+    return false;
+
+  ShiftVal = Amount;
+  return true;
+}
+
+// Check whether an AND with Mask is suitable for a TEST UNDER MASK
+// instruction and whether the CC value is descriptive enough to handle
+// a comparison of type Opcode between the AND result and CmpVal.
+// CCMask says which comparison result is being tested and BitSize is
+// the number of bits in the operands.  If TEST UNDER MASK can be used,
+// return the corresponding CC mask, otherwise return 0.
+static unsigned getTestUnderMaskCond(unsigned BitSize, unsigned CCMask,
+                                     uint64_t Mask, uint64_t CmpVal,
+                                     unsigned ICmpType) {
+  assert(Mask != 0 && "ANDs with zero should have been removed by now");
+
+  // Check whether the mask is suitable for TMHH, TMHL, TMLH or TMLL.
+  if (!SystemZ::isImmLL(Mask) && !SystemZ::isImmLH(Mask) &&
+      !SystemZ::isImmHL(Mask) && !SystemZ::isImmHH(Mask))
+    return 0;
+
+  // Work out the masks for the lowest and highest bits.
+  unsigned HighShift = 63 - countLeadingZeros(Mask);
+  uint64_t High = uint64_t(1) << HighShift;
+  uint64_t Low = uint64_t(1) << countTrailingZeros(Mask);
+
+  // Signed ordered comparisons are effectively unsigned if the sign
+  // bit is dropped.
+  bool EffectivelyUnsigned = (ICmpType != SystemZICMP::SignedOnly);
+
+  // Check for equality comparisons with 0, or the equivalent.
+  if (CmpVal == 0) {
+    if (CCMask == SystemZ::CCMASK_CMP_EQ)
+      return SystemZ::CCMASK_TM_ALL_0;
+    if (CCMask == SystemZ::CCMASK_CMP_NE)
+      return SystemZ::CCMASK_TM_SOME_1;
+  }
+  if (EffectivelyUnsigned && CmpVal <= Low) {
+    if (CCMask == SystemZ::CCMASK_CMP_LT)
+      return SystemZ::CCMASK_TM_ALL_0;
+    if (CCMask == SystemZ::CCMASK_CMP_GE)
+      return SystemZ::CCMASK_TM_SOME_1;
+  }
+  if (EffectivelyUnsigned && CmpVal < Low) {
+    if (CCMask == SystemZ::CCMASK_CMP_LE)
+      return SystemZ::CCMASK_TM_ALL_0;
+    if (CCMask == SystemZ::CCMASK_CMP_GT)
+      return SystemZ::CCMASK_TM_SOME_1;
+  }
+
+  // Check for equality comparisons with the mask, or the equivalent.
+  if (CmpVal == Mask) {
+    if (CCMask == SystemZ::CCMASK_CMP_EQ)
+      return SystemZ::CCMASK_TM_ALL_1;
+    if (CCMask == SystemZ::CCMASK_CMP_NE)
+      return SystemZ::CCMASK_TM_SOME_0;
+  }
+  if (EffectivelyUnsigned && CmpVal >= Mask - Low && CmpVal < Mask) {
+    if (CCMask == SystemZ::CCMASK_CMP_GT)
+      return SystemZ::CCMASK_TM_ALL_1;
+    if (CCMask == SystemZ::CCMASK_CMP_LE)
+      return SystemZ::CCMASK_TM_SOME_0;
+  }
+  if (EffectivelyUnsigned && CmpVal > Mask - Low && CmpVal <= Mask) {
+    if (CCMask == SystemZ::CCMASK_CMP_GE)
+      return SystemZ::CCMASK_TM_ALL_1;
+    if (CCMask == SystemZ::CCMASK_CMP_LT)
+      return SystemZ::CCMASK_TM_SOME_0;
+  }
+
+  // Check for ordered comparisons with the top bit.
+  if (EffectivelyUnsigned && CmpVal >= Mask - High && CmpVal < High) {
+    if (CCMask == SystemZ::CCMASK_CMP_LE)
+      return SystemZ::CCMASK_TM_MSB_0;
+    if (CCMask == SystemZ::CCMASK_CMP_GT)
+      return SystemZ::CCMASK_TM_MSB_1;
+  }
+  if (EffectivelyUnsigned && CmpVal > Mask - High && CmpVal <= High) {
+    if (CCMask == SystemZ::CCMASK_CMP_LT)
+      return SystemZ::CCMASK_TM_MSB_0;
+    if (CCMask == SystemZ::CCMASK_CMP_GE)
+      return SystemZ::CCMASK_TM_MSB_1;
+  }
+
+  // If there are just two bits, we can do equality checks for Low and High
+  // as well.
+  if (Mask == Low + High) {
+    if (CCMask == SystemZ::CCMASK_CMP_EQ && CmpVal == Low)
+      return SystemZ::CCMASK_TM_MIXED_MSB_0;
+    if (CCMask == SystemZ::CCMASK_CMP_NE && CmpVal == Low)
+      return SystemZ::CCMASK_TM_MIXED_MSB_0 ^ SystemZ::CCMASK_ANY;
+    if (CCMask == SystemZ::CCMASK_CMP_EQ && CmpVal == High)
+      return SystemZ::CCMASK_TM_MIXED_MSB_1;
+    if (CCMask == SystemZ::CCMASK_CMP_NE && CmpVal == High)
+      return SystemZ::CCMASK_TM_MIXED_MSB_1 ^ SystemZ::CCMASK_ANY;
+  }
+
+  // Looks like we've exhausted our options.
+  return 0;
+}
+
+// See whether the comparison (Opcode CmpOp0, CmpOp1, ICmpType) can be
+// implemented as a TEST UNDER MASK instruction when the condition being
+// tested is as described by CCValid and CCMask.  Update the arguments
+// with the TM version if so.
+static void adjustForTestUnderMask(SelectionDAG &DAG, unsigned &Opcode,
+                                   SDValue &CmpOp0, SDValue &CmpOp1,
+                                   unsigned &CCValid, unsigned &CCMask,
+                                   unsigned &ICmpType) {
+  // Check that we have a comparison with a constant.
   ConstantSDNode *ConstCmpOp1 = dyn_cast<ConstantSDNode>(CmpOp1);
-  if (!ConstCmpOp1 || ConstCmpOp1->getZExtValue() != 0)
+  if (!ConstCmpOp1)
     return;
+  uint64_t CmpVal = ConstCmpOp1->getZExtValue();
 
   // Check whether the nonconstant input is an AND with a constant mask.
   if (CmpOp0.getOpcode() != ISD::AND)
@@ -1199,45 +1363,83 @@ static void adjustForTestUnderMask(unsigned &Opcode, SDValue &CmpOp0,
   ConstantSDNode *Mask = dyn_cast<ConstantSDNode>(AndOp1.getNode());
   if (!Mask)
     return;
-
-  // Check whether the mask is suitable for TMHH, TMHL, TMLH or TMLL.
   uint64_t MaskVal = Mask->getZExtValue();
-  if (!SystemZ::isImmLL(MaskVal) && !SystemZ::isImmLH(MaskVal) &&
-      !SystemZ::isImmHL(MaskVal) && !SystemZ::isImmHH(MaskVal))
-    return;
+
+  // Check whether the combination of mask, comparison value and comparison
+  // type are suitable.
+  unsigned BitSize = CmpOp0.getValueType().getSizeInBits();
+  unsigned NewCCMask, ShiftVal;
+  if (ICmpType != SystemZICMP::SignedOnly &&
+      AndOp0.getOpcode() == ISD::SHL &&
+      isSimpleShift(AndOp0, ShiftVal) &&
+      (NewCCMask = getTestUnderMaskCond(BitSize, CCMask, MaskVal >> ShiftVal,
+                                        CmpVal >> ShiftVal,
+                                        SystemZICMP::Any))) {
+    AndOp0 = AndOp0.getOperand(0);
+    AndOp1 = DAG.getConstant(MaskVal >> ShiftVal, AndOp0.getValueType());
+  } else if (ICmpType != SystemZICMP::SignedOnly &&
+             AndOp0.getOpcode() == ISD::SRL &&
+             isSimpleShift(AndOp0, ShiftVal) &&
+             (NewCCMask = getTestUnderMaskCond(BitSize, CCMask,
+                                               MaskVal << ShiftVal,
+                                               CmpVal << ShiftVal,
+                                               SystemZICMP::UnsignedOnly))) {
+    AndOp0 = AndOp0.getOperand(0);
+    AndOp1 = DAG.getConstant(MaskVal << ShiftVal, AndOp0.getValueType());
+  } else {
+    NewCCMask = getTestUnderMaskCond(BitSize, CCMask, MaskVal, CmpVal,
+                                     ICmpType);
+    if (!NewCCMask)
+      return;
+  }
 
   // Go ahead and make the change.
   Opcode = SystemZISD::TM;
   CmpOp0 = AndOp0;
   CmpOp1 = AndOp1;
+  ICmpType = (bool(NewCCMask & SystemZ::CCMASK_TM_MIXED_MSB_0) !=
+              bool(NewCCMask & SystemZ::CCMASK_TM_MIXED_MSB_1));
   CCValid = SystemZ::CCMASK_TM;
-  CCMask = (CCMask == SystemZ::CCMASK_CMP_EQ ?
-            SystemZ::CCMASK_TM_ALL_0 :
-            SystemZ::CCMASK_TM_ALL_0 ^ CCValid);
+  CCMask = NewCCMask;
 }
 
 // Return a target node that compares CmpOp0 with CmpOp1 and stores a
 // 2-bit result in CC.  Set CCValid to the CCMASK_* of all possible
 // 2-bit results and CCMask to the subset of those results that are
 // associated with Cond.
-static SDValue emitCmp(SelectionDAG &DAG, SDLoc DL, SDValue CmpOp0,
-                       SDValue CmpOp1, ISD::CondCode Cond, unsigned &CCValid,
+static SDValue emitCmp(const SystemZTargetMachine &TM, SelectionDAG &DAG,
+                       SDLoc DL, SDValue CmpOp0, SDValue CmpOp1,
+                       ISD::CondCode Cond, unsigned &CCValid,
                        unsigned &CCMask) {
   bool IsUnsigned = false;
   CCMask = CCMaskForCondCode(Cond);
-  if (CmpOp0.getValueType().isFloatingPoint())
+  unsigned Opcode, ICmpType = 0;
+  if (CmpOp0.getValueType().isFloatingPoint()) {
     CCValid = SystemZ::CCMASK_FCMP;
-  else {
+    Opcode = SystemZISD::FCMP;
+  } else {
     IsUnsigned = CCMask & SystemZ::CCMASK_CMP_UO;
     CCValid = SystemZ::CCMASK_ICMP;
     CCMask &= CCValid;
     adjustZeroCmp(DAG, IsUnsigned, CmpOp0, CmpOp1, CCMask);
     adjustSubwordCmp(DAG, IsUnsigned, CmpOp0, CmpOp1, CCMask);
-    if (preferUnsignedComparison(CmpOp0, CmpOp1, CCMask))
-      IsUnsigned = true;
+    Opcode = SystemZISD::ICMP;
+    // Choose the type of comparison.  Equality and inequality tests can
+    // use either signed or unsigned comparisons.  The choice also doesn't
+    // matter if both sign bits are known to be clear.  In those cases we
+    // want to give the main isel code the freedom to choose whichever
+    // form fits best.
+    if (CCMask == SystemZ::CCMASK_CMP_EQ ||
+        CCMask == SystemZ::CCMASK_CMP_NE ||
+        (DAG.SignBitIsZero(CmpOp0) && DAG.SignBitIsZero(CmpOp1)))
+      ICmpType = SystemZICMP::Any;
+    else if (IsUnsigned)
+      ICmpType = SystemZICMP::UnsignedOnly;
+    else
+      ICmpType = SystemZICMP::SignedOnly;
   }
 
-  if (shouldSwapCmpOperands(CmpOp0, CmpOp1, IsUnsigned)) {
+  if (shouldSwapCmpOperands(CmpOp0, CmpOp1, ICmpType)) {
     std::swap(CmpOp0, CmpOp1);
     CCMask = ((CCMask & SystemZ::CCMASK_CMP_EQ) |
               (CCMask & SystemZ::CCMASK_CMP_GT ? SystemZ::CCMASK_CMP_LT : 0) |
@@ -1245,8 +1447,11 @@ static SDValue emitCmp(SelectionDAG &DAG, SDLoc DL, SDValue CmpOp0,
               (CCMask & SystemZ::CCMASK_CMP_UO));
   }
 
-  unsigned Opcode = (IsUnsigned ? SystemZISD::UCMP : SystemZISD::CMP);
-  adjustForTestUnderMask(Opcode, CmpOp0, CmpOp1, CCValid, CCMask);
+  adjustForTestUnderMask(DAG, Opcode, CmpOp0, CmpOp1, CCValid, CCMask,
+                         ICmpType);
+  if (Opcode == SystemZISD::ICMP || Opcode == SystemZISD::TM)
+    return DAG.getNode(Opcode, DL, MVT::Glue, CmpOp0, CmpOp1,
+                       DAG.getConstant(ICmpType, MVT::i32));
   return DAG.getNode(Opcode, DL, MVT::Glue, CmpOp0, CmpOp1);
 }
 
@@ -1277,14 +1482,38 @@ static void lowerGR128Binary(SelectionDAG &DAG, SDLoc DL, EVT VT,
   SDValue Result = DAG.getNode(Opcode, DL, MVT::Untyped,
                                SDValue(In128, 0), Op1);
   bool Is32Bit = is32Bit(VT);
-  SDValue SubReg0 = DAG.getTargetConstant(SystemZ::even128(Is32Bit), VT);
-  SDValue SubReg1 = DAG.getTargetConstant(SystemZ::odd128(Is32Bit), VT);
-  SDNode *Reg0 = DAG.getMachineNode(TargetOpcode::EXTRACT_SUBREG, DL,
-                                    VT, Result, SubReg0);
-  SDNode *Reg1 = DAG.getMachineNode(TargetOpcode::EXTRACT_SUBREG, DL,
-                                    VT, Result, SubReg1);
-  Even = SDValue(Reg0, 0);
-  Odd = SDValue(Reg1, 0);
+  Even = DAG.getTargetExtractSubreg(SystemZ::even128(Is32Bit), DL, VT, Result);
+  Odd = DAG.getTargetExtractSubreg(SystemZ::odd128(Is32Bit), DL, VT, Result);
+}
+
+SDValue SystemZTargetLowering::lowerSETCC(SDValue Op,
+                                          SelectionDAG &DAG) const {
+  SDValue CmpOp0   = Op.getOperand(0);
+  SDValue CmpOp1   = Op.getOperand(1);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(2))->get();
+  SDLoc DL(Op);
+
+  unsigned CCValid, CCMask;
+  SDValue Glue = emitCmp(TM, DAG, DL, CmpOp0, CmpOp1, CC, CCValid, CCMask);
+
+  IPMConversion Conversion = getIPMConversion(CCValid, CCMask);
+  SDValue Result = DAG.getNode(SystemZISD::IPM, DL, MVT::i32, Glue);
+
+  if (Conversion.XORValue)
+    Result = DAG.getNode(ISD::XOR, DL, MVT::i32, Result,
+                         DAG.getConstant(Conversion.XORValue, MVT::i32));
+
+  if (Conversion.AddValue)
+    Result = DAG.getNode(ISD::ADD, DL, MVT::i32, Result,
+                         DAG.getConstant(Conversion.AddValue, MVT::i32));
+
+  // The SHR/AND sequence should get optimized to an RISBG.
+  Result = DAG.getNode(ISD::SRL, DL, MVT::i32, Result,
+                       DAG.getConstant(Conversion.Bit, MVT::i32));
+  if (Conversion.Bit != 31)
+    Result = DAG.getNode(ISD::AND, DL, MVT::i32, Result,
+                         DAG.getConstant(1, MVT::i32));
+  return Result;
 }
 
 SDValue SystemZTargetLowering::lowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
@@ -1296,7 +1525,7 @@ SDValue SystemZTargetLowering::lowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DL(Op);
 
   unsigned CCValid, CCMask;
-  SDValue Flags = emitCmp(DAG, DL, CmpOp0, CmpOp1, CC, CCValid, CCMask);
+  SDValue Flags = emitCmp(TM, DAG, DL, CmpOp0, CmpOp1, CC, CCValid, CCMask);
   return DAG.getNode(SystemZISD::BR_CCMASK, DL, Op.getValueType(),
                      Chain, DAG.getConstant(CCValid, MVT::i32),
                      DAG.getConstant(CCMask, MVT::i32), Dest, Flags);
@@ -1312,7 +1541,7 @@ SDValue SystemZTargetLowering::lowerSELECT_CC(SDValue Op,
   SDLoc DL(Op);
 
   unsigned CCValid, CCMask;
-  SDValue Flags = emitCmp(DAG, DL, CmpOp0, CmpOp1, CC, CCValid, CCMask);
+  SDValue Flags = emitCmp(TM, DAG, DL, CmpOp0, CmpOp1, CC, CCValid, CCMask);
 
   SmallVector<SDValue, 5> Ops;
   Ops.push_back(TrueOp);
@@ -1336,18 +1565,18 @@ SDValue SystemZTargetLowering::lowerGlobalAddress(GlobalAddressSDNode *Node,
 
   SDValue Result;
   if (Subtarget.isPC32DBLSymbol(GV, RM, CM)) {
-    // Make sure that the offset is aligned to a halfword.  If it isn't,
-    // create an "anchor" at the previous 12-bit boundary.
-    // FIXME check whether there is a better way of handling this.
-    if (Offset & 1) {
-      Result = DAG.getTargetGlobalAddress(GV, DL, PtrVT,
-                                          Offset & ~uint64_t(0xfff));
-      Offset &= 0xfff;
-    } else {
-      Result = DAG.getTargetGlobalAddress(GV, DL, PtrVT, Offset);
+    // Assign anchors at 1<<12 byte boundaries.
+    uint64_t Anchor = Offset & ~uint64_t(0xfff);
+    Result = DAG.getTargetGlobalAddress(GV, DL, PtrVT, Anchor);
+    Result = DAG.getNode(SystemZISD::PCREL_WRAPPER, DL, PtrVT, Result);
+
+    // The offset can be folded into the address if it is aligned to a halfword.
+    Offset -= Anchor;
+    if (Offset != 0 && (Offset & 1) == 0) {
+      SDValue Full = DAG.getTargetGlobalAddress(GV, DL, PtrVT, Anchor + Offset);
+      Result = DAG.getNode(SystemZISD::PCREL_OFFSET, DL, PtrVT, Full, Result);
       Offset = 0;
     }
-    Result = DAG.getNode(SystemZISD::PCREL_WRAPPER, DL, PtrVT, Result);
   } else {
     Result = DAG.getTargetGlobalAddress(GV, DL, PtrVT, 0, SystemZII::MO_GOT);
     Result = DAG.getNode(SystemZISD::PCREL_WRAPPER, DL, PtrVT, Result);
@@ -1449,24 +1678,33 @@ SDValue SystemZTargetLowering::lowerBITCAST(SDValue Op,
   EVT InVT = In.getValueType();
   EVT ResVT = Op.getValueType();
 
-  SDValue SubReg32 = DAG.getTargetConstant(SystemZ::subreg_32bit, MVT::i64);
-  SDValue Shift32 = DAG.getConstant(32, MVT::i64);
   if (InVT == MVT::i32 && ResVT == MVT::f32) {
-    SDValue In64 = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i64, In);
-    SDValue Shift = DAG.getNode(ISD::SHL, DL, MVT::i64, In64, Shift32);
-    SDValue Out64 = DAG.getNode(ISD::BITCAST, DL, MVT::f64, Shift);
-    SDNode *Out = DAG.getMachineNode(TargetOpcode::EXTRACT_SUBREG, DL,
-                                     MVT::f32, Out64, SubReg32);
-    return SDValue(Out, 0);
+    SDValue In64;
+    if (Subtarget.hasHighWord()) {
+      SDNode *U64 = DAG.getMachineNode(TargetOpcode::IMPLICIT_DEF, DL,
+                                       MVT::i64);
+      In64 = DAG.getTargetInsertSubreg(SystemZ::subreg_h32, DL,
+                                       MVT::i64, SDValue(U64, 0), In);
+    } else {
+      In64 = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i64, In);
+      In64 = DAG.getNode(ISD::SHL, DL, MVT::i64, In64,
+                         DAG.getConstant(32, MVT::i64));
+    }
+    SDValue Out64 = DAG.getNode(ISD::BITCAST, DL, MVT::f64, In64);
+    return DAG.getTargetExtractSubreg(SystemZ::subreg_h32,
+                                      DL, MVT::f32, Out64);
   }
   if (InVT == MVT::f32 && ResVT == MVT::i32) {
     SDNode *U64 = DAG.getMachineNode(TargetOpcode::IMPLICIT_DEF, DL, MVT::f64);
-    SDNode *In64 = DAG.getMachineNode(TargetOpcode::INSERT_SUBREG, DL,
-                                      MVT::f64, SDValue(U64, 0), In, SubReg32);
-    SDValue Out64 = DAG.getNode(ISD::BITCAST, DL, MVT::i64, SDValue(In64, 0));
-    SDValue Shift = DAG.getNode(ISD::SRL, DL, MVT::i64, Out64, Shift32);
-    SDValue Out = DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, Shift);
-    return Out;
+    SDValue In64 = DAG.getTargetInsertSubreg(SystemZ::subreg_h32, DL,
+                                             MVT::f64, SDValue(U64, 0), In);
+    SDValue Out64 = DAG.getNode(ISD::BITCAST, DL, MVT::i64, In64);
+    if (Subtarget.hasHighWord())
+      return DAG.getTargetExtractSubreg(SystemZ::subreg_h32, DL,
+                                        MVT::i32, Out64);
+    SDValue Shift = DAG.getNode(ISD::SRL, DL, MVT::i64, Out64,
+                                DAG.getConstant(32, MVT::i64));
+    return DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, Shift);
   }
   llvm_unreachable("Unexpected bitcast combination");
 }
@@ -1707,10 +1945,8 @@ SDValue SystemZTargetLowering::lowerOR(SDValue Op, SelectionDAG &DAG) const {
   // can be folded.
   SDLoc DL(Op);
   SDValue Low32 = DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, LowOp);
-  SDValue SubReg32 = DAG.getTargetConstant(SystemZ::subreg_32bit, MVT::i64);
-  SDNode *Result = DAG.getMachineNode(TargetOpcode::INSERT_SUBREG, DL,
-                                      MVT::i64, HighOp, Low32, SubReg32);
-  return SDValue(Result, 0);
+  return DAG.getTargetInsertSubreg(SystemZ::subreg_l32, DL,
+                                   MVT::i64, HighOp, Low32);
 }
 
 // Op is an 8-, 16-bit or 32-bit ATOMIC_LOAD_* operation.  Lower the first
@@ -1876,6 +2112,8 @@ SDValue SystemZTargetLowering::LowerOperation(SDValue Op,
     return lowerBR_CC(Op, DAG);
   case ISD::SELECT_CC:
     return lowerSELECT_CC(Op, DAG);
+  case ISD::SETCC:
+    return lowerSETCC(Op, DAG);
   case ISD::GlobalAddress:
     return lowerGlobalAddress(cast<GlobalAddressSDNode>(Op), DAG);
   case ISD::GlobalTLSAddress:
@@ -1946,8 +2184,9 @@ const char *SystemZTargetLowering::getTargetNodeName(unsigned Opcode) const {
     OPCODE(CALL);
     OPCODE(SIBCALL);
     OPCODE(PCREL_WRAPPER);
-    OPCODE(CMP);
-    OPCODE(UCMP);
+    OPCODE(PCREL_OFFSET);
+    OPCODE(ICMP);
+    OPCODE(FCMP);
     OPCODE(TM);
     OPCODE(BR_CCMASK);
     OPCODE(SELECT_CCMASK);
@@ -1959,6 +2198,12 @@ const char *SystemZTargetLowering::getTargetNodeName(unsigned Opcode) const {
     OPCODE(UDIVREM64);
     OPCODE(MVC);
     OPCODE(MVC_LOOP);
+    OPCODE(NC);
+    OPCODE(NC_LOOP);
+    OPCODE(OC);
+    OPCODE(OC_LOOP);
+    OPCODE(XC);
+    OPCODE(XC_LOOP);
     OPCODE(CLC);
     OPCODE(CLC_LOOP);
     OPCODE(STRCMP);
@@ -2224,11 +2469,11 @@ SystemZTargetLowering::emitAtomicLoadBinary(MachineInstr *MI,
       .addReg(RotatedOldVal).addOperand(Src2);
     if (BitSize < 32)
       // XILF with the upper BitSize bits set.
-      BuildMI(MBB, DL, TII->get(SystemZ::XILF32), RotatedNewVal)
+      BuildMI(MBB, DL, TII->get(SystemZ::XILF), RotatedNewVal)
         .addReg(Tmp).addImm(uint32_t(~0 << (32 - BitSize)));
     else if (BitSize == 32)
       // XILF with every bit set.
-      BuildMI(MBB, DL, TII->get(SystemZ::XILF32), RotatedNewVal)
+      BuildMI(MBB, DL, TII->get(SystemZ::XILF), RotatedNewVal)
         .addReg(Tmp).addImm(~uint32_t(0));
     else {
       // Use LCGR and add -1 to the result, which is more compact than
@@ -2495,8 +2740,8 @@ SystemZTargetLowering::emitAtomicCmpSwapW(MachineInstr *MI,
 
 // Emit an extension from a GR32 or GR64 to a GR128.  ClearEven is true
 // if the high register of the GR128 value must be cleared or false if
-// it's "don't care".  SubReg is subreg_odd32 when extending a GR32
-// and subreg_odd when extending a GR64.
+// it's "don't care".  SubReg is subreg_l32 when extending a GR32
+// and subreg_l64 when extending a GR64.
 MachineBasicBlock *
 SystemZTargetLowering::emitExt128(MachineInstr *MI,
                                   MachineBasicBlock *MBB,
@@ -2518,7 +2763,7 @@ SystemZTargetLowering::emitExt128(MachineInstr *MI,
     BuildMI(*MBB, MI, DL, TII->get(SystemZ::LLILL), Zero64)
       .addImm(0);
     BuildMI(*MBB, MI, DL, TII->get(TargetOpcode::INSERT_SUBREG), NewIn128)
-      .addReg(In128).addReg(Zero64).addImm(SystemZ::subreg_high);
+      .addReg(In128).addReg(Zero64).addImm(SystemZ::subreg_h64);
     In128 = NewIn128;
   }
   BuildMI(*MBB, MI, DL, TII->get(TargetOpcode::INSERT_SUBREG), Dest)
@@ -2727,12 +2972,12 @@ SystemZTargetLowering::emitStringWrapper(MachineInstr *MI,
   //  LoopMBB:
   //   %This1Reg = phi [ %Start1Reg, StartMBB ], [ %End1Reg, LoopMBB ]
   //   %This2Reg = phi [ %Start2Reg, StartMBB ], [ %End2Reg, LoopMBB ]
-  //   R0W = %CharReg
-  //   %End1Reg, %End2Reg = CLST %This1Reg, %This2Reg -- uses R0W
+  //   R0L = %CharReg
+  //   %End1Reg, %End2Reg = CLST %This1Reg, %This2Reg -- uses R0L
   //   JO LoopMBB
   //   # fall through to DoneMMB
   //
-  // The load of R0W can be hoisted by post-RA LICM.
+  // The load of R0L can be hoisted by post-RA LICM.
   MBB = LoopMBB;
 
   BuildMI(MBB, DL, TII->get(SystemZ::PHI), This1Reg)
@@ -2741,7 +2986,7 @@ SystemZTargetLowering::emitStringWrapper(MachineInstr *MI,
   BuildMI(MBB, DL, TII->get(SystemZ::PHI), This2Reg)
     .addReg(Start2Reg).addMBB(StartMBB)
     .addReg(End2Reg).addMBB(LoopMBB);
-  BuildMI(MBB, DL, TII->get(TargetOpcode::COPY), SystemZ::R0W).addReg(CharReg);
+  BuildMI(MBB, DL, TII->get(TargetOpcode::COPY), SystemZ::R0L).addReg(CharReg);
   BuildMI(MBB, DL, TII->get(Opcode))
     .addReg(End1Reg, RegState::Define).addReg(End2Reg, RegState::Define)
     .addReg(This1Reg).addReg(This2Reg);
@@ -2759,6 +3004,7 @@ SystemZTargetLowering::emitStringWrapper(MachineInstr *MI,
 MachineBasicBlock *SystemZTargetLowering::
 EmitInstrWithCustomInserter(MachineInstr *MI, MachineBasicBlock *MBB) const {
   switch (MI->getOpcode()) {
+  case SystemZ::Select32Mux:
   case SystemZ::Select32:
   case SystemZ::SelectF32:
   case SystemZ::Select64:
@@ -2766,18 +3012,14 @@ EmitInstrWithCustomInserter(MachineInstr *MI, MachineBasicBlock *MBB) const {
   case SystemZ::SelectF128:
     return emitSelect(MI, MBB);
 
-  case SystemZ::CondStore8_32:
-    return emitCondStore(MI, MBB, SystemZ::STC32, 0, false);
-  case SystemZ::CondStore8_32Inv:
-    return emitCondStore(MI, MBB, SystemZ::STC32, 0, true);
-  case SystemZ::CondStore16_32:
-    return emitCondStore(MI, MBB, SystemZ::STH32, 0, false);
-  case SystemZ::CondStore16_32Inv:
-    return emitCondStore(MI, MBB, SystemZ::STH32, 0, true);
-  case SystemZ::CondStore32_32:
-    return emitCondStore(MI, MBB, SystemZ::ST32, SystemZ::STOC32, false);
-  case SystemZ::CondStore32_32Inv:
-    return emitCondStore(MI, MBB, SystemZ::ST32, SystemZ::STOC32, true);
+  case SystemZ::CondStore8Mux:
+    return emitCondStore(MI, MBB, SystemZ::STCMux, 0, false);
+  case SystemZ::CondStore8MuxInv:
+    return emitCondStore(MI, MBB, SystemZ::STCMux, 0, true);
+  case SystemZ::CondStore16Mux:
+    return emitCondStore(MI, MBB, SystemZ::STHMux, 0, false);
+  case SystemZ::CondStore16MuxInv:
+    return emitCondStore(MI, MBB, SystemZ::STHMux, 0, true);
   case SystemZ::CondStore8:
     return emitCondStore(MI, MBB, SystemZ::STC, 0, false);
   case SystemZ::CondStore8Inv:
@@ -2804,11 +3046,11 @@ EmitInstrWithCustomInserter(MachineInstr *MI, MachineBasicBlock *MBB) const {
     return emitCondStore(MI, MBB, SystemZ::STD, 0, true);
 
   case SystemZ::AEXT128_64:
-    return emitExt128(MI, MBB, false, SystemZ::subreg_low);
+    return emitExt128(MI, MBB, false, SystemZ::subreg_l64);
   case SystemZ::ZEXT128_32:
-    return emitExt128(MI, MBB, true, SystemZ::subreg_low32);
+    return emitExt128(MI, MBB, true, SystemZ::subreg_l32);
   case SystemZ::ZEXT128_64:
-    return emitExt128(MI, MBB, true, SystemZ::subreg_low);
+    return emitExt128(MI, MBB, true, SystemZ::subreg_l64);
 
   case SystemZ::ATOMIC_SWAPW:
     return emitAtomicLoadBinary(MI, MBB, 0, 0);
@@ -2844,98 +3086,98 @@ EmitInstrWithCustomInserter(MachineInstr *MI, MachineBasicBlock *MBB) const {
   case SystemZ::ATOMIC_LOADW_NR:
     return emitAtomicLoadBinary(MI, MBB, SystemZ::NR, 0);
   case SystemZ::ATOMIC_LOADW_NILH:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILH32, 0);
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILH, 0);
   case SystemZ::ATOMIC_LOAD_NR:
     return emitAtomicLoadBinary(MI, MBB, SystemZ::NR, 32);
-  case SystemZ::ATOMIC_LOAD_NILL32:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILL32, 32);
-  case SystemZ::ATOMIC_LOAD_NILH32:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILH32, 32);
-  case SystemZ::ATOMIC_LOAD_NILF32:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILF32, 32);
+  case SystemZ::ATOMIC_LOAD_NILL:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILL, 32);
+  case SystemZ::ATOMIC_LOAD_NILH:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILH, 32);
+  case SystemZ::ATOMIC_LOAD_NILF:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILF, 32);
   case SystemZ::ATOMIC_LOAD_NGR:
     return emitAtomicLoadBinary(MI, MBB, SystemZ::NGR, 64);
-  case SystemZ::ATOMIC_LOAD_NILL:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILL, 64);
-  case SystemZ::ATOMIC_LOAD_NILH:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILH, 64);
-  case SystemZ::ATOMIC_LOAD_NIHL:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NIHL, 64);
-  case SystemZ::ATOMIC_LOAD_NIHH:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NIHH, 64);
-  case SystemZ::ATOMIC_LOAD_NILF:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILF, 64);
-  case SystemZ::ATOMIC_LOAD_NIHF:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NIHF, 64);
+  case SystemZ::ATOMIC_LOAD_NILL64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILL64, 64);
+  case SystemZ::ATOMIC_LOAD_NILH64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILH64, 64);
+  case SystemZ::ATOMIC_LOAD_NIHL64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NIHL64, 64);
+  case SystemZ::ATOMIC_LOAD_NIHH64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NIHH64, 64);
+  case SystemZ::ATOMIC_LOAD_NILF64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILF64, 64);
+  case SystemZ::ATOMIC_LOAD_NIHF64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NIHF64, 64);
 
   case SystemZ::ATOMIC_LOADW_OR:
     return emitAtomicLoadBinary(MI, MBB, SystemZ::OR, 0);
   case SystemZ::ATOMIC_LOADW_OILH:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILH32, 0);
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILH, 0);
   case SystemZ::ATOMIC_LOAD_OR:
     return emitAtomicLoadBinary(MI, MBB, SystemZ::OR, 32);
-  case SystemZ::ATOMIC_LOAD_OILL32:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILL32, 32);
-  case SystemZ::ATOMIC_LOAD_OILH32:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILH32, 32);
-  case SystemZ::ATOMIC_LOAD_OILF32:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILF32, 32);
+  case SystemZ::ATOMIC_LOAD_OILL:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILL, 32);
+  case SystemZ::ATOMIC_LOAD_OILH:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILH, 32);
+  case SystemZ::ATOMIC_LOAD_OILF:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILF, 32);
   case SystemZ::ATOMIC_LOAD_OGR:
     return emitAtomicLoadBinary(MI, MBB, SystemZ::OGR, 64);
-  case SystemZ::ATOMIC_LOAD_OILL:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILL, 64);
-  case SystemZ::ATOMIC_LOAD_OILH:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILH, 64);
-  case SystemZ::ATOMIC_LOAD_OIHL:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::OIHL, 64);
-  case SystemZ::ATOMIC_LOAD_OIHH:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::OIHH, 64);
-  case SystemZ::ATOMIC_LOAD_OILF:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILF, 64);
-  case SystemZ::ATOMIC_LOAD_OIHF:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::OIHF, 64);
+  case SystemZ::ATOMIC_LOAD_OILL64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILL64, 64);
+  case SystemZ::ATOMIC_LOAD_OILH64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILH64, 64);
+  case SystemZ::ATOMIC_LOAD_OIHL64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::OIHL64, 64);
+  case SystemZ::ATOMIC_LOAD_OIHH64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::OIHH64, 64);
+  case SystemZ::ATOMIC_LOAD_OILF64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::OILF64, 64);
+  case SystemZ::ATOMIC_LOAD_OIHF64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::OIHF64, 64);
 
   case SystemZ::ATOMIC_LOADW_XR:
     return emitAtomicLoadBinary(MI, MBB, SystemZ::XR, 0);
   case SystemZ::ATOMIC_LOADW_XILF:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::XILF32, 0);
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::XILF, 0);
   case SystemZ::ATOMIC_LOAD_XR:
     return emitAtomicLoadBinary(MI, MBB, SystemZ::XR, 32);
-  case SystemZ::ATOMIC_LOAD_XILF32:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::XILF32, 32);
+  case SystemZ::ATOMIC_LOAD_XILF:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::XILF, 32);
   case SystemZ::ATOMIC_LOAD_XGR:
     return emitAtomicLoadBinary(MI, MBB, SystemZ::XGR, 64);
-  case SystemZ::ATOMIC_LOAD_XILF:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::XILF, 64);
-  case SystemZ::ATOMIC_LOAD_XIHF:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::XIHF, 64);
+  case SystemZ::ATOMIC_LOAD_XILF64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::XILF64, 64);
+  case SystemZ::ATOMIC_LOAD_XIHF64:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::XIHF64, 64);
 
   case SystemZ::ATOMIC_LOADW_NRi:
     return emitAtomicLoadBinary(MI, MBB, SystemZ::NR, 0, true);
   case SystemZ::ATOMIC_LOADW_NILHi:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILH32, 0, true);
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILH, 0, true);
   case SystemZ::ATOMIC_LOAD_NRi:
     return emitAtomicLoadBinary(MI, MBB, SystemZ::NR, 32, true);
-  case SystemZ::ATOMIC_LOAD_NILL32i:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILL32, 32, true);
-  case SystemZ::ATOMIC_LOAD_NILH32i:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILH32, 32, true);
-  case SystemZ::ATOMIC_LOAD_NILF32i:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILF32, 32, true);
+  case SystemZ::ATOMIC_LOAD_NILLi:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILL, 32, true);
+  case SystemZ::ATOMIC_LOAD_NILHi:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILH, 32, true);
+  case SystemZ::ATOMIC_LOAD_NILFi:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILF, 32, true);
   case SystemZ::ATOMIC_LOAD_NGRi:
     return emitAtomicLoadBinary(MI, MBB, SystemZ::NGR, 64, true);
-  case SystemZ::ATOMIC_LOAD_NILLi:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILL, 64, true);
-  case SystemZ::ATOMIC_LOAD_NILHi:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILH, 64, true);
-  case SystemZ::ATOMIC_LOAD_NIHLi:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NIHL, 64, true);
-  case SystemZ::ATOMIC_LOAD_NIHHi:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NIHH, 64, true);
-  case SystemZ::ATOMIC_LOAD_NILFi:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILF, 64, true);
-  case SystemZ::ATOMIC_LOAD_NIHFi:
-    return emitAtomicLoadBinary(MI, MBB, SystemZ::NIHF, 64, true);
+  case SystemZ::ATOMIC_LOAD_NILL64i:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILL64, 64, true);
+  case SystemZ::ATOMIC_LOAD_NILH64i:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILH64, 64, true);
+  case SystemZ::ATOMIC_LOAD_NIHL64i:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NIHL64, 64, true);
+  case SystemZ::ATOMIC_LOAD_NIHH64i:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NIHH64, 64, true);
+  case SystemZ::ATOMIC_LOAD_NILF64i:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NILF64, 64, true);
+  case SystemZ::ATOMIC_LOAD_NIHF64i:
+    return emitAtomicLoadBinary(MI, MBB, SystemZ::NIHF64, 64, true);
 
   case SystemZ::ATOMIC_LOADW_MIN:
     return emitAtomicLoadMinMax(MI, MBB, SystemZ::CR,
@@ -2982,6 +3224,15 @@ EmitInstrWithCustomInserter(MachineInstr *MI, MachineBasicBlock *MBB) const {
   case SystemZ::MVCSequence:
   case SystemZ::MVCLoop:
     return emitMemMemWrapper(MI, MBB, SystemZ::MVC);
+  case SystemZ::NCSequence:
+  case SystemZ::NCLoop:
+    return emitMemMemWrapper(MI, MBB, SystemZ::NC);
+  case SystemZ::OCSequence:
+  case SystemZ::OCLoop:
+    return emitMemMemWrapper(MI, MBB, SystemZ::OC);
+  case SystemZ::XCSequence:
+  case SystemZ::XCLoop:
+    return emitMemMemWrapper(MI, MBB, SystemZ::XC);
   case SystemZ::CLCSequence:
   case SystemZ::CLCLoop:
     return emitMemMemWrapper(MI, MBB, SystemZ::CLC);

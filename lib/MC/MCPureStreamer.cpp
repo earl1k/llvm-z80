@@ -29,7 +29,7 @@ private:
 public:
   MCPureStreamer(MCContext &Context, MCAsmBackend &TAB, raw_ostream &OS,
                  MCCodeEmitter *Emitter)
-      : MCObjectStreamer(SK_PureStreamer, Context, TAB, OS, Emitter) {}
+      : MCObjectStreamer(Context, 0, TAB, OS, Emitter) {}
 
   /// @name MCStreamer Interface
   /// @{
@@ -94,15 +94,12 @@ public:
   virtual void EmitFileDirective(StringRef Filename) {
     report_fatal_error("unsupported directive in pure streamer");
   }
+  virtual void EmitIdent(StringRef IdentString) {
+    report_fatal_error("unsupported directive in pure streamer");
+  }
   virtual bool EmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
                                       StringRef Filename, unsigned CUID = 0) {
     report_fatal_error("unsupported directive in pure streamer");
-  }
-
-  /// @}
-
-  static bool classof(const MCStreamer *S) {
-    return S->getKind() == SK_PureStreamer;
   }
 };
 
@@ -121,7 +118,7 @@ void MCPureStreamer::EmitLabel(MCSymbol *Symbol) {
   assert(!Symbol->isVariable() && "Cannot emit a variable symbol!");
   assert(getCurrentSection().first && "Cannot emit before setting section!");
 
-  Symbol->setSection(*getCurrentSection().first);
+  AssignSection(Symbol, getCurrentSection().first);
 
   MCSymbolData &SD = getAssembler().getOrCreateSymbolData(*Symbol);
 

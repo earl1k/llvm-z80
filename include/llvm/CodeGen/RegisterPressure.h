@@ -22,7 +22,7 @@
 namespace llvm {
 
 class LiveIntervals;
-class LiveInterval;
+class LiveRange;
 class RegisterClassInfo;
 class MachineInstr;
 
@@ -145,6 +145,8 @@ public:
   typedef const PressureChange* const_iterator;
   iterator begin() { return &PressureChanges[0]; }
   iterator end() { return &PressureChanges[MaxPSets]; }
+  const_iterator begin() const { return &PressureChanges[0]; }
+  const_iterator end() const { return &PressureChanges[MaxPSets]; }
 
   void addPressureChange(unsigned RegUnit, bool IsDec,
                          const MachineRegisterInfo *MRI);
@@ -157,6 +159,9 @@ class PressureDiffs {
   unsigned Max;
 public:
   PressureDiffs(): PDiffArray(0), Size(0), Max(0) {}
+  ~PressureDiffs() { free(PDiffArray); }
+
+  void clear() { Size = 0; }
 
   void init(unsigned N);
 
@@ -286,6 +291,8 @@ public:
   RegPressureTracker(RegionPressure &rp) :
     MF(0), TRI(0), RCI(0), LIS(0), MBB(0), P(rp), RequireIntervals(false),
     TrackUntiedDefs(false) {}
+
+  void reset();
 
   void init(const MachineFunction *mf, const RegisterClassInfo *rci,
             const LiveIntervals *lis, const MachineBasicBlock *mbb,
@@ -417,7 +424,7 @@ public:
   void dump() const;
 
 protected:
-  const LiveInterval *getInterval(unsigned Reg) const;
+  const LiveRange *getLiveRange(unsigned Reg) const;
 
   void increaseRegPressure(ArrayRef<unsigned> Regs);
   void decreaseRegPressure(ArrayRef<unsigned> Regs);

@@ -20,6 +20,7 @@
 #ifndef LLVM_SUPPORT_ELF_H
 #define LLVM_SUPPORT_ELF_H
 
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
 #include <cstring>
 
@@ -650,7 +651,7 @@ enum {
 };
 
 // ARM Specific e_flags
-enum {
+enum LLVM_ENUM_INT_TYPE(unsigned) {
   EF_ARM_SOFT_FLOAT =     0x00000200U,
   EF_ARM_VFP_FLOAT =      0x00000400U,
   EF_ARM_EABI_UNKNOWN =   0x00000000U,
@@ -800,7 +801,7 @@ enum {
 };
 
 // Mips Specific e_flags
-enum {
+enum LLVM_ENUM_INT_TYPE(unsigned) {
   EF_MIPS_NOREORDER = 0x00000001, // Don't reorder instructions
   EF_MIPS_PIC       = 0x00000002, // Position independent code
   EF_MIPS_CPIC      = 0x00000004, // Call object with Position independent code
@@ -880,6 +881,19 @@ enum {
   R_MIPS_GLOB_DAT          = 51,
   R_MIPS_COPY              = 126,
   R_MIPS_JUMP_SLOT         = 127,
+  R_MICROMIPS_26_S1        = 133,
+  R_MICROMIPS_HI16         = 134,
+  R_MICROMIPS_LO16         = 135,
+  R_MICROMIPS_GOT16        = 138,
+  R_MICROMIPS_PC16_S1      = 141,
+  R_MICROMIPS_CALL16       = 142,
+  R_MICROMIPS_GOT_DISP     = 145,
+  R_MICROMIPS_GOT_PAGE     = 146,
+  R_MICROMIPS_GOT_OFST     = 147,
+  R_MICROMIPS_TLS_DTPREL_HI16 = 164,
+  R_MICROMIPS_TLS_DTPREL_LO16 = 165,
+  R_MICROMIPS_TLS_TPREL_HI16  = 169,
+  R_MICROMIPS_TLS_TPREL_LO16  = 170,
   R_MIPS_NUM               = 218
 };
 
@@ -1116,7 +1130,7 @@ enum {
 };
 
 // Section types.
-enum {
+enum LLVM_ENUM_INT_TYPE(unsigned) {
   SHT_NULL          = 0,  // No associated section (inactive entry).
   SHT_PROGBITS      = 1,  // Program-defined contents.
   SHT_SYMTAB        = 2,  // Symbol table.
@@ -1164,7 +1178,7 @@ enum {
 };
 
 // Section flags.
-enum {
+enum LLVM_ENUM_INT_TYPE(unsigned) {
   // Section data should be writable during execution.
   SHF_WRITE = 0x1,
 
@@ -1196,6 +1210,9 @@ enum {
   // This section holds Thread-Local Storage.
   SHF_TLS = 0x400U,
 
+  // This section is excluded from the final executable or shared library.
+  SHF_EXCLUDE = 0x80000000U,
+
   // Start of target-specific flags.
 
   /// XCORE_SHF_CP_SECTION - All sections with the "c" flag are grouped
@@ -1226,12 +1243,34 @@ enum {
   // for faster accesses
   SHF_HEX_GPREL = 0x10000000,
 
-  // Do not strip this section. FIXME: We need target specific SHF_ enums.
-  SHF_MIPS_NOSTRIP = 0x8000000
+  // Section contains text/data which may be replicated in other sections.
+  // Linker must retain only one copy.
+  SHF_MIPS_NODUPES = 0x01000000,
+
+  // Linker must generate implicit hidden weak names.
+  SHF_MIPS_NAMES   = 0x02000000,
+
+  // Section data local to process.
+  SHF_MIPS_LOCAL   = 0x04000000,
+
+  // Do not strip this section.
+  SHF_MIPS_NOSTRIP = 0x08000000,
+
+  // Section must be part of global data area.
+  SHF_MIPS_GPREL   = 0x10000000,
+
+  // This section should be merged.
+  SHF_MIPS_MERGE   = 0x20000000,
+
+  // Address size to be inferred from section entry size.
+  SHF_MIPS_ADDR    = 0x40000000,
+
+  // Section data is string data by default.
+  SHF_MIPS_STRING  = 0x80000000
 };
 
 // Section Group Flags
-enum {
+enum LLVM_ENUM_INT_TYPE(unsigned) {
   GRP_COMDAT = 0x1,
   GRP_MASKOS = 0x0ff00000,
   GRP_MASKPROC = 0xf0000000
@@ -1444,11 +1483,16 @@ enum {
   PT_ARM_ARCHEXT = 0x70000000, // Platform architecture compatibility info
   // These all contain stack unwind tables.
   PT_ARM_EXIDX   = 0x70000001,
-  PT_ARM_UNWIND  = 0x70000001
+  PT_ARM_UNWIND  = 0x70000001,
+
+  // MIPS program header types.
+  PT_MIPS_REGINFO  = 0x70000000,  // Register usage information.
+  PT_MIPS_RTPROC   = 0x70000001,  // Runtime procedure table.
+  PT_MIPS_OPTIONS  = 0x70000002   // Options segment.
 };
 
 // Segment flag bits.
-enum {
+enum LLVM_ENUM_INT_TYPE(unsigned) {
   PF_X        = 1,         // Execute
   PF_W        = 2,         // Write
   PF_R        = 4,         // Read
@@ -1526,6 +1570,7 @@ enum {
   DT_RELCOUNT     = 0x6FFFFFFA, // ELF32_Rel count.
 
   DT_FLAGS_1      = 0X6FFFFFFB, // Flags_1.
+  DT_VERSYM       = 0x6FFFFFF0, // The address of .gnu.version section.
   DT_VERDEF       = 0X6FFFFFFC, // The address of the version definition table.
   DT_VERDEFNUM    = 0X6FFFFFFD, // The number of entries in DT_VERDEF.
   DT_VERNEED      = 0X6FFFFFFE, // The address of the version Dependency table.

@@ -22,7 +22,6 @@ PPCMCAsmInfoDarwin::PPCMCAsmInfoDarwin(bool is64Bit) {
   }
   IsLittleEndian = false;
 
-  PCSymbol = ".";
   CommentString = ";";
   ExceptionsType = ExceptionHandling::DwarfCFI;
 
@@ -47,15 +46,14 @@ PPCLinuxMCAsmInfo::PPCLinuxMCAsmInfo(bool is64Bit) {
   CommentString = "#";
   GlobalPrefix = "";
   PrivateGlobalPrefix = ".L";
-  WeakRefDirective = "\t.weak\t";
-  
+
   // Uses '.section' before '.bss' directive
   UsesELFSectionDirectiveForBSS = true;  
 
   // Debug Information
   SupportsDebugInformation = true;
 
-  PCSymbol = ".";
+  DollarIsPC = true;
 
   // Set up DWARF directives
   HasLEB128 = true;  // Target asm supports leb128 directives (little-endian)

@@ -1,4 +1,4 @@
-//===-- SIInstrInfo.h - SI Instruction Info Interface ---------------------===//
+//===-- SIInstrInfo.h - SI Instruction Info Interface -----------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -40,16 +40,24 @@ public:
   virtual MachineInstr *commuteInstruction(MachineInstr *MI,
                                            bool NewMI=false) const;
 
-  virtual MachineInstr * getMovImmInstr(MachineFunction *MF, unsigned DstReg,
-                                        int64_t Imm) const;
-
   virtual unsigned getIEQOpcode() const { assert(!"Implement"); return 0;}
+  MachineInstr *buildMovInstr(MachineBasicBlock *MBB,
+                              MachineBasicBlock::iterator I,
+                              unsigned DstReg, unsigned SrcReg) const;
   virtual bool isMov(unsigned Opcode) const;
 
   virtual bool isSafeToMoveRegClassDefs(const TargetRegisterClass *RC) const;
   int isMIMG(uint16_t Opcode) const;
   int isSMRD(uint16_t Opcode) const;
+  bool isVOP1(uint16_t Opcode) const;
+  bool isVOP2(uint16_t Opcode) const;
+  bool isVOP3(uint16_t Opcode) const;
+  bool isVOPC(uint16_t Opcode) const;
+  bool isInlineConstant(const MachineOperand &MO) const;
+  bool isLiteralConstant(const MachineOperand &MO) const;
 
+  virtual bool verifyInstruction(const MachineInstr *MI,
+                                 StringRef &ErrInfo) const;
   virtual int getIndirectIndexBegin(const MachineFunction &MF) const;
 
   virtual int getIndirectIndexEnd(const MachineFunction &MF) const;
@@ -57,10 +65,7 @@ public:
   virtual unsigned calculateIndirectAddress(unsigned RegIndex,
                                             unsigned Channel) const;
 
-  virtual const TargetRegisterClass *getIndirectAddrStoreRegClass(
-                                                      unsigned SourceReg) const;
-
-  virtual const TargetRegisterClass *getIndirectAddrLoadRegClass() const;
+  virtual const TargetRegisterClass *getIndirectAddrRegClass() const;
 
   virtual MachineInstrBuilder buildIndirectWrite(MachineBasicBlock *MBB,
                                                  MachineBasicBlock::iterator I,
@@ -73,8 +78,6 @@ public:
                                                 unsigned ValueReg,
                                                 unsigned Address,
                                                 unsigned OffsetReg) const;
-
-  virtual const TargetRegisterClass *getSuperIndirectRegClass() const;
   };
 
 namespace AMDGPU {

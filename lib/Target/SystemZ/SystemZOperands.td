@@ -46,7 +46,8 @@ class PCRelOperand<ValueType vt, AsmOperandClass asmop> : Operand<vt> {
 // address with address size VT.  SELF is the name of the operand and
 // ASMOP is the associated asm operand.
 class PCRelAddress<ValueType vt, string self, AsmOperandClass asmop>
-  : ComplexPattern<vt, 1, "selectPCRelAddress", [z_pcrel_wrapper]>,
+  : ComplexPattern<vt, 1, "selectPCRelAddress",
+                   [z_pcrel_wrapper, z_pcrel_offset]>,
     PCRelOperand<vt, asmop> {
   let MIOperandInfo = (ops !cast<Operand>(self));
 }
@@ -333,6 +334,10 @@ def imm64sx8 : Immediate<i64, [{
   return isInt<8>(N->getSExtValue());
 }], SIMM8, "S8Imm">;
 
+def imm64zx8 : Immediate<i64, [{
+  return isUInt<8>(N->getSExtValue());
+}], UIMM8, "U8Imm">;
+
 def imm64sx16 : Immediate<i64, [{
   return isInt<16>(N->getSExtValue());
 }], SIMM16, "S16Imm">;
@@ -388,19 +393,6 @@ def brtarget32 : PCRelOperand<OtherVT, PCRel32> {
 // and multiplied by 2.
 def pcrel32 : PCRelAddress<i64, "pcrel32", PCRel32> {
   let EncoderMethod = "getPC32DBLEncoding";
-  let DecoderMethod = "decodePC32DBLOperand";
-}
-
-// A PC-relative offset of a global value when the value is used as a
-// call target.  The offset is sign-extended and multiplied by 2.
-def pcrel16call : PCRelAddress<i64, "pcrel16call", PCRel16> {
-  let PrintMethod = "printCallOperand";
-  let EncoderMethod = "getPLT16DBLEncoding";
-  let DecoderMethod = "decodePC16DBLOperand";
-}
-def pcrel32call : PCRelAddress<i64, "pcrel32call", PCRel32> {
-  let PrintMethod = "printCallOperand";
-  let EncoderMethod = "getPLT32DBLEncoding";
   let DecoderMethod = "decodePC32DBLOperand";
 }
 

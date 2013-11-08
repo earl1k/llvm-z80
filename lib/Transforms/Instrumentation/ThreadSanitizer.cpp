@@ -240,12 +240,8 @@ bool ThreadSanitizer::doInitialization(Module &M) {
 }
 
 static bool isVtableAccess(Instruction *I) {
-  if (MDNode *Tag = I->getMetadata(LLVMContext::MD_tbaa)) {
-    if (Tag->getNumOperands() < 1) return false;
-    if (MDString *Tag1 = dyn_cast<MDString>(Tag->getOperand(0))) {
-      if (Tag1->getString() == "vtable pointer") return true;
-    }
-  }
+  if (MDNode *Tag = I->getMetadata(LLVMContext::MD_tbaa))
+    return Tag->isTBAAVtableAccess();
   return false;
 }
 
@@ -362,7 +358,7 @@ bool ThreadSanitizer::runOnFunction(Function &F) {
   // (e.g. variables that do not escape, etc).
 
   // Instrument memory accesses.
-  if (ClInstrumentMemoryAccesses)
+  if (ClInstrumentMemoryAccesses && F.hasFnAttribute(Attribute::SanitizeThread))
     for (size_t i = 0, n = AllLoadsAndStores.size(); i < n; ++i) {
       Res |= instrumentLoadOrStore(AllLoadsAndStores[i]);
     }

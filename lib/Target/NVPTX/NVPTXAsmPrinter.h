@@ -155,7 +155,7 @@ class LLVM_LIBRARY_VISIBILITY NVPTXAsmPrinter : public AsmPrinter {
           if (pos == nextSymbolPos) {
             const Value *v = Symbols[nSym];
             if (const GlobalValue *GVar = dyn_cast<GlobalValue>(v)) {
-              MCSymbol *Name = AP.Mang->getSymbol(GVar);
+              MCSymbol *Name = AP.getSymbol(GVar);
               O << *Name;
             } else if (const ConstantExpr *Cexpr = dyn_cast<ConstantExpr>(v)) {
               O << *nvptx::LowerConstant(Cexpr, AP);
@@ -188,6 +188,7 @@ private:
   void EmitFunctionEntryLabel();
   void EmitFunctionBodyStart();
   void EmitFunctionBodyEnd();
+  void emitImplicitDef(const MachineInstr *MI) const;
 
   void EmitInstruction(const MachineInstr *);
   void lowerToMCInst(const MachineInstr *MI, MCInst &OutMI);
@@ -213,7 +214,7 @@ private:
   void emitGlobals(const Module &M);
   void emitHeader(Module &M, raw_ostream &O);
   void emitKernelFunctionDirectives(const Function &F, raw_ostream &O) const;
-  void emitVirtualRegister(unsigned int vr, bool isVec, raw_ostream &O);
+  void emitVirtualRegister(unsigned int vr, raw_ostream &);
   void emitFunctionExternParamList(const MachineFunction &MF);
   void emitFunctionParamList(const Function *, raw_ostream &O);
   void emitFunctionParamList(const MachineFunction &MF, raw_ostream &O);
@@ -294,7 +295,7 @@ public:
 
   bool ignoreLoc(const MachineInstr &);
 
-  virtual void getVirtualRegisterName(unsigned, bool, raw_ostream &);
+  std::string getVirtualRegisterName(unsigned) const;
 
   DebugLoc prevDebugLoc;
   void emitLineNumberAsDotLoc(const MachineInstr &);

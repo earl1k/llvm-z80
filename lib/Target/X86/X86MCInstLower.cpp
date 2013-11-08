@@ -17,6 +17,7 @@
 #include "X86COFFMachineModuleInfo.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
+#include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/Type.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -34,14 +35,12 @@ namespace {
 /// X86MCInstLower - This class is used to lower an MachineInstr into an MCInst.
 class X86MCInstLower {
   MCContext &Ctx;
-  Mangler *Mang;
   const MachineFunction &MF;
   const TargetMachine &TM;
   const MCAsmInfo &MAI;
   X86AsmPrinter &AsmPrinter;
 public:
-  X86MCInstLower(Mangler *mang, const MachineFunction &MF,
-                 X86AsmPrinter &asmprinter);
+  X86MCInstLower(const MachineFunction &MF, X86AsmPrinter &asmprinter);
 
   void Lower(const MachineInstr *MI, MCInst &OutMI) const;
 
@@ -50,13 +49,16 @@ public:
 
 private:
   MachineModuleInfoMachO &getMachOMMI() const;
+  Mangler *getMang() const {
+    return AsmPrinter.Mang;
+  }
 };
 
 } // end anonymous namespace
 
-X86MCInstLower::X86MCInstLower(Mangler *mang, const MachineFunction &mf,
+X86MCInstLower::X86MCInstLower(const MachineFunction &mf,
                                X86AsmPrinter &asmprinter)
-: Ctx(mf.getContext()), Mang(mang), MF(mf), TM(mf.getTarget()),
+: Ctx(mf.getContext()), MF(mf), TM(mf.getTarget()),
   MAI(*TM.getMCAsmInfo()), AsmPrinter(asmprinter) {}
 
 MachineModuleInfoMachO &X86MCInstLower::getMachOMMI() const {
@@ -81,7 +83,7 @@ GetSymbolFromOperand(const MachineOperand &MO) const {
         MO.getTargetFlags() == X86II::MO_DARWIN_HIDDEN_NONLAZY_PIC_BASE)
       isImplicitlyPrivate = true;
 
-    Mang->getNameWithPrefix(Name, GV, isImplicitlyPrivate);
+    getMang()->getNameWithPrefix(Name, GV, isImplicitlyPrivate);
   } else if (MO.isSymbol()) {
     Name += MAI.getGlobalPrefix();
     Name += MO.getSymbolName();
@@ -110,7 +112,7 @@ GetSymbolFromOperand(const MachineOperand &MO) const {
       assert(MO.isGlobal() && "Extern symbol not handled yet");
       StubSym =
         MachineModuleInfoImpl::
-        StubValueTy(Mang->getSymbol(MO.getGlobal()),
+        StubValueTy(AsmPrinter.getSymbol(MO.getGlobal()),
                     !MO.getGlobal()->hasInternalLinkage());
     }
     return Sym;
@@ -124,7 +126,7 @@ GetSymbolFromOperand(const MachineOperand &MO) const {
       assert(MO.isGlobal() && "Extern symbol not handled yet");
       StubSym =
         MachineModuleInfoImpl::
-        StubValueTy(Mang->getSymbol(MO.getGlobal()),
+        StubValueTy(AsmPrinter.getSymbol(MO.getGlobal()),
                     !MO.getGlobal()->hasInternalLinkage());
     }
     return Sym;
@@ -140,7 +142,7 @@ GetSymbolFromOperand(const MachineOperand &MO) const {
     if (MO.isGlobal()) {
       StubSym =
         MachineModuleInfoImpl::
-        StubValueTy(Mang->getSymbol(MO.getGlobal()),
+        StubValueTy(AsmPrinter.getSymbol(MO.getGlobal()),
                     !MO.getGlobal()->hasInternalLinkage());
     } else {
       Name.erase(Name.end()-5, Name.end());
@@ -685,8 +687,128 @@ static void LowerTlsAddr(MCStreamer &OutStreamer,
     .addExpr(tlsRef));
 }
 
+static std::pair<StackMaps::Location, MachineInstr::const_mop_iterator>
+parseMemoryOperand(StackMaps::Location::LocationType LocTy,
+                   MachineInstr::const_mop_iterator MOI,
+                   MachineInstr::const_mop_iterator MOE) {
+
+  typedef StackMaps::Location Location;
+
+  assert(std::distance(MOI, MOE) >= 5 && "Too few operands to encode mem op.");
+
+  const MachineOperand &Base = *MOI;
+  const MachineOperand &Scale = *(++MOI);
+  const MachineOperand &Index = *(++MOI);
+  const MachineOperand &Disp = *(++MOI);
+  const MachineOperand &ZeroReg = *(++MOI);
+
+  // Sanity check for supported operand format.
+  assert(Base.isReg() &&
+         Scale.isImm() && Scale.getImm() == 1 &&
+         Index.isReg() && Index.getReg() == 0 &&
+         Disp.isImm() && ZeroReg.isReg() && (ZeroReg.getReg() == 0) &&
+         "Unsupported x86 memory operand sequence.");
+  (void)Scale;
+  (void)Index;
+  (void)ZeroReg;
+
+  return std::make_pair(
+           Location(LocTy, Base.getReg(), Disp.getImm()), ++MOI);
+}
+
+std::pair<StackMaps::Location, MachineInstr::const_mop_iterator>
+X86AsmPrinter::stackmapOperandParser(MachineInstr::const_mop_iterator MOI,
+                                     MachineInstr::const_mop_iterator MOE) {
+
+  typedef StackMaps::Location Location;
+
+  const MachineOperand &MOP = *MOI;
+  assert(!MOP.isRegMask() && (!MOP.isReg() || !MOP.isImplicit()) &&
+         "Register mask and implicit operands should not be processed.");
+
+  if (MOP.isImm()) {
+    switch (MOP.getImm()) {
+    default: llvm_unreachable("Unrecognized operand type.");
+    case StackMaps::DirectMemRefOp:
+      return parseMemoryOperand(StackMaps::Location::Direct,
+                                llvm::next(MOI), MOE);
+    case StackMaps::IndirectMemRefOp:
+      return parseMemoryOperand(StackMaps::Location::Indirect,
+                                llvm::next(MOI), MOE);
+    case StackMaps::ConstantOp: {
+      ++MOI;
+      assert(MOI->isImm() && "Expected constant operand.");
+      int64_t Imm = MOI->getImm();
+      return std::make_pair(Location(Location::Constant, 0, Imm), ++MOI);
+    }
+    }
+  }
+
+  // Otherwise this is a reg operand.
+  assert(MOP.isReg() && "Expected register operand here.");
+  assert(TargetRegisterInfo::isPhysicalRegister(MOP.getReg()) &&
+         "Virtreg operands should have been rewritten before now.");
+  return std::make_pair(Location(Location::Register, MOP.getReg(), 0), ++MOI);
+}
+
+static MachineInstr::const_mop_iterator
+getStackMapEndMOP(MachineInstr::const_mop_iterator MOI,
+                  MachineInstr::const_mop_iterator MOE) {
+  for (; MOI != MOE; ++MOI)
+    if (MOI->isRegMask() || (MOI->isReg() && MOI->isImplicit()))
+      break;
+
+  return MOI;
+}
+
+static void LowerSTACKMAP(MCStreamer &OutStreamer,
+                          X86MCInstLower &MCInstLowering,
+                          StackMaps &SM,
+                          const MachineInstr &MI)
+{
+  int64_t ID = MI.getOperand(0).getImm();
+  unsigned NumNOPBytes = MI.getOperand(1).getImm();
+
+  assert((int32_t)ID == ID && "Stack maps hold 32-bit IDs");
+  SM.recordStackMap(MI, ID, llvm::next(MI.operands_begin(), 2),
+                    getStackMapEndMOP(MI.operands_begin(), MI.operands_end()));
+  // Emit padding.
+  for (unsigned i = 0; i < NumNOPBytes; ++i)
+    OutStreamer.EmitInstruction(MCInstBuilder(X86::NOOP));
+}
+
+static void LowerPATCHPOINT(MCStreamer &OutStreamer,
+                            X86MCInstLower &MCInstLowering,
+                            StackMaps &SM,
+                            const MachineInstr &MI)
+{
+  int64_t ID = MI.getOperand(0).getImm();
+  assert((int32_t)ID == ID && "Stack maps hold 32-bit IDs");
+
+  // Get the number of arguments participating in the call. This number was
+  // adjusted during call lowering by subtracting stack args.
+  int64_t StackMapIdx = MI.getOperand(3).getImm() + 4;
+  assert(StackMapIdx <= MI.getNumOperands() && "Patchpoint dropped args.");
+
+  SM.recordStackMap(MI, ID, llvm::next(MI.operands_begin(), StackMapIdx),
+                     getStackMapEndMOP(MI.operands_begin(), MI.operands_end()));
+
+  // Emit call. We need to know how many bytes we encoded here.
+  unsigned EncodedBytes = 2;
+  OutStreamer.EmitInstruction(MCInstBuilder(X86::CALL64r)
+                              .addReg(MI.getOperand(2).getReg()));
+
+  // Emit padding.
+  unsigned NumNOPBytes = MI.getOperand(1).getImm();
+  assert(NumNOPBytes >= EncodedBytes &&
+         "Patchpoint can't request size less than the length of a call.");
+
+  for (unsigned i = EncodedBytes; i < NumNOPBytes; ++i)
+    OutStreamer.EmitInstruction(MCInstBuilder(X86::NOOP));
+}
+
 void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
-  X86MCInstLower MCInstLowering(Mang, *MF, *this);
+  X86MCInstLower MCInstLowering(*MF, *this);
   switch (MI->getOpcode()) {
   case TargetOpcode::DBG_VALUE:
     llvm_unreachable("Should be handled target independently");
@@ -774,6 +896,12 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addExpr(DotExpr));
     return;
   }
+
+  case TargetOpcode::STACKMAP:
+    return LowerSTACKMAP(OutStreamer, MCInstLowering, SM, *MI);
+
+  case TargetOpcode::PATCHPOINT:
+    return LowerPATCHPOINT(OutStreamer, MCInstLowering, SM, *MI);
   }
 
   MCInst TmpInst;

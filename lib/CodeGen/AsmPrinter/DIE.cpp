@@ -34,8 +34,10 @@ using namespace llvm;
 /// Profile - Used to gather unique data for the abbreviation folding set.
 ///
 void DIEAbbrevData::Profile(FoldingSetNodeID &ID) const {
-  ID.AddInteger(Attribute);
-  ID.AddInteger(Form);
+  // Explicitly cast to an integer type for which FoldingSetNodeID has
+  // overloads.  Otherwise MSVC 2010 thinks this call is ambiguous.
+  ID.AddInteger(unsigned(Attribute));
+  ID.AddInteger(unsigned(Form));
 }
 
 //===----------------------------------------------------------------------===//
@@ -45,7 +47,7 @@ void DIEAbbrevData::Profile(FoldingSetNodeID &ID) const {
 /// Profile - Used to gather unique data for the abbreviation folding set.
 ///
 void DIEAbbrev::Profile(FoldingSetNodeID &ID) const {
-  ID.AddInteger(Tag);
+  ID.AddInteger(unsigned(Tag));
   ID.AddInteger(ChildrenFlag);
 
   // For each attribute description.
@@ -112,14 +114,22 @@ DIE::~DIE() {
 
 /// Climb up the parent chain to get the compile unit DIE to which this DIE
 /// belongs.
-DIE *DIE::getCompileUnit() {
-  DIE *p = this;
+const DIE *DIE::getCompileUnit() const {
+  const DIE *Cu = getCompileUnitOrNull();
+  assert(Cu && "We should not have orphaned DIEs.");
+  return Cu;
+}
+
+/// Climb up the parent chain to get the compile unit DIE this DIE belongs
+/// to. Return NULL if DIE is not added to an owner yet.
+const DIE *DIE::getCompileUnitOrNull() const {
+  const DIE *p = this;
   while (p) {
     if (p->getTag() == dwarf::DW_TAG_compile_unit)
       return p;
     p = p->getParent();
   }
-  llvm_unreachable("We should not have orphaned DIEs.");
+  return NULL;
 }
 
 DIEValue *DIE::findAttribute(uint16_t Attribute) {
@@ -199,14 +209,14 @@ void DIEValue::dump() const {
 
 /// EmitValue - Emit integer of appropriate size.
 ///
-void DIEInteger::EmitValue(AsmPrinter *Asm, uint16_t Form) const {
+void DIEInteger::EmitValue(AsmPrinter *Asm, dwarf::Form Form) const {
   unsigned Size = ~0U;
   switch (Form) {
   case dwarf::DW_FORM_flag_present:
     // Emit something to keep the lines and comments in sync.
     // FIXME: Is there a better way to do this?
     if (Asm->OutStreamer.hasRawTextSupport())
-      Asm->OutStreamer.EmitRawText(StringRef(""));
+      Asm->OutStreamer.EmitRawText("");
     return;
   case dwarf::DW_FORM_flag:  // Fall thru
   case dwarf::DW_FORM_ref1:  // Fall thru
@@ -231,7 +241,7 @@ void DIEInteger::EmitValue(AsmPrinter *Asm, uint16_t Form) const {
 
 /// SizeOf - Determine size of integer value in bytes.
 ///
-unsigned DIEInteger::SizeOf(AsmPrinter *AP, uint16_t Form) const {
+unsigned DIEInteger::SizeOf(AsmPrinter *AP, dwarf::Form Form) const {
   switch (Form) {
   case dwarf::DW_FORM_flag_present: return 0;
   case dwarf::DW_FORM_flag:  // Fall thru
@@ -266,13 +276,13 @@ void DIEInteger::print(raw_ostream &O) const {
 
 /// EmitValue - Emit expression value.
 ///
-void DIEExpr::EmitValue(AsmPrinter *AP, uint16_t Form) const {
+void DIEExpr::EmitValue(AsmPrinter *AP, dwarf::Form Form) const {
   AP->OutStreamer.EmitValue(Expr, SizeOf(AP, Form));
 }
 
 /// SizeOf - Determine size of expression value in bytes.
 ///
-unsigned DIEExpr::SizeOf(AsmPrinter *AP, uint16_t Form) const {
+unsigned DIEExpr::SizeOf(AsmPrinter *AP, dwarf::Form Form) const {
   if (Form == dwarf::DW_FORM_data4) return 4;
   if (Form == dwarf::DW_FORM_sec_offset) return 4;
   if (Form == dwarf::DW_FORM_strp) return 4;
@@ -292,15 +302,16 @@ void DIEExpr::print(raw_ostream &O) const {
 
 /// EmitValue - Emit label value.
 ///
-void DIELabel::EmitValue(AsmPrinter *AP, uint16_t Form) const {
-  AP->EmitLabelReference(Label, SizeOf(AP, Form), Form == dwarf::DW_FORM_strp 
-    || Form == dwarf::DW_FORM_sec_offset || Form == dwarf::DW_OP_call_ref
-    || Form == dwarf::DW_FORM_ref_addr);
+void DIELabel::EmitValue(AsmPrinter *AP, dwarf::Form Form) const {
+  AP->EmitLabelReference(Label, SizeOf(AP, Form),
+                         Form == dwarf::DW_FORM_strp ||
+                             Form == dwarf::DW_FORM_sec_offset ||
+                             Form == dwarf::DW_FORM_ref_addr);
 }
 
 /// SizeOf - Determine size of label value in bytes.
 ///
-unsigned DIELabel::SizeOf(AsmPrinter *AP, uint16_t Form) const {
+unsigned DIELabel::SizeOf(AsmPrinter *AP, dwarf::Form Form) const {
   if (Form == dwarf::DW_FORM_data4) return 4;
   if (Form == dwarf::DW_FORM_sec_offset) return 4;
   if (Form == dwarf::DW_FORM_strp) return 4;
@@ -319,13 +330,13 @@ void DIELabel::print(raw_ostream &O) const {
 
 /// EmitValue - Emit delta value.
 ///
-void DIEDelta::EmitValue(AsmPrinter *AP, uint16_t Form) const {
+void DIEDelta::EmitValue(AsmPrinter *AP, dwarf::Form Form) const {
   AP->EmitLabelDifference(LabelHi, LabelLo, SizeOf(AP, Form));
 }
 
 /// SizeOf - Determine size of delta value in bytes.
 ///
-unsigned DIEDelta::SizeOf(AsmPrinter *AP, uint16_t Form) const {
+unsigned DIEDelta::SizeOf(AsmPrinter *AP, dwarf::Form Form) const {
   if (Form == dwarf::DW_FORM_data4) return 4;
   if (Form == dwarf::DW_FORM_strp) return 4;
   return AP->getDataLayout().getPointerSize();
@@ -343,13 +354,13 @@ void DIEDelta::print(raw_ostream &O) const {
 
 /// EmitValue - Emit string value.
 ///
-void DIEString::EmitValue(AsmPrinter *AP, uint16_t Form) const {
+void DIEString::EmitValue(AsmPrinter *AP, dwarf::Form Form) const {
   Access->EmitValue(AP, Form);
 }
 
 /// SizeOf - Determine size of delta value in bytes.
 ///
-unsigned DIEString::SizeOf(AsmPrinter *AP, uint16_t Form) const {
+unsigned DIEString::SizeOf(AsmPrinter *AP, dwarf::Form Form) const {
   return Access->SizeOf(AP, Form);
 }
 
@@ -366,7 +377,7 @@ void DIEString::print(raw_ostream &O) const {
 
 /// EmitValue - Emit debug information entry offset.
 ///
-void DIEEntry::EmitValue(AsmPrinter *AP, uint16_t Form) const {
+void DIEEntry::EmitValue(AsmPrinter *AP, dwarf::Form Form) const {
   AP->EmitInt32(Entry->getOffset());
 }
 
@@ -404,7 +415,7 @@ unsigned DIEBlock::ComputeSize(AsmPrinter *AP) {
 
 /// EmitValue - Emit block data.
 ///
-void DIEBlock::EmitValue(AsmPrinter *Asm, uint16_t Form) const {
+void DIEBlock::EmitValue(AsmPrinter *Asm, dwarf::Form Form) const {
   switch (Form) {
   default: llvm_unreachable("Improper form for block");
   case dwarf::DW_FORM_block1: Asm->EmitInt8(Size);    break;
@@ -420,7 +431,7 @@ void DIEBlock::EmitValue(AsmPrinter *Asm, uint16_t Form) const {
 
 /// SizeOf - Determine size of block data in bytes.
 ///
-unsigned DIEBlock::SizeOf(AsmPrinter *AP, uint16_t Form) const {
+unsigned DIEBlock::SizeOf(AsmPrinter *AP, dwarf::Form Form) const {
   switch (Form) {
   case dwarf::DW_FORM_block1: return Size + sizeof(int8_t);
   case dwarf::DW_FORM_block2: return Size + sizeof(int16_t);

@@ -147,10 +147,28 @@ void RegionPressure::openBottom(MachineBasicBlock::const_iterator PrevBottom) {
   LiveInRegs.clear();
 }
 
-const LiveInterval *RegPressureTracker::getInterval(unsigned Reg) const {
+const LiveRange *RegPressureTracker::getLiveRange(unsigned Reg) const {
   if (TargetRegisterInfo::isVirtualRegister(Reg))
     return &LIS->getInterval(Reg);
   return LIS->getCachedRegUnit(Reg);
+}
+
+void RegPressureTracker::reset() {
+  MBB = 0;
+  LIS = 0;
+
+  CurrSetPressure.clear();
+  LiveThruPressure.clear();
+  P.MaxSetPressure.clear();
+
+  if (RequireIntervals)
+    static_cast<IntervalPressure&>(P).reset();
+  else
+    static_cast<RegionPressure&>(P).reset();
+
+  LiveRegs.PhysRegs.clear();
+  LiveRegs.VirtRegs.clear();
+  UntiedDefs.clear();
 }
 
 /// Setup the RegPressureTracker.
@@ -163,6 +181,8 @@ void RegPressureTracker::init(const MachineFunction *mf,
                               MachineBasicBlock::const_iterator pos,
                               bool ShouldTrackUntiedDefs)
 {
+  reset();
+
   MF = mf;
   TRI = MF->getTarget().getRegisterInfo();
   RCI = rci;
@@ -177,19 +197,11 @@ void RegPressureTracker::init(const MachineFunction *mf,
 
   CurrPos = pos;
   CurrSetPressure.assign(TRI->getNumRegPressureSets(), 0);
-  LiveThruPressure.clear();
 
-  if (RequireIntervals)
-    static_cast<IntervalPressure&>(P).reset();
-  else
-    static_cast<RegionPressure&>(P).reset();
   P.MaxSetPressure = CurrSetPressure;
 
-  LiveRegs.PhysRegs.clear();
   LiveRegs.PhysRegs.setUniverse(TRI->getNumRegs());
-  LiveRegs.VirtRegs.clear();
   LiveRegs.VirtRegs.setUniverse(MRI->getNumVirtRegs());
-  UntiedDefs.clear();
   if (TrackUntiedDefs)
     UntiedDefs.setUniverse(MRI->getNumVirtRegs());
 }
@@ -498,10 +510,9 @@ bool RegPressureTracker::recede(SmallVectorImpl<unsigned> *LiveUses,
     if (!LiveRegs.contains(Reg)) {
       // Adjust liveouts if LiveIntervals are available.
       if (RequireIntervals) {
-        const LiveInterval *LI = getInterval(Reg);
-        // Check if this LR is killed and not redefined here.
-        if (LI) {
-          LiveRangeQuery LRQ(*LI, SlotIdx);
+        const LiveRange *LR = getLiveRange(Reg);
+        if (LR) {
+          LiveQueryResult LRQ = LR->Query(SlotIdx);
           if (!LRQ.isKill() && !LRQ.valueDefined())
             discoverLiveOut(Reg);
         }
@@ -558,8 +569,8 @@ bool RegPressureTracker::advance() {
     // Kill liveness at last uses.
     bool lastUse = false;
     if (RequireIntervals) {
-      const LiveInterval *LI = getInterval(Reg);
-      lastUse = LI && LiveRangeQuery(*LI, SlotIdx).isKill();
+      const LiveRange *LR = getLiveRange(Reg);
+      lastUse = LR && LR->Query(SlotIdx).isKill();
     }
     else {
       // Allocatable physregs are always single-use before register rewriting.
@@ -882,11 +893,12 @@ void RegPressureTracker::bumpDownwardPressure(const MachineInstr *MI) {
       // FIXME: allow the caller to pass in the list of vreg uses that remain
       // to be bottom-scheduled to avoid searching uses at each query.
       SlotIndex CurrIdx = getCurrSlot();
-      const LiveInterval *LI = getInterval(Reg);
-      if (LI) {
-        LiveRangeQuery LRQ(*LI, SlotIdx);
-        if (LRQ.isKill() && !findUseBetween(Reg, CurrIdx, SlotIdx, MRI, LIS))
+      const LiveRange *LR = getLiveRange(Reg);
+      if (LR) {
+        LiveQueryResult LRQ = LR->Query(SlotIdx);
+        if (LRQ.isKill() && !findUseBetween(Reg, CurrIdx, SlotIdx, MRI, LIS)) {
           decreaseRegPressure(Reg);
+        }
       }
     }
     else if (!TargetRegisterInfo::isVirtualRegister(Reg)) {

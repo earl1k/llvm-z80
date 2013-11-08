@@ -533,7 +533,7 @@ namespace {
       default: break;
       case Instruction::GetElementPtr:
         // We mark this instruction as zero-cost because scalar GEPs are usually
-        // lowered to the intruction addressing mode. At the moment we don't
+        // lowered to the instruction addressing mode. At the moment we don't
         // generate vector GEPs.
         return 0;
       case Instruction::Br:
@@ -625,10 +625,10 @@ namespace {
         ConstantInt *IntOff = ConstOffSCEV->getValue();
         int64_t Offset = IntOff->getSExtValue();
 
-        Type *VTy = cast<PointerType>(IPtr->getType())->getElementType();
+        Type *VTy = IPtr->getType()->getPointerElementType();
         int64_t VTyTSS = (int64_t) TD->getTypeStoreSize(VTy);
 
-        Type *VTy2 = cast<PointerType>(JPtr->getType())->getElementType();
+        Type *VTy2 = JPtr->getType()->getPointerElementType();
         if (VTy != VTy2 && Offset < 0) {
           int64_t VTy2TSS = (int64_t) TD->getTypeStoreSize(VTy2);
           OffsetInElmts = Offset/VTy2TSS;
@@ -2231,11 +2231,12 @@ namespace {
     // The pointer value is taken to be the one with the lowest offset.
     Value *VPtr = IPtr;
 
-    Type *ArgTypeI = cast<PointerType>(IPtr->getType())->getElementType();
-    Type *ArgTypeJ = cast<PointerType>(JPtr->getType())->getElementType();
+    Type *ArgTypeI = IPtr->getType()->getPointerElementType();
+    Type *ArgTypeJ = JPtr->getType()->getPointerElementType();
     Type *VArgType = getVecTypeForPair(ArgTypeI, ArgTypeJ);
-    Type *VArgPtrType = PointerType::get(VArgType,
-      cast<PointerType>(IPtr->getType())->getAddressSpace());
+    Type *VArgPtrType
+      = PointerType::get(VArgType,
+                         IPtr->getType()->getPointerAddressSpace());
     return new BitCastInst(VPtr, VArgPtrType, getReplacementName(I, true, o),
                         /* insert before */ I);
   }
@@ -2244,7 +2245,7 @@ namespace {
                      unsigned MaskOffset, unsigned NumInElem,
                      unsigned NumInElem1, unsigned IdxOffset,
                      std::vector<Constant*> &Mask) {
-    unsigned NumElem1 = cast<VectorType>(J->getType())->getNumElements();
+    unsigned NumElem1 = J->getType()->getVectorNumElements();
     for (unsigned v = 0; v < NumElem1; ++v) {
       int m = cast<ShuffleVectorInst>(J)->getMaskValue(v);
       if (m < 0) {
@@ -2271,18 +2272,18 @@ namespace {
     Type *ArgTypeJ = J->getType();
     Type *VArgType = getVecTypeForPair(ArgTypeI, ArgTypeJ);
 
-    unsigned NumElemI = cast<VectorType>(ArgTypeI)->getNumElements();
+    unsigned NumElemI = ArgTypeI->getVectorNumElements();
 
     // Get the total number of elements in the fused vector type.
     // By definition, this must equal the number of elements in
     // the final mask.
-    unsigned NumElem = cast<VectorType>(VArgType)->getNumElements();
+    unsigned NumElem = VArgType->getVectorNumElements();
     std::vector<Constant*> Mask(NumElem);
 
     Type *OpTypeI = I->getOperand(0)->getType();
-    unsigned NumInElemI = cast<VectorType>(OpTypeI)->getNumElements();
+    unsigned NumInElemI = OpTypeI->getVectorNumElements();
     Type *OpTypeJ = J->getOperand(0)->getType();
-    unsigned NumInElemJ = cast<VectorType>(OpTypeJ)->getNumElements();
+    unsigned NumInElemJ = OpTypeJ->getVectorNumElements();
 
     // The fused vector will be:
     // -----------------------------------------------------
@@ -2344,6 +2345,12 @@ namespace {
     return ExpandedIEChain;
   }
 
+  static unsigned getNumScalarElements(Type *Ty) {
+    if (VectorType *VecTy = dyn_cast<VectorType>(Ty))
+      return VecTy->getNumElements();
+    return 1;
+  }
+
   // Returns the value to be used as the specified operand of the vector
   // instruction that fuses I with J.
   Value *BBVectorize::getReplacementInput(LLVMContext& Context, Instruction *I,
@@ -2359,17 +2366,8 @@ namespace {
     Instruction *L = I, *H = J;
     Type *ArgTypeL = ArgTypeI, *ArgTypeH = ArgTypeJ;
 
-    unsigned numElemL;
-    if (ArgTypeL->isVectorTy())
-      numElemL = cast<VectorType>(ArgTypeL)->getNumElements();
-    else
-      numElemL = 1;
-
-    unsigned numElemH;
-    if (ArgTypeH->isVectorTy())
-      numElemH = cast<VectorType>(ArgTypeH)->getNumElements();
-    else
-      numElemH = 1;
+    unsigned numElemL = getNumScalarElements(ArgTypeL);
+    unsigned numElemH = getNumScalarElements(ArgTypeH);
 
     Value *LOp = L->getOperand(o);
     Value *HOp = H->getOperand(o);
@@ -2430,11 +2428,12 @@ namespace {
 
       if (CanUseInputs) {
         unsigned LOpElem =
-          cast<VectorType>(cast<Instruction>(LOp)->getOperand(0)->getType())
-            ->getNumElements();
+          cast<Instruction>(LOp)->getOperand(0)->getType()
+            ->getVectorNumElements();
+
         unsigned HOpElem =
-          cast<VectorType>(cast<Instruction>(HOp)->getOperand(0)->getType())
-            ->getNumElements();
+          cast<Instruction>(HOp)->getOperand(0)->getType()
+            ->getVectorNumElements();
 
         // We have one or two input vectors. We need to map each index of the
         // operands to the index of the original vector.
@@ -2650,14 +2649,14 @@ namespace {
                                            getReplacementName(IBeforeJ ? I : J,
                                                               true, o, 1));
         }
-  
+
         NHOp->insertBefore(IBeforeJ ? J : I);
         HOp = NHOp;
       }
     }
 
     if (ArgType->isVectorTy()) {
-      unsigned numElem = cast<VectorType>(VArgType)->getNumElements();
+      unsigned numElem = VArgType->getVectorNumElements();
       std::vector<Constant*> Mask(numElem);
       for (unsigned v = 0; v < numElem; ++v) {
         unsigned Idx = v;
@@ -2750,16 +2749,8 @@ namespace {
       VectorType *VType = getVecTypeForPair(IType, JType);
       unsigned numElem = VType->getNumElements();
 
-      unsigned numElemI, numElemJ;
-      if (IType->isVectorTy())
-        numElemI = cast<VectorType>(IType)->getNumElements();
-      else
-        numElemI = 1;
-
-      if (JType->isVectorTy())
-        numElemJ = cast<VectorType>(JType)->getNumElements();
-      else
-        numElemJ = 1;
+      unsigned numElemI = getNumScalarElements(IType);
+      unsigned numElemJ = getNumScalarElements(JType);
 
       if (IType->isVectorTy()) {
         std::vector<Constant*> Mask1(numElemI), Mask2(numElemI);

@@ -100,3 +100,56 @@ define <2 x double> @test12(double* %x) {
    %res = insertelement <2 x double>zeroinitializer, double %y, i32 0
    ret <2 x double>%res
 }
+
+; CHECK-LABEL: @test13
+; CHECK: vmovqz  %rdi
+; CHECK: ret
+define <2 x i64> @test13(i64 %x) {
+   %res = insertelement <2 x i64>zeroinitializer, i64 %x, i32 0
+   ret <2 x i64>%res
+}
+
+; CHECK-LABEL: @test14
+; CHECK: vmovdz  %edi
+; CHECK: ret
+define <4 x i32> @test14(i32 %x) {
+   %res = insertelement <4 x i32>zeroinitializer, i32 %x, i32 0
+   ret <4 x i32>%res
+}
+
+; CHECK-LABEL: @test15
+; CHECK: vmovdz  (%rdi)
+; CHECK: ret
+define <4 x i32> @test15(i32* %x) {
+   %y = load i32* %x, align 4
+   %res = insertelement <4 x i32>zeroinitializer, i32 %y, i32 0
+   ret <4 x i32>%res
+}
+
+; CHECK-LABEL: test16
+; CHECK: vmovdqu32
+; CHECK: ret
+define <16 x i32> @test16(i8 * %addr) {
+  %vaddr = bitcast i8* %addr to <16 x i32>*
+  %res = load <16 x i32>* %vaddr, align 1
+  ret <16 x i32>%res
+}
+
+; CHECK-LABEL: test17
+; CHECK: vmovdqa32
+; CHECK: ret
+define <16 x i32> @test17(i8 * %addr) {
+  %vaddr = bitcast i8* %addr to <16 x i32>*
+  %res = load <16 x i32>* %vaddr, align 64
+  ret <16 x i32>%res
+}
+
+; CHECK-LABEL: test18
+; CHECK: vmovdqa64
+; CHECK: ret
+define void @test18(i8 * %addr, <8 x i64> %data) {
+  %vaddr = bitcast i8* %addr to <8 x i64>*
+  store <8 x i64>%data, <8 x i64>* %vaddr, align 64
+  ret void
+}
+

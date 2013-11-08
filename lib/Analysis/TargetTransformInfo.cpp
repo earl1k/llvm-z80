@@ -96,6 +96,11 @@ bool TargetTransformInfo::isLoweredToCall(const Function *F) const {
   return PrevTTI->isLoweredToCall(F);
 }
 
+void TargetTransformInfo::getUnrollingPreferences(Loop *L,
+                            UnrollingPreferences &UP) const {
+  PrevTTI->getUnrollingPreferences(L, UP);
+}
+
 bool TargetTransformInfo::isLegalAddImmediate(int64_t Imm) const {
   return PrevTTI->isLegalAddImmediate(Imm);
 }
@@ -217,6 +222,11 @@ unsigned TargetTransformInfo::getNumberOfParts(Type *Tp) const {
 unsigned TargetTransformInfo::getAddressComputationCost(Type *Tp,
                                                         bool IsComplex) const {
   return PrevTTI->getAddressComputationCost(Tp, IsComplex);
+}
+
+unsigned TargetTransformInfo::getReductionCost(unsigned Opcode, Type *Ty,
+                                               bool IsPairwise) const {
+  return PrevTTI->getReductionCost(Opcode, Ty, IsPairwise);
 }
 
 namespace {
@@ -469,6 +479,8 @@ struct NoTTI : ImmutablePass, TargetTransformInfo {
     return true;
   }
 
+  void getUnrollingPreferences(Loop *, UnrollingPreferences &) const { }
+
   bool isLegalAddImmediate(int64_t Imm) const {
     return false;
   }
@@ -584,6 +596,10 @@ struct NoTTI : ImmutablePass, TargetTransformInfo {
 
   unsigned getAddressComputationCost(Type *Tp, bool) const {
     return 0;
+  }
+
+  unsigned getReductionCost(unsigned, Type *, bool) const {
+    return 1;
   }
 };
 

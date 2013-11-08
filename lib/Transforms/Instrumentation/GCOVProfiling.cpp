@@ -17,7 +17,6 @@
 #define DEBUG_TYPE "insert-gcov-profiling"
 
 #include "llvm/Transforms/Instrumentation.h"
-#include "ProfilingUtils.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Statistic.h"
@@ -599,7 +598,7 @@ bool GCOVProfiler::emitProfileArcs() {
     };
     FTy = FunctionType::get(Builder.getVoidTy(), Params, false);
 
-    // Inialize the environment and register the local writeout and flush
+    // Initialize the environment and register the local writeout and flush
     // functions.
     Constant *GCOVInit = M->getOrInsertFunction("llvm_gcov_init", FTy);
     Builder.CreateCall2(GCOVInit, WriteoutF, FlushF);

@@ -35,6 +35,16 @@ class TestingConfig:
                     'TMP' : os.environ.get('TMP',''),
                     })
 
+        # The option to preserve TEMP, TMP, and TMPDIR.
+        # This is intended to check how many temporary files would be generated
+        # (and be not cleaned up) in automated builders.
+        if os.environ.has_key('LIT_PRESERVES_TMP'):
+            environment.update({
+                    'TEMP' : os.environ.get('TEMP',''),
+                    'TMP' : os.environ.get('TMP',''),
+                    'TMPDIR' : os.environ.get('TMPDIR',''),
+                    })
+
         # Set the default available features based on the LitConfig.
         available_features = []
         if litConfig.useValgrind:
@@ -113,17 +123,6 @@ class TestingConfig:
         self.excludes = set(excludes)
         self.available_features = set(available_features)
         self.pipefail = pipefail
-
-    def clone(self):
-        # FIXME: Chain implementations?
-        #
-        # FIXME: Allow extra parameters?
-        return TestingConfig(self, self.name, self.suffixes, self.test_format,
-                             self.environment, self.substitutions,
-                             self.unsupported,
-                             self.test_exec_root, self.test_source_root,
-                             self.excludes, self.available_features,
-                             self.pipefail)
 
     def finish(self, litConfig):
         """finish() - Finish this config object, after loading is complete."""

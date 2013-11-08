@@ -1,4 +1,4 @@
-/*===-- target_ocaml.c - LLVM Ocaml Glue ------------------------*- C++ -*-===*\
+/*===-- target_ocaml.c - LLVM OCaml Glue ------------------------*- C++ -*-===*\
 |*                                                                            *|
 |*                     The LLVM Compiler Infrastructure                       *|
 |*                                                                            *|
@@ -7,7 +7,7 @@
 |*                                                                            *|
 |*===----------------------------------------------------------------------===*|
 |*                                                                            *|
-|* This file glues LLVM's ocaml interface to its C interface. These functions *|
+|* This file glues LLVM's OCaml interface to its C interface. These functions *|
 |* are by and large transparent wrappers to the corresponding C functions.    *|
 |*                                                                            *|
 |* Note that these functions intentionally take liberties with the CAMLparamX *|
@@ -92,7 +92,7 @@ CAMLprim value llvm_preferred_align_of_global(LLVMTargetDataRef TD,
 /* DataLayout.t -> Llvm.lltype -> Int64.t -> int */
 CAMLprim value llvm_element_at_offset(LLVMTargetDataRef TD, LLVMTypeRef Ty,
                                       value Offset) {
-  return Val_int(LLVMElementAtOffset(TD, Ty, Int_val(Offset)));
+  return Val_int(LLVMElementAtOffset(TD, Ty, Int64_val(Offset)));
 }
 
 /* DataLayout.t -> Llvm.lltype -> int -> Int64.t */

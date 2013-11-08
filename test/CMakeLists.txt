@@ -13,21 +13,25 @@ if(NOT LLVM_BUILD_TOOLS)
 endif()
 
 # Set the depends list as a variable so that it can grow conditionally.
+# NOTE: Sync the substitutions in test/lit.cfg when adding to this list.
 set(LLVM_TEST_DEPENDS
           UnitTests
           BugpointPasses
           LLVMHello
           llc
           lli
+          lli-child-target
           llvm-ar
           llvm-as
           llvm-bcanalyzer
+          llvm-c-test
           llvm-cov
           llvm-diff
           llvm-dis
           llvm-extract
           llvm-dwarfdump
           llvm-link
+          llvm-lto
           llvm-mc
           llvm-mcmarkup
           llvm-nm

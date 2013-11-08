@@ -118,14 +118,14 @@ SIInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
   } else if (AMDGPU::VReg_32RegClass.contains(DestReg)) {
     assert(AMDGPU::VReg_32RegClass.contains(SrcReg) ||
-	   AMDGPU::SReg_32RegClass.contains(SrcReg));
+           AMDGPU::SReg_32RegClass.contains(SrcReg));
     BuildMI(MBB, MI, DL, get(AMDGPU::V_MOV_B32_e32), DestReg)
             .addReg(SrcReg, getKillRegState(KillSrc));
     return;
 
   } else if (AMDGPU::VReg_64RegClass.contains(DestReg)) {
     assert(AMDGPU::VReg_64RegClass.contains(SrcReg) ||
-	   AMDGPU::SReg_64RegClass.contains(SrcReg));
+           AMDGPU::SReg_64RegClass.contains(SrcReg));
     Opcode = AMDGPU::V_MOV_B32_e32;
     SubIndices = Sub0_1;
 
@@ -136,19 +136,19 @@ SIInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
   } else if (AMDGPU::VReg_128RegClass.contains(DestReg)) {
     assert(AMDGPU::VReg_128RegClass.contains(SrcReg) ||
-	   AMDGPU::SReg_128RegClass.contains(SrcReg));
+           AMDGPU::SReg_128RegClass.contains(SrcReg));
     Opcode = AMDGPU::V_MOV_B32_e32;
     SubIndices = Sub0_3;
 
   } else if (AMDGPU::VReg_256RegClass.contains(DestReg)) {
     assert(AMDGPU::VReg_256RegClass.contains(SrcReg) ||
-	   AMDGPU::SReg_256RegClass.contains(SrcReg));
+           AMDGPU::SReg_256RegClass.contains(SrcReg));
     Opcode = AMDGPU::V_MOV_B32_e32;
     SubIndices = Sub0_7;
 
   } else if (AMDGPU::VReg_512RegClass.contains(DestReg)) {
     assert(AMDGPU::VReg_512RegClass.contains(SrcReg) ||
-	   AMDGPU::SReg_512RegClass.contains(SrcReg));
+           AMDGPU::SReg_512RegClass.contains(SrcReg));
     Opcode = AMDGPU::V_MOV_B32_e32;
     SubIndices = Sub0_15;
 
@@ -197,15 +197,11 @@ MachineInstr *SIInstrInfo::commuteInstruction(MachineInstr *MI,
   return MI;
 }
 
-MachineInstr * SIInstrInfo::getMovImmInstr(MachineFunction *MF, unsigned DstReg,
-                                           int64_t Imm) const {
-  MachineInstr * MI = MF->CreateMachineInstr(get(AMDGPU::V_MOV_B32_e32), DebugLoc());
-  MachineInstrBuilder MIB(*MF, MI);
-  MIB.addReg(DstReg, RegState::Define);
-  MIB.addImm(Imm);
-
-  return MI;
-
+MachineInstr *SIInstrInfo::buildMovInstr(MachineBasicBlock *MBB,
+                                         MachineBasicBlock::iterator I,
+                                         unsigned DstReg,
+                                         unsigned SrcReg) const {
+  llvm_unreachable("Not Implemented");
 }
 
 bool SIInstrInfo::isMov(unsigned Opcode) const {
@@ -232,6 +228,112 @@ int SIInstrInfo::isSMRD(uint16_t Opcode) const {
   return get(Opcode).TSFlags & SIInstrFlags::SMRD;
 }
 
+bool SIInstrInfo::isVOP1(uint16_t Opcode) const {
+  return get(Opcode).TSFlags & SIInstrFlags::VOP1;
+}
+
+bool SIInstrInfo::isVOP2(uint16_t Opcode) const {
+  return get(Opcode).TSFlags & SIInstrFlags::VOP2;
+}
+
+bool SIInstrInfo::isVOP3(uint16_t Opcode) const {
+  return get(Opcode).TSFlags & SIInstrFlags::VOP3;
+}
+
+bool SIInstrInfo::isVOPC(uint16_t Opcode) const {
+  return get(Opcode).TSFlags & SIInstrFlags::VOPC;
+}
+
+bool SIInstrInfo::isInlineConstant(const MachineOperand &MO) const {
+  if(MO.isImm()) {
+    return MO.getImm() >= -16 && MO.getImm() <= 64;
+  }
+  if (MO.isFPImm()) {
+    return MO.getFPImm()->isExactlyValue(0.0)  ||
+           MO.getFPImm()->isExactlyValue(0.5)  ||
+           MO.getFPImm()->isExactlyValue(-0.5) ||
+           MO.getFPImm()->isExactlyValue(1.0)  ||
+           MO.getFPImm()->isExactlyValue(-1.0) ||
+           MO.getFPImm()->isExactlyValue(2.0)  ||
+           MO.getFPImm()->isExactlyValue(-2.0) ||
+           MO.getFPImm()->isExactlyValue(4.0)  ||
+           MO.getFPImm()->isExactlyValue(-4.0);
+  }
+  return false;
+}
+
+bool SIInstrInfo::isLiteralConstant(const MachineOperand &MO) const {
+  return (MO.isImm() || MO.isFPImm()) && !isInlineConstant(MO);
+}
+
+bool SIInstrInfo::verifyInstruction(const MachineInstr *MI,
+                                    StringRef &ErrInfo) const {
+  uint16_t Opcode = MI->getOpcode();
+  int Src0Idx = AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::src0);
+  int Src1Idx = AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::src1);
+  int Src2Idx = AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::src2);
+
+  // Verify VOP*
+  if (isVOP1(Opcode) || isVOP2(Opcode) || isVOP3(Opcode) || isVOPC(Opcode)) {
+    unsigned ConstantBusCount = 0;
+    unsigned SGPRUsed = AMDGPU::NoRegister;
+    for (int i = 0, e = MI->getNumOperands(); i != e; ++i) {
+      const MachineOperand &MO = MI->getOperand(i);
+      if (MO.isReg() && MO.isUse() &&
+          !TargetRegisterInfo::isVirtualRegister(MO.getReg())) {
+
+        // EXEC register uses the constant bus.
+        if (!MO.isImplicit() && MO.getReg() == AMDGPU::EXEC)
+          ++ConstantBusCount;
+
+        // SGPRs use the constant bus
+        if (MO.getReg() == AMDGPU::M0 || MO.getReg() == AMDGPU::VCC ||
+            (!MO.isImplicit() &&
+            (AMDGPU::SGPR_32RegClass.contains(MO.getReg()) ||
+            AMDGPU::SGPR_64RegClass.contains(MO.getReg())))) {
+          if (SGPRUsed != MO.getReg()) {
+            ++ConstantBusCount;
+            SGPRUsed = MO.getReg();
+          }
+        }
+      }
+      // Literal constants use the constant bus.
+      if (isLiteralConstant(MO))
+        ++ConstantBusCount;
+    }
+    if (ConstantBusCount > 1) {
+      ErrInfo = "VOP* instruction uses the constant bus more than once";
+      return false;
+    }
+  }
+
+  // Verify SRC1 for VOP2 and VOPC
+  if (Src1Idx != -1 && (isVOP2(Opcode) || isVOPC(Opcode))) {
+    const MachineOperand &Src1 = MI->getOperand(Src1Idx);
+    if (Src1.isImm()) {
+      ErrInfo = "VOP[2C] src1 cannot be an immediate.";
+      return false;
+    }
+  }
+
+  // Verify VOP3
+  if (isVOP3(Opcode)) {
+    if (Src0Idx != -1 && isLiteralConstant(MI->getOperand(Src0Idx))) {
+      ErrInfo = "VOP3 src0 cannot be a literal constant.";
+      return false;
+    }
+    if (Src1Idx != -1 && isLiteralConstant(MI->getOperand(Src1Idx))) {
+      ErrInfo = "VOP3 src1 cannot be a literal constant.";
+      return false;
+    }
+    if (Src2Idx != -1 && isLiteralConstant(MI->getOperand(Src2Idx))) {
+      ErrInfo = "VOP3 src2 cannot be a literal constant.";
+      return false;
+    }
+  }
+  return true;
+}
+
 //===----------------------------------------------------------------------===//
 // Indirect addressing callbacks
 //===----------------------------------------------------------------------===//
@@ -251,12 +353,7 @@ int SIInstrInfo::getIndirectIndexEnd(const MachineFunction &MF) const {
   llvm_unreachable("Unimplemented");
 }
 
-const TargetRegisterClass *SIInstrInfo::getIndirectAddrStoreRegClass(
-                                                     unsigned SourceReg) const {
-  llvm_unreachable("Unimplemented");
-}
-
-const TargetRegisterClass *SIInstrInfo::getIndirectAddrLoadRegClass() const {
+const TargetRegisterClass *SIInstrInfo::getIndirectAddrRegClass() const {
   llvm_unreachable("Unimplemented");
 }
 
@@ -273,9 +370,5 @@ MachineInstrBuilder SIInstrInfo::buildIndirectRead(
                                    MachineBasicBlock::iterator I,
                                    unsigned ValueReg,
                                    unsigned Address, unsigned OffsetReg) const {
-  llvm_unreachable("Unimplemented");
-}
-
-const TargetRegisterClass *SIInstrInfo::getSuperIndirectRegClass() const {
   llvm_unreachable("Unimplemented");
 }

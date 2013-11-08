@@ -556,8 +556,9 @@ private:
   /// }
 
 public:
-  X86AsmParser(MCSubtargetInfo &sti, MCAsmParser &parser)
-    : MCTargetAsmParser(), STI(sti), Parser(parser), InstInfo(0) {
+  X86AsmParser(MCSubtargetInfo &sti, MCAsmParser &parser,
+               const MCInstrInfo &MII)
+      : MCTargetAsmParser(), STI(sti), Parser(parser), InstInfo(0) {
 
     // Initialize the set of available features.
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
@@ -868,6 +869,12 @@ struct X86Operand : public MCParsedAsmOperand {
 
   bool isReg() const { return Kind == Register; }
 
+  bool isGR32orGR64() const {
+    return Kind == Register &&
+      (X86MCRegisterClasses[X86::GR32RegClassID].contains(getReg()) ||
+      X86MCRegisterClasses[X86::GR64RegClassID].contains(getReg()));
+  }
+
   void addExpr(MCInst &Inst, const MCExpr *Expr) const {
     // Add as immediates when possible.
     if (const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(Expr))
@@ -879,6 +886,37 @@ struct X86Operand : public MCParsedAsmOperand {
   void addRegOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
     Inst.addOperand(MCOperand::CreateReg(getReg()));
+  }
+
+  static unsigned getGR32FromGR64(unsigned RegNo) {
+    switch (RegNo) {
+    default: llvm_unreachable("Unexpected register");
+    case X86::RAX: return X86::EAX;
+    case X86::RCX: return X86::ECX;
+    case X86::RDX: return X86::EDX;
+    case X86::RBX: return X86::EBX;
+    case X86::RBP: return X86::EBP;
+    case X86::RSP: return X86::ESP;
+    case X86::RSI: return X86::ESI;
+    case X86::RDI: return X86::EDI;
+    case X86::R8: return X86::R8D;
+    case X86::R9: return X86::R9D;
+    case X86::R10: return X86::R10D;
+    case X86::R11: return X86::R11D;
+    case X86::R12: return X86::R12D;
+    case X86::R13: return X86::R13D;
+    case X86::R14: return X86::R14D;
+    case X86::R15: return X86::R15D;
+    case X86::RIP: return X86::EIP;
+    }
+  }
+
+  void addGR32orGR64Operands(MCInst &Inst, unsigned N) const {
+    assert(N == 1 && "Invalid number of operands!");
+    unsigned RegNo = getReg();
+    if (X86MCRegisterClasses[X86::GR64RegClassID].contains(RegNo))
+      RegNo = getGR32FromGR64(RegNo);
+    Inst.addOperand(MCOperand::CreateReg(RegNo));
   }
 
   void addImmOperands(MCInst &Inst, unsigned N) const {
@@ -1978,6 +2016,47 @@ ParseInstruction(ParseInstructionInfo &Info, StringRef Name, SMLoc NameLoc,
       }
     }
 
+    if (STI.getFeatureBits() & X86::FeatureAVX512) {
+      // Parse mask register {%k1}
+      if (getLexer().is(AsmToken::LCurly)) {
+        SMLoc Loc = Parser.getTok().getLoc();
+        Operands.push_back(X86Operand::CreateToken("{", Loc));
+        Parser.Lex();  // Eat the {
+        if (X86Operand *Op = ParseOperand()) {
+          Operands.push_back(Op);
+          if (!getLexer().is(AsmToken::RCurly)) {
+            SMLoc Loc = getLexer().getLoc();
+            Parser.eatToEndOfStatement();
+            return Error(Loc, "Expected } at this point");
+          }
+          Loc = Parser.getTok().getLoc();
+          Operands.push_back(X86Operand::CreateToken("}", Loc));
+          Parser.Lex();  // Eat the }
+        } else {
+          Parser.eatToEndOfStatement();
+          return true;
+        }
+      }
+      // Parse "zeroing non-masked" semantic {z}
+      if (getLexer().is(AsmToken::LCurly)) {
+        SMLoc Loc = Parser.getTok().getLoc();
+        Operands.push_back(X86Operand::CreateToken("{z}", Loc));
+        Parser.Lex();  // Eat the {
+        if (!getLexer().is(AsmToken::Identifier) || getLexer().getTok().getIdentifier() != "z") {
+          SMLoc Loc = getLexer().getLoc();
+          Parser.eatToEndOfStatement();
+          return Error(Loc, "Expected z at this point");
+        }
+        Parser.Lex();  // Eat the z
+        if (!getLexer().is(AsmToken::RCurly)) {
+            SMLoc Loc = getLexer().getLoc();
+            Parser.eatToEndOfStatement();
+            return Error(Loc, "Expected } at this point");
+        }
+        Parser.Lex();  // Eat the }
+      }
+    }
+
     if (getLexer().isNot(AsmToken::EndOfStatement)) {
       SMLoc Loc = getLexer().getLoc();
       Parser.eatToEndOfStatement();
@@ -2229,6 +2308,55 @@ processInstruction(MCInst &Inst,
   case X86::SBB16i16: return convert16i16to16ri8(Inst, X86::SBB16ri8);
   case X86::SBB32i32: return convert32i32to32ri8(Inst, X86::SBB32ri8);
   case X86::SBB64i32: return convert64i32to64ri8(Inst, X86::SBB64ri8);
+  case X86::VMOVAPDrr:
+  case X86::VMOVAPDYrr:
+  case X86::VMOVAPSrr:
+  case X86::VMOVAPSYrr:
+  case X86::VMOVDQArr:
+  case X86::VMOVDQAYrr:
+  case X86::VMOVDQUrr:
+  case X86::VMOVDQUYrr:
+  case X86::VMOVUPDrr:
+  case X86::VMOVUPDYrr:
+  case X86::VMOVUPSrr:
+  case X86::VMOVUPSYrr: {
+    if (X86II::isX86_64ExtendedReg(Inst.getOperand(0).getReg()) ||
+        !X86II::isX86_64ExtendedReg(Inst.getOperand(1).getReg()))
+      return false;
+
+    unsigned NewOpc;
+    switch (Inst.getOpcode()) {
+    default: llvm_unreachable("Invalid opcode");
+    case X86::VMOVAPDrr:  NewOpc = X86::VMOVAPDrr_REV;  break;
+    case X86::VMOVAPDYrr: NewOpc = X86::VMOVAPDYrr_REV; break;
+    case X86::VMOVAPSrr:  NewOpc = X86::VMOVAPSrr_REV;  break;
+    case X86::VMOVAPSYrr: NewOpc = X86::VMOVAPSYrr_REV; break;
+    case X86::VMOVDQArr:  NewOpc = X86::VMOVDQArr_REV;  break;
+    case X86::VMOVDQAYrr: NewOpc = X86::VMOVDQAYrr_REV; break;
+    case X86::VMOVDQUrr:  NewOpc = X86::VMOVDQUrr_REV;  break;
+    case X86::VMOVDQUYrr: NewOpc = X86::VMOVDQUYrr_REV; break;
+    case X86::VMOVUPDrr:  NewOpc = X86::VMOVUPDrr_REV;  break;
+    case X86::VMOVUPDYrr: NewOpc = X86::VMOVUPDYrr_REV; break;
+    case X86::VMOVUPSrr:  NewOpc = X86::VMOVUPSrr_REV;  break;
+    case X86::VMOVUPSYrr: NewOpc = X86::VMOVUPSYrr_REV; break;
+    }
+    Inst.setOpcode(NewOpc);
+    return true;
+  }
+  case X86::VMOVSDrr:
+  case X86::VMOVSSrr: {
+    if (X86II::isX86_64ExtendedReg(Inst.getOperand(0).getReg()) ||
+        !X86II::isX86_64ExtendedReg(Inst.getOperand(2).getReg()))
+      return false;
+    unsigned NewOpc;
+    switch (Inst.getOpcode()) {
+    default: llvm_unreachable("Invalid opcode");
+    case X86::VMOVSDrr: NewOpc = X86::VMOVSDrr_REV;   break;
+    case X86::VMOVSSrr: NewOpc = X86::VMOVSSrr_REV;   break;
+    }
+    Inst.setOpcode(NewOpc);
+    return true;
+  }
   }
 }
 

@@ -22,19 +22,22 @@
 #include "llvm/Support/ErrorHandling.h"
 using namespace llvm;
 
-MCObjectStreamer::MCObjectStreamer(StreamerKind Kind, MCContext &Context,
+MCObjectStreamer::MCObjectStreamer(MCContext &Context,
+                                   MCTargetStreamer *TargetStreamer,
                                    MCAsmBackend &TAB, raw_ostream &OS,
                                    MCCodeEmitter *Emitter_)
-    : MCStreamer(Kind, Context),
+    : MCStreamer(Context, TargetStreamer),
       Assembler(new MCAssembler(Context, TAB, *Emitter_,
                                 *TAB.createObjectWriter(OS), OS)),
       CurSectionData(0) {}
 
-MCObjectStreamer::MCObjectStreamer(StreamerKind Kind, MCContext &Context,
+MCObjectStreamer::MCObjectStreamer(MCContext &Context,
+                                   MCTargetStreamer *TargetStreamer,
                                    MCAsmBackend &TAB, raw_ostream &OS,
                                    MCCodeEmitter *Emitter_,
                                    MCAssembler *_Assembler)
-    : MCStreamer(Kind, Context), Assembler(_Assembler), CurSectionData(0) {}
+    : MCStreamer(Context, TargetStreamer), Assembler(_Assembler),
+      CurSectionData(0) {}
 
 MCObjectStreamer::~MCObjectStreamer() {
   delete &Assembler->getBackend();
@@ -302,6 +305,7 @@ void MCObjectStreamer::EmitDwarfAdvanceFrameAddr(const MCSymbol *LastLabel,
 }
 
 void MCObjectStreamer::EmitBytes(StringRef Data) {
+  MCLineEntry::Make(this, getCurrentSection().first);
   getOrCreateDataFragment()->getContents().append(Data.begin(), Data.end());
 }
 

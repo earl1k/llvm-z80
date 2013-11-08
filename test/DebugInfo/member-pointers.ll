@@ -4,12 +4,12 @@
 ; RUN: llc -filetype=obj -O0 < %s > %t
 ; RUN: llvm-dwarfdump -debug-dump=info %t | FileCheck %s
 ; CHECK: DW_TAG_ptr_to_member_type
-; CHECK: [[TYPE:.*]]:   DW_TAG_subroutine_type
+; CHECK: DW_TAG_ptr_to_member_type
+; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]       (cu + {{.*}} => {[[TYPE:0x[0-9a-f]+]]})
+; CHECK: [[TYPE]]:   DW_TAG_subroutine_type
 ; CHECK: DW_TAG_formal_parameter
 ; CHECK-NEXT: DW_AT_type
 ; CHECK-NEXT: DW_AT_artificial [DW_FORM_flag
-; CHECK: DW_TAG_ptr_to_member_type
-; CHECK-NEXT: DW_AT_type [DW_FORM_ref4]       (cu + {{.*}} => {[[TYPE]]})
 ; IR generated from clang -g with the following source:
 ; struct S {
 ; };
@@ -32,7 +32,7 @@
 !9 = metadata !{i32 786451, metadata !15, null, metadata !"S", i32 1, i64 8, i64 8, i32 0, i32 0, null, metadata !1, i32 0, null, null, null} ; [ DW_TAG_structure_type ] [S] [line 1, size 8, align 8, offset 0] [def] [from ]
 !10 = metadata !{i32 786484, i32 0, null, metadata !"y", metadata !"y", metadata !"", metadata !6, i32 5, metadata !11, i32 0, i32 1, { i64, i64 }* @y, null} ; [ DW_TAG_variable ] [y] [line 5] [def]
 !11 = metadata !{i32 786463, null, null, null, i32 0, i64 0, i64 0, i64 0, i32 0, metadata !12, metadata !9} ; [ DW_TAG_ptr_to_member_type ] [line 0, size 0, align 0, offset 0] [from ]
-!12 = metadata !{i32 786453, i32 0, metadata !"", i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !13, i32 0, i32 0, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
+!12 = metadata !{i32 786453, i32 0, null, i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !13, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
 !13 = metadata !{null, metadata !14, metadata !8}
-!14 = metadata !{i32 786447, i32 0, metadata !"", i32 0, i32 0, i64 64, i64 64, i64 0, i32 1088, metadata !9} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from S]
+!14 = metadata !{i32 786447, i32 0, null, i32 0, i32 0, i64 64, i64 64, i64 0, i32 1088, metadata !9} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from S]
 !15 = metadata !{metadata !"simple.cpp", metadata !"/home/blaikie/Development/scratch"}

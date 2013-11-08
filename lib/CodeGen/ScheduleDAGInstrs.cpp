@@ -185,9 +185,6 @@ void ScheduleDAGInstrs::enterRegion(MachineBasicBlock *bb,
   RegionBegin = begin;
   RegionEnd = end;
   NumRegionInstrs = regioninstrs;
-  MISUnitMap.clear();
-
-  ScheduleDAG::clearDAG();
 }
 
 /// Close the current scheduling region. Don't clear any state in case the
@@ -418,7 +415,8 @@ void ScheduleDAGInstrs::addVRegUseDeps(SUnit *SU, unsigned OperIdx) {
 
   // Lookup this operand's reaching definition.
   assert(LIS && "vreg dependencies requires LiveIntervals");
-  LiveRangeQuery LRQ(LIS->getInterval(Reg), LIS->getInstructionIndex(MI));
+  LiveQueryResult LRQ
+    = LIS->getInterval(Reg).Query(LIS->getInstructionIndex(MI));
   VNInfo *VNI = LRQ.valueIn();
 
   // VNI will be valid because MachineOperand::readsReg() is checked by caller.
@@ -702,6 +700,9 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
   bool UseAA = EnableAASchedMI.getNumOccurrences() > 0 ? EnableAASchedMI
                                                        : ST.useAA();
   AliasAnalysis *AAForDep = UseAA ? AA : 0;
+
+  MISUnitMap.clear();
+  ScheduleDAG::clearDAG();
 
   // Create an SUnit for each real instruction.
   initSUnits();

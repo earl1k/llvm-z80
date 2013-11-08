@@ -45,32 +45,60 @@ extern "C" void LLVMInitializeR600AsmPrinter() {
   TargetRegistry::RegisterAsmPrinter(TheAMDGPUTarget, createAMDGPUAsmPrinterPass);
 }
 
+AMDGPUAsmPrinter::AMDGPUAsmPrinter(TargetMachine &TM, MCStreamer &Streamer)
+    : AsmPrinter(TM, Streamer)
+{
+  DisasmEnabled = TM.getSubtarget<AMDGPUSubtarget>().dumpCode() &&
+                  ! Streamer.hasRawTextSupport();
+}
+
 /// We need to override this function so we can avoid
 /// the call to EmitFunctionHeader(), which the MCPureStreamer can't handle.
 bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
-  const AMDGPUSubtarget &STM = TM.getSubtarget<AMDGPUSubtarget>();
-  if (STM.dumpCode()) {
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-    MF.dump();
-#endif
-  }
   SetupMachineFunction(MF);
   if (OutStreamer.hasRawTextSupport()) {
     OutStreamer.EmitRawText("@" + MF.getName() + ":");
   }
 
-  const MCSectionELF *ConfigSection = getObjFileLowering().getContext()
-                                              .getELFSection(".AMDGPU.config",
+  MCContext &Context = getObjFileLowering().getContext();
+  const MCSectionELF *ConfigSection = Context.getELFSection(".AMDGPU.config",
                                               ELF::SHT_PROGBITS, 0,
                                               SectionKind::getReadOnly());
   OutStreamer.SwitchSection(ConfigSection);
+  const AMDGPUSubtarget &STM = TM.getSubtarget<AMDGPUSubtarget>();
   if (STM.getGeneration() > AMDGPUSubtarget::NORTHERN_ISLANDS) {
     EmitProgramInfoSI(MF);
   } else {
     EmitProgramInfoR600(MF);
   }
+
+  DisasmLines.clear();
+  HexLines.clear();
+  DisasmLineMaxLen = 0;
+
   OutStreamer.SwitchSection(getObjFileLowering().getTextSection());
   EmitFunctionBody();
+
+  if (STM.dumpCode()) {
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+    MF.dump();
+#endif
+
+    if (DisasmEnabled) {
+      OutStreamer.SwitchSection(Context.getELFSection(".AMDGPU.disasm",
+                                                  ELF::SHT_NOTE, 0,
+                                                  SectionKind::getReadOnly()));
+
+      for (size_t i = 0; i < DisasmLines.size(); ++i) {
+        std::string Comment(DisasmLineMaxLen - DisasmLines[i].size(), ' ');
+        Comment += " ; " + HexLines[i] + "\n";
+
+        OutStreamer.EmitBytes(StringRef(DisasmLines[i]));
+        OutStreamer.EmitBytes(StringRef(Comment));
+      }
+    }
+  }
+
   return false;
 }
 
@@ -139,6 +167,7 @@ void AMDGPUAsmPrinter::EmitProgramInfoR600(MachineFunction &MF) {
 }
 
 void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF) {
+  const AMDGPUSubtarget &STM = TM.getSubtarget<AMDGPUSubtarget>();
   unsigned MaxSGPR = 0;
   unsigned MaxVGPR = 0;
   bool VCCUsed = false;
@@ -168,8 +197,10 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF) {
           VCCUsed = true;
           continue;
         }
+
         switch (reg) {
         default: break;
+        case AMDGPU::SCC:
         case AMDGPU::EXEC:
         case AMDGPU::M0:
           continue;
@@ -202,6 +233,9 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF) {
         } else if (AMDGPU::VReg_256RegClass.contains(reg)) {
           isSGPR = false;
           width = 8;
+        } else if (AMDGPU::SReg_512RegClass.contains(reg)) {
+          isSGPR = true;
+          width = 16;
         } else if (AMDGPU::VReg_512RegClass.contains(reg)) {
           isSGPR = false;
           width = 16;
@@ -234,13 +268,24 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(MachineFunction &MF) {
   OutStreamer.EmitIntValue(RsrcReg, 4);
   OutStreamer.EmitIntValue(S_00B028_VGPRS(MaxVGPR / 4) | S_00B028_SGPRS(MaxSGPR / 8), 4);
 
+  unsigned LDSAlignShift;
+  if (STM.getGeneration() < AMDGPUSubtarget::SEA_ISLANDS) {
+    // LDS is allocated in 64 dword blocks
+    LDSAlignShift = 8;
+  } else {
+    // LDS is allocated in 128 dword blocks
+    LDSAlignShift = 9;
+  }
+  unsigned LDSBlocks =
+          RoundUpToAlignment(MFI->LDSSize, 1 << LDSAlignShift) >> LDSAlignShift;
+
   if (MFI->ShaderType == ShaderType::COMPUTE) {
     OutStreamer.EmitIntValue(R_00B84C_COMPUTE_PGM_RSRC2, 4);
-    OutStreamer.EmitIntValue(S_00B84C_LDS_SIZE(RoundUpToAlignment(MFI->LDSSize, 256) >> 8), 4);
+    OutStreamer.EmitIntValue(S_00B84C_LDS_SIZE(LDSBlocks), 4);
   }
   if (MFI->ShaderType == ShaderType::PIXEL) {
     OutStreamer.EmitIntValue(R_00B02C_SPI_SHADER_PGM_RSRC2_PS, 4);
-    OutStreamer.EmitIntValue(S_00B02C_EXTRA_LDS_SIZE(RoundUpToAlignment(MFI->LDSSize, 256) >> 8), 4);
+    OutStreamer.EmitIntValue(S_00B02C_EXTRA_LDS_SIZE(LDSBlocks), 4);
     OutStreamer.EmitIntValue(R_0286CC_SPI_PS_INPUT_ENA, 4);
     OutStreamer.EmitIntValue(MFI->PSInputAddr, 4);
   }

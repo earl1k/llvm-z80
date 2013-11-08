@@ -135,13 +135,17 @@ public:
       EndFunctionBodyCall(F, FunctionStart, FunctionEnd));
     Base->endFunctionBody(F, FunctionStart, FunctionEnd);
   }
-  virtual uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment,
-                                       unsigned SectionID, bool IsReadOnly) {
-    return Base->allocateDataSection(Size, Alignment, SectionID, IsReadOnly);
+  virtual uint8_t *allocateDataSection(
+    uintptr_t Size, unsigned Alignment, unsigned SectionID,
+    StringRef SectionName, bool IsReadOnly) {
+    return Base->allocateDataSection(
+      Size, Alignment, SectionID, SectionName, IsReadOnly);
   }
-  virtual uint8_t *allocateCodeSection(uintptr_t Size, unsigned Alignment,
-                                       unsigned SectionID) {
-    return Base->allocateCodeSection(Size, Alignment, SectionID);
+  virtual uint8_t *allocateCodeSection(
+    uintptr_t Size, unsigned Alignment, unsigned SectionID,
+    StringRef SectionName) {
+    return Base->allocateCodeSection(
+      Size, Alignment, SectionID, SectionName);
   }
   virtual bool finalizeMemory(std::string *ErrMsg) { return false; }
   virtual uint8_t *allocateSpace(intptr_t Size, unsigned Alignment) {
@@ -716,17 +720,5 @@ TEST(LazyLoadedJITTest, EagerCompiledRecursionThroughGhost) {
   EXPECT_EQ(3, recur1(4));
 }
 #endif // !defined(__arm__) && !defined(__powerpc__) && !defined(__s390__)
-
-// This code is copied from JITEventListenerTest, but it only runs once for all
-// the tests in this directory.  Everything seems fine, but that's strange
-// behavior.
-class JITEnvironment : public testing::Environment {
-  virtual void SetUp() {
-    // Required to create a JIT.
-    InitializeNativeTarget();
-  }
-};
-testing::Environment* const jit_env =
-  testing::AddGlobalTestEnvironment(new JITEnvironment);
 
 }

@@ -23,6 +23,7 @@
 #include "MCTargetDesc/PPCMCExpr.h"
 #include "PPCSubtarget.h"
 #include "PPCTargetMachine.h"
+#include "PPCTargetStreamer.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
@@ -202,7 +203,7 @@ void PPCAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,
             .getGVStubEntry(SymToPrint);
         if (StubSym.getPointer() == 0)
           StubSym = MachineModuleInfoImpl::
-            StubValueTy(Mang->getSymbol(GV), !GV->hasInternalLinkage());
+            StubValueTy(getSymbol(GV), !GV->hasInternalLinkage());
       } else if (GV->isDeclaration() || GV->hasCommonLinkage() ||
                  GV->hasAvailableExternallyLinkage()) {
         SymToPrint = GetSymbolWithGlobalValueBase(GV, "$non_lazy_ptr");
@@ -212,12 +213,12 @@ void PPCAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,
                     getHiddenGVStubEntry(SymToPrint);
         if (StubSym.getPointer() == 0)
           StubSym = MachineModuleInfoImpl::
-            StubValueTy(Mang->getSymbol(GV), !GV->hasInternalLinkage());
+            StubValueTy(getSymbol(GV), !GV->hasInternalLinkage());
       } else {
-        SymToPrint = Mang->getSymbol(GV);
+        SymToPrint = getSymbol(GV);
       }
     } else {
-      SymToPrint = Mang->getSymbol(GV);
+      SymToPrint = getSymbol(GV);
     }
     
     O << *SymToPrint;
@@ -363,7 +364,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     assert(MO.isGlobal() || MO.isCPI() || MO.isJTI());
     MCSymbol *MOSymbol = 0;
     if (MO.isGlobal())
-      MOSymbol = Mang->getSymbol(MO.getGlobal());
+      MOSymbol = getSymbol(MO.getGlobal());
     else if (MO.isCPI())
       MOSymbol = GetCPISymbol(MO.getIndex());
     else if (MO.isJTI())
@@ -402,7 +403,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       const GlobalAlias *GAlias = dyn_cast<GlobalAlias>(GValue);
       const GlobalValue *RealGValue = GAlias ?
         GAlias->resolveAliasedGlobal(false) : GValue;
-      MOSymbol = Mang->getSymbol(RealGValue);
+      MOSymbol = getSymbol(RealGValue);
       const GlobalVariable *GVar = dyn_cast<GlobalVariable>(RealGValue);
       IsExternal = GVar && !GVar->hasInitializer();
       IsCommon = GVar && RealGValue->hasCommonLinkage();
@@ -413,7 +414,8 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     else if (MO.isJTI())
       MOSymbol = GetJTISymbol(MO.getIndex());
 
-    if (IsExternal || IsFunction || IsCommon || IsAvailExt || MO.isJTI())
+    if (IsExternal || IsFunction || IsCommon || IsAvailExt || MO.isJTI() ||
+        TM.getCodeModel() == CodeModel::Large)
       MOSymbol = lookUpOrCreateTOCEntry(MOSymbol);
 
     const MCExpr *Exp =
@@ -438,18 +440,22 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
     if (MO.isJTI())
       MOSymbol = lookUpOrCreateTOCEntry(GetJTISymbol(MO.getIndex()));
-    else if (MO.isCPI())
+    else if (MO.isCPI()) {
       MOSymbol = GetCPISymbol(MO.getIndex());
+      if (TM.getCodeModel() == CodeModel::Large)
+        MOSymbol = lookUpOrCreateTOCEntry(MOSymbol);
+    }
     else if (MO.isGlobal()) {
       const GlobalValue *GValue = MO.getGlobal();
       const GlobalAlias *GAlias = dyn_cast<GlobalAlias>(GValue);
       const GlobalValue *RealGValue = GAlias ?
         GAlias->resolveAliasedGlobal(false) : GValue;
-      MOSymbol = Mang->getSymbol(RealGValue);
+      MOSymbol = getSymbol(RealGValue);
       const GlobalVariable *GVar = dyn_cast<GlobalVariable>(RealGValue);
     
       if (!GVar || !GVar->hasInitializer() || RealGValue->hasCommonLinkage() ||
-          RealGValue->hasAvailableExternallyLinkage())
+          RealGValue->hasAvailableExternallyLinkage() ||
+          TM.getCodeModel() == CodeModel::Large)
         MOSymbol = lookUpOrCreateTOCEntry(MOSymbol);
     }
 
@@ -479,14 +485,14 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       const GlobalAlias *GAlias = dyn_cast<GlobalAlias>(GValue);
       const GlobalValue *RealGValue = GAlias ?
         GAlias->resolveAliasedGlobal(false) : GValue;
-      MOSymbol = Mang->getSymbol(RealGValue);
+      MOSymbol = getSymbol(RealGValue);
       const GlobalVariable *GVar = dyn_cast<GlobalVariable>(RealGValue);
       IsExternal = GVar && !GVar->hasInitializer();
       IsFunction = !GVar;
     } else if (MO.isCPI())
       MOSymbol = GetCPISymbol(MO.getIndex());
 
-    if (IsFunction || IsExternal)
+    if (IsFunction || IsExternal || TM.getCodeModel() == CodeModel::Large)
       MOSymbol = lookUpOrCreateTOCEntry(MOSymbol);
 
     const MCExpr *Exp =
@@ -502,7 +508,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
     const MachineOperand &MO = MI->getOperand(2);
     const GlobalValue *GValue = MO.getGlobal();
-    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    MCSymbol *MOSymbol = getSymbol(GValue);
     const MCExpr *SymGotTprel =
       MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TPREL_HA,
                               OutContext);
@@ -520,7 +526,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     TmpInst.setOpcode(PPC::LD);
     const MachineOperand &MO = MI->getOperand(1);
     const GlobalValue *GValue = MO.getGlobal();
-    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    MCSymbol *MOSymbol = getSymbol(GValue);
     const MCExpr *Exp =
       MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TPREL_LO,
                               OutContext);
@@ -534,7 +540,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
     const MachineOperand &MO = MI->getOperand(2);
     const GlobalValue *GValue = MO.getGlobal();
-    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    MCSymbol *MOSymbol = getSymbol(GValue);
     const MCExpr *SymGotTlsGD =
       MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TLSGD_HA,
                               OutContext);
@@ -550,7 +556,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
     const MachineOperand &MO = MI->getOperand(2);
     const GlobalValue *GValue = MO.getGlobal();
-    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    MCSymbol *MOSymbol = getSymbol(GValue);
     const MCExpr *SymGotTlsGD =
       MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TLSGD_LO,
                               OutContext);
@@ -571,7 +577,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       MCSymbolRefExpr::Create(TlsGetAddr, MCSymbolRefExpr::VK_None, OutContext);
     const MachineOperand &MO = MI->getOperand(2);
     const GlobalValue *GValue = MO.getGlobal();
-    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    MCSymbol *MOSymbol = getSymbol(GValue);
     const MCExpr *SymVar =
       MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_TLSGD,
                               OutContext);
@@ -586,7 +592,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
     const MachineOperand &MO = MI->getOperand(2);
     const GlobalValue *GValue = MO.getGlobal();
-    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    MCSymbol *MOSymbol = getSymbol(GValue);
     const MCExpr *SymGotTlsLD =
       MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TLSLD_HA,
                               OutContext);
@@ -602,7 +608,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
     const MachineOperand &MO = MI->getOperand(2);
     const GlobalValue *GValue = MO.getGlobal();
-    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    MCSymbol *MOSymbol = getSymbol(GValue);
     const MCExpr *SymGotTlsLD =
       MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_GOT_TLSLD_LO,
                               OutContext);
@@ -623,7 +629,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       MCSymbolRefExpr::Create(TlsGetAddr, MCSymbolRefExpr::VK_None, OutContext);
     const MachineOperand &MO = MI->getOperand(2);
     const GlobalValue *GValue = MO.getGlobal();
-    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    MCSymbol *MOSymbol = getSymbol(GValue);
     const MCExpr *SymVar =
       MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_TLSLD,
                               OutContext);
@@ -638,7 +644,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
     const MachineOperand &MO = MI->getOperand(2);
     const GlobalValue *GValue = MO.getGlobal();
-    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    MCSymbol *MOSymbol = getSymbol(GValue);
     const MCExpr *SymDtprel =
       MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_DTPREL_HA,
                               OutContext);
@@ -654,7 +660,7 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     assert(Subtarget.isPPC64() && "Not supported for 32-bit PowerPC");
     const MachineOperand &MO = MI->getOperand(2);
     const GlobalValue *GValue = MO.getGlobal();
-    MCSymbol *MOSymbol = Mang->getSymbol(GValue);
+    MCSymbol *MOSymbol = getSymbol(GValue);
     const MCExpr *SymDtprel =
       MCSymbolRefExpr::Create(MOSymbol, MCSymbolRefExpr::VK_PPC_DTPREL_LO,
                               OutContext);
@@ -766,6 +772,9 @@ bool PPCLinuxAsmPrinter::doFinalization(Module &M) {
 
   bool isPPC64 = TD->getPointerSizeInBits() == 64;
 
+  PPCTargetStreamer &TS =
+      static_cast<PPCTargetStreamer &>(OutStreamer.getTargetStreamer());
+
   if (isPPC64 && !TOC.empty()) {
     const MCSectionELF *Section = OutStreamer.getContext().getELFSection(".toc",
         ELF::SHT_PROGBITS, ELF::SHF_WRITE | ELF::SHF_ALLOC,
@@ -776,7 +785,7 @@ bool PPCLinuxAsmPrinter::doFinalization(Module &M) {
          E = TOC.end(); I != E; ++I) {
       OutStreamer.EmitLabel(I->second);
       MCSymbol *S = OutContext.GetOrCreateSymbol(I->first->getName());
-      OutStreamer.EmitTCEntry(*S);
+      TS.emitTCEntry(*S);
     }
   }
 
@@ -1052,7 +1061,7 @@ bool PPCDarwinAsmPrinter::doFinalization(Module &M) {
         MCSymbol *NLPSym = GetSymbolWithGlobalValueBase(*I, "$non_lazy_ptr");
         MachineModuleInfoImpl::StubValueTy &StubSym =
           MMIMacho.getGVStubEntry(NLPSym);
-        StubSym = MachineModuleInfoImpl::StubValueTy(Mang->getSymbol(*I), true);
+        StubSym = MachineModuleInfoImpl::StubValueTy(getSymbol(*I), true);
       }
     }
   }

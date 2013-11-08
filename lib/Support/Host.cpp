@@ -265,7 +265,8 @@ std::string sys::getHostCPUName() {
       case 54: // 32 nm Atom Midview
         return "atom";
 
-      case 55: // Intel Atom Silvermont processors
+      // Atom Silvermont codes from the Intel software optimization guide.
+      case 55:
       case 74:
       case 77:
         return "slm";
@@ -347,9 +348,11 @@ std::string sys::getHostCPUName() {
       case 21:
         if (!HasAVX) // If the OS doesn't support AVX provide a sane fallback.
           return "btver1";
-        if (Model > 15 && Model <= 31)
-          return "bdver2";
-        return "bdver1";
+        if (Model >= 0x30)
+          return "bdver3"; // 30h-3Fh: Steamroller
+        if (Model >= 0x10)
+          return "bdver2"; // 10h-1Fh: Piledriver
+        return "bdver1";   // 00h-0Fh: Bulldozer
       case 22:
         if (!HasAVX) // If the OS doesn't support AVX provide a sane fallback.
           return "btver1";
@@ -532,6 +535,48 @@ std::string sys::getHostCPUName() {
           .Case("0xc24", "cortex-m4")
           .Default("generic");
 
+  return "generic";
+}
+#elif defined(__linux__) && defined(__s390x__)
+std::string sys::getHostCPUName() {
+  // STIDP is a privileged operation, so use /proc/cpuinfo instead.
+  // Note: We cannot mmap /proc/cpuinfo here and then process the resulting
+  // memory buffer because the 'file' has 0 size (it can be read from only
+  // as a stream).
+
+  std::string Err;
+  DataStreamer *DS = getDataFileStreamer("/proc/cpuinfo", &Err);
+  if (!DS) {
+    DEBUG(dbgs() << "Unable to open /proc/cpuinfo: " << Err << "\n");
+    return "generic";
+  }
+
+  // The "processor 0:" line comes after a fair amount of other information,
+  // including a cache breakdown, but this should be plenty.
+  char buffer[2048];
+  size_t CPUInfoSize = DS->GetBytes((unsigned char*) buffer, sizeof(buffer));
+  delete DS;
+
+  StringRef Str(buffer, CPUInfoSize);
+  SmallVector<StringRef, 32> Lines;
+  Str.split(Lines, "\n");
+  for (unsigned I = 0, E = Lines.size(); I != E; ++I) {
+    if (Lines[I].startswith("processor ")) {
+      size_t Pos = Lines[I].find("machine = ");
+      if (Pos != StringRef::npos) {
+        Pos += sizeof("machine = ") - 1;
+        unsigned int Id;
+        if (!Lines[I].drop_front(Pos).getAsInteger(10, Id)) {
+          if (Id >= 2827)
+            return "zEC12";
+          if (Id >= 2817)
+            return "z196";
+        }
+      }
+      break;
+    }
+  }
+  
   return "generic";
 }
 #else

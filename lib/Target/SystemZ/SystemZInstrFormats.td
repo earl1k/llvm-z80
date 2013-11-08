@@ -1349,6 +1349,100 @@ class Pseudo<dag outs, dag ins, list<dag> pattern>
   let isCodeGenOnly = 1;
 }
 
+// Like UnaryRI, but expanded after RA depending on the choice of register.
+class UnaryRIPseudo<SDPatternOperator operator, RegisterOperand cls,
+                    Immediate imm>
+  : Pseudo<(outs cls:$R1), (ins imm:$I2),
+           [(set cls:$R1, (operator imm:$I2))]>;
+
+// Like UnaryRXY, but expanded after RA depending on the choice of register.
+class UnaryRXYPseudo<string key, SDPatternOperator operator,
+                     RegisterOperand cls, bits<5> bytes,
+                     AddressingMode mode = bdxaddr20only>
+  : Pseudo<(outs cls:$R1), (ins mode:$XBD2),
+           [(set cls:$R1, (operator mode:$XBD2))]> {
+  let OpKey = key ## cls;
+  let OpType = "mem";
+  let mayLoad = 1;
+  let Has20BitOffset = 1;
+  let HasIndex = 1;
+  let AccessBytes = bytes;
+}
+
+// Like UnaryRR, but expanded after RA depending on the choice of registers.
+class UnaryRRPseudo<string key, SDPatternOperator operator,
+                    RegisterOperand cls1, RegisterOperand cls2>
+  : Pseudo<(outs cls1:$R1), (ins cls2:$R2),
+           [(set cls1:$R1, (operator cls2:$R2))]> {
+  let OpKey = key ## cls1;
+  let OpType = "reg";
+}
+
+// Like BinaryRI, but expanded after RA depending on the choice of register.
+class BinaryRIPseudo<SDPatternOperator operator, RegisterOperand cls,
+                     Immediate imm>
+  : Pseudo<(outs cls:$R1), (ins cls:$R1src, imm:$I2),
+           [(set cls:$R1, (operator cls:$R1src, imm:$I2))]> {
+  let Constraints = "$R1 = $R1src";
+}
+
+// Like BinaryRIE, but expanded after RA depending on the choice of register.
+class BinaryRIEPseudo<SDPatternOperator operator, RegisterOperand cls,
+                      Immediate imm>
+  : Pseudo<(outs cls:$R1), (ins cls:$R3, imm:$I2),
+           [(set cls:$R1, (operator cls:$R3, imm:$I2))]>;
+
+// Like BinaryRIAndK, but expanded after RA depending on the choice of register.
+multiclass BinaryRIAndKPseudo<string key, SDPatternOperator operator,
+                              RegisterOperand cls, Immediate imm> {
+  let NumOpsKey = key in {
+    let NumOpsValue = "3" in
+      def K : BinaryRIEPseudo<null_frag, cls, imm>,
+              Requires<[FeatureHighWord, FeatureDistinctOps]>;
+    let NumOpsValue = "2", isConvertibleToThreeAddress = 1 in
+      def "" : BinaryRIPseudo<operator, cls, imm>,
+               Requires<[FeatureHighWord]>;
+  }
+}
+
+// Like CompareRI, but expanded after RA depending on the choice of register.
+class CompareRIPseudo<SDPatternOperator operator, RegisterOperand cls,
+                      Immediate imm>
+  : Pseudo<(outs), (ins cls:$R1, imm:$I2), [(operator cls:$R1, imm:$I2)]>;
+
+// Like CompareRXY, but expanded after RA depending on the choice of register.
+class CompareRXYPseudo<SDPatternOperator operator, RegisterOperand cls,
+                       SDPatternOperator load, bits<5> bytes,
+                       AddressingMode mode = bdxaddr20only>
+  : Pseudo<(outs), (ins cls:$R1, mode:$XBD2),
+           [(operator cls:$R1, (load mode:$XBD2))]> {
+  let mayLoad = 1;
+  let Has20BitOffset = 1;
+  let HasIndex = 1;
+  let AccessBytes = bytes;
+}
+
+// Like StoreRXY, but expanded after RA depending on the choice of register.
+class StoreRXYPseudo<SDPatternOperator operator, RegisterOperand cls,
+                     bits<5> bytes, AddressingMode mode = bdxaddr20only>
+  : Pseudo<(outs), (ins cls:$R1, mode:$XBD2),
+           [(operator cls:$R1, mode:$XBD2)]> {
+  let mayStore = 1;
+  let Has20BitOffset = 1;
+  let HasIndex = 1;
+  let AccessBytes = bytes;
+}
+
+// Like RotateSelectRIEf, but expanded after RA depending on the choice
+// of registers.
+class RotateSelectRIEfPseudo<RegisterOperand cls1, RegisterOperand cls2>
+  : Pseudo<(outs cls1:$R1),
+           (ins cls1:$R1src, cls2:$R2, uimm8:$I3, uimm8:$I4, uimm8zx6:$I5),
+           []> {
+  let Constraints = "$R1 = $R1src";
+  let DisableEncoding = "$R1src";
+}
+
 // Implements "$dst = $cc & (8 >> CC) ? $src1 : $src2", where CC is
 // the value of the PSW's 2-bit condition code field.
 class SelectWrapper<RegisterOperand cls>
@@ -1466,4 +1560,37 @@ multiclass StringRRE<string mnemonic, bits<16> opcode,
                       (ins GR64:$start1, GR64:$start2, GR32:$char),
                       [(set GR64:$end, (operator GR64:$start1, GR64:$start2,
                                                  GR32:$char))]>;
+}
+
+// A pseudo instruction that is a direct alias of a real instruction.
+// These aliases are used in cases where a particular register operand is
+// fixed or where the same instruction is used with different register sizes.
+// The size parameter is the size in bytes of the associated real instruction.
+class Alias<int size, dag outs, dag ins, list<dag> pattern>
+  : InstSystemZ<size, outs, ins, "", pattern> {
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+}
+
+// An alias of a BinaryRI, but with different register sizes.
+class BinaryAliasRI<SDPatternOperator operator, RegisterOperand cls,
+                    Immediate imm>
+  : Alias<4, (outs cls:$R1), (ins cls:$R1src, imm:$I2),
+          [(set cls:$R1, (operator cls:$R1src, imm:$I2))]> {
+  let Constraints = "$R1 = $R1src";
+}
+
+// An alias of a BinaryRIL, but with different register sizes.
+class BinaryAliasRIL<SDPatternOperator operator, RegisterOperand cls,
+                     Immediate imm>
+  : Alias<6, (outs cls:$R1), (ins cls:$R1src, imm:$I2),
+          [(set cls:$R1, (operator cls:$R1src, imm:$I2))]> {
+  let Constraints = "$R1 = $R1src";
+}
+
+// An alias of a RotateSelectRIEf, but with different register sizes.
+class RotateSelectAliasRIEf<RegisterOperand cls1, RegisterOperand cls2>
+  : Alias<6, (outs cls1:$R1),
+          (ins cls1:$R1src, cls2:$R2, uimm8:$I3, uimm8:$I4, uimm8zx6:$I5), []> {
+  let Constraints = "$R1 = $R1src";
 }

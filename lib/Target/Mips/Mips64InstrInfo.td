@@ -15,9 +15,6 @@
 // Mips Operand, Complex Patterns and Transformations Definitions.
 //===----------------------------------------------------------------------===//
 
-// Instruction operand types
-def shamt_64       : Operand<i64>;
-
 // Unsigned Operand
 def uimm16_64      : Operand<i64> {
   let PrintMethod = "printUnsignedImm";
@@ -95,25 +92,26 @@ def NOR64  : LogicNOR<"nor", GPR64Opnd>, ADD_FM<0, 0x27>;
 }
 
 /// Shift Instructions
-def DSLL   : shift_rotate_imm<"dsll", shamt, GPR64Opnd, shl, immZExt6>,
+def DSLL   : shift_rotate_imm<"dsll", uimm6, GPR64Opnd, shl, immZExt6>,
              SRA_FM<0x38, 0>;
-def DSRL   : shift_rotate_imm<"dsrl", shamt, GPR64Opnd, srl, immZExt6>,
+def DSRL   : shift_rotate_imm<"dsrl", uimm6, GPR64Opnd, srl, immZExt6>,
              SRA_FM<0x3a, 0>;
-def DSRA   : shift_rotate_imm<"dsra", shamt, GPR64Opnd, sra, immZExt6>,
+def DSRA   : shift_rotate_imm<"dsra", uimm6, GPR64Opnd, sra, immZExt6>,
              SRA_FM<0x3b, 0>;
 def DSLLV  : shift_rotate_reg<"dsllv", GPR64Opnd, shl>, SRLV_FM<0x14, 0>;
 def DSRLV  : shift_rotate_reg<"dsrlv", GPR64Opnd, srl>, SRLV_FM<0x16, 0>;
 def DSRAV  : shift_rotate_reg<"dsrav", GPR64Opnd, sra>, SRLV_FM<0x17, 0>;
-def DSLL32 : shift_rotate_imm<"dsll32", shamt, GPR64Opnd>, SRA_FM<0x3c, 0>;
-def DSRL32 : shift_rotate_imm<"dsrl32", shamt, GPR64Opnd>, SRA_FM<0x3e, 0>;
-def DSRA32 : shift_rotate_imm<"dsra32", shamt, GPR64Opnd>, SRA_FM<0x3f, 0>;
+def DSLL32 : shift_rotate_imm<"dsll32", uimm5, GPR64Opnd>, SRA_FM<0x3c, 0>;
+def DSRL32 : shift_rotate_imm<"dsrl32", uimm5, GPR64Opnd>, SRA_FM<0x3e, 0>;
+def DSRA32 : shift_rotate_imm<"dsra32", uimm5, GPR64Opnd>, SRA_FM<0x3f, 0>;
 
 // Rotate Instructions
 let Predicates = [HasMips64r2, HasStdEnc] in {
-  def DROTR  : shift_rotate_imm<"drotr", shamt, GPR64Opnd, rotr, immZExt6>,
+  def DROTR  : shift_rotate_imm<"drotr", uimm6, GPR64Opnd, rotr, immZExt6>,
                SRA_FM<0x3a, 1>;
   def DROTRV : shift_rotate_reg<"drotrv", GPR64Opnd, rotr>,
                SRLV_FM<0x16, 1>;
+  def DROTR32 : shift_rotate_imm<"drotr32", uimm5, GPR64Opnd>, SRA_FM<0x3e, 1>;
 }
 
 /// Load and Store Instructions
@@ -135,16 +133,16 @@ def SD    : Store<"sd", GPR64Opnd, store, IIStore>, LW_FM<0x3f>;
 
 /// load/store left/right
 let isCodeGenOnly = 1 in {
-def LWL64 : LoadLeftRight<"lwl", MipsLWL, GPR64Opnd>, LW_FM<0x22>;
-def LWR64 : LoadLeftRight<"lwr", MipsLWR, GPR64Opnd>, LW_FM<0x26>;
-def SWL64 : StoreLeftRight<"swl", MipsSWL, GPR64Opnd>, LW_FM<0x2a>;
-def SWR64 : StoreLeftRight<"swr", MipsSWR, GPR64Opnd>, LW_FM<0x2e>;
+def LWL64 : LoadLeftRight<"lwl", MipsLWL, GPR64Opnd, IILoad>, LW_FM<0x22>;
+def LWR64 : LoadLeftRight<"lwr", MipsLWR, GPR64Opnd, IILoad>, LW_FM<0x26>;
+def SWL64 : StoreLeftRight<"swl", MipsSWL, GPR64Opnd, IIStore>, LW_FM<0x2a>;
+def SWR64 : StoreLeftRight<"swr", MipsSWR, GPR64Opnd, IIStore>, LW_FM<0x2e>;
 }
 
-def LDL   : LoadLeftRight<"ldl", MipsLDL, GPR64Opnd>, LW_FM<0x1a>;
-def LDR   : LoadLeftRight<"ldr", MipsLDR, GPR64Opnd>, LW_FM<0x1b>;
-def SDL   : StoreLeftRight<"sdl", MipsSDL, GPR64Opnd>, LW_FM<0x2c>;
-def SDR   : StoreLeftRight<"sdr", MipsSDR, GPR64Opnd>, LW_FM<0x2d>;
+def LDL   : LoadLeftRight<"ldl", MipsLDL, GPR64Opnd, IILoad>, LW_FM<0x1a>;
+def LDR   : LoadLeftRight<"ldr", MipsLDR, GPR64Opnd, IILoad>, LW_FM<0x1b>;
+def SDL   : StoreLeftRight<"sdl", MipsSDL, GPR64Opnd, IIStore>, LW_FM<0x2c>;
+def SDR   : StoreLeftRight<"sdr", MipsSDR, GPR64Opnd, IIStore>, LW_FM<0x2d>;
 
 /// Load-linked, Store-conditional
 def LLD : LLBase<"lld", GPR64Opnd>, LW_FM<0x34>;
@@ -152,16 +150,17 @@ def SCD : SCBase<"scd", GPR64Opnd>, LW_FM<0x3c>;
 
 /// Jump and Branch Instructions
 let isCodeGenOnly = 1 in {
-def JR64   : IndirectBranch<GPR64Opnd>, MTLO_FM<8>;
-def BEQ64  : CBranch<"beq", seteq, GPR64Opnd>, BEQ_FM<4>;
-def BNE64  : CBranch<"bne", setne, GPR64Opnd>, BEQ_FM<5>;
-def BGEZ64 : CBranchZero<"bgez", setge, GPR64Opnd>, BGEZ_FM<1, 1>;
-def BGTZ64 : CBranchZero<"bgtz", setgt, GPR64Opnd>, BGEZ_FM<7, 0>;
-def BLEZ64 : CBranchZero<"blez", setle, GPR64Opnd>, BGEZ_FM<6, 0>;
-def BLTZ64 : CBranchZero<"bltz", setlt, GPR64Opnd>, BGEZ_FM<1, 0>;
+def JR64   : IndirectBranch<"jr", GPR64Opnd>, MTLO_FM<8>;
+def BEQ64  : CBranch<"beq", brtarget, seteq, GPR64Opnd>, BEQ_FM<4>;
+def BNE64  : CBranch<"bne", brtarget, setne, GPR64Opnd>, BEQ_FM<5>;
+def BGEZ64 : CBranchZero<"bgez", brtarget, setge, GPR64Opnd>, BGEZ_FM<1, 1>;
+def BGTZ64 : CBranchZero<"bgtz", brtarget, setgt, GPR64Opnd>, BGEZ_FM<7, 0>;
+def BLEZ64 : CBranchZero<"blez", brtarget, setle, GPR64Opnd>, BGEZ_FM<6, 0>;
+def BLTZ64 : CBranchZero<"bltz", brtarget, setlt, GPR64Opnd>, BGEZ_FM<1, 0>;
 def JALR64 : JumpLinkReg<"jalr", GPR64Opnd>, JALR_FM;
 def JALR64Pseudo : JumpLinkRegPseudo<GPR64Opnd, JALR, RA, GPR32Opnd>;
-def TAILCALL64_R : JumpFR<GPR64Opnd, MipsTailCall>, MTLO_FM<8>, IsTailCall;
+def TAILCALL64_R : JumpFR<"tcallr", GPR64Opnd, MipsTailCall>,
+                   MTLO_FM<8>, IsTailCall;
 }
 
 /// Multiply and Divide Instructions.
@@ -183,8 +182,11 @@ def PseudoDUDIV : MultDivPseudo<DUDIV, ACC128, GPR64Opnd, MipsDivRemU,
 let isCodeGenOnly = 1 in {
 def MTHI64 : MoveToLOHI<"mthi", GPR64Opnd, [HI0_64]>, MTLO_FM<0x11>;
 def MTLO64 : MoveToLOHI<"mtlo", GPR64Opnd, [LO0_64]>, MTLO_FM<0x13>;
-def MFHI64 : MoveFromLOHI<"mfhi", GPR64Opnd, [HI0_64]>, MFLO_FM<0x10>;
-def MFLO64 : MoveFromLOHI<"mflo", GPR64Opnd, [LO0_64]>, MFLO_FM<0x12>;
+def MFHI64 : MoveFromLOHI<"mfhi", GPR64Opnd, AC0_64>, MFLO_FM<0x10>;
+def MFLO64 : MoveFromLOHI<"mflo", GPR64Opnd, AC0_64>, MFLO_FM<0x12>;
+def PseudoMFHI64 : PseudoMFLOHI<GPR64, ACC128, MipsMFHI>;
+def PseudoMFLO64 : PseudoMFLOHI<GPR64, ACC128, MipsMFLO>;
+def PseudoMTLOHI64 : PseudoMTLOHI<ACC128, GPR64>;
 
 /// Sign Ext In Register Instructions.
 def SEB64 : SignExtInReg<"seb", i8, GPR64Opnd>, SEB_FM<0x10, 0x20>;
@@ -204,16 +206,13 @@ def LEA_ADDiu64 : EffectiveAddress<"daddiu", GPR64Opnd>, LW_FM<0x19>;
 let isCodeGenOnly = 1 in
 def RDHWR64 : ReadHardware<GPR64Opnd, HWRegsOpnd>, RDHWR_FM;
 
-def DEXT : ExtBase<"dext", GPR64Opnd>, EXT_FM<3>;
-let Pattern = []<dag> in {
-  def DEXTU : ExtBase<"dextu", GPR64Opnd>, EXT_FM<2>;
-  def DEXTM : ExtBase<"dextm", GPR64Opnd>, EXT_FM<1>;
-}
-def DINS : InsBase<"dins", GPR64Opnd>, EXT_FM<7>;
-let Pattern = []<dag> in {
-  def DINSU : InsBase<"dinsu", GPR64Opnd>, EXT_FM<6>;
-  def DINSM : InsBase<"dinsm", GPR64Opnd>, EXT_FM<5>;
-}
+def DEXT : ExtBase<"dext", GPR64Opnd, uimm6, MipsExt>, EXT_FM<3>;
+def DEXTU : ExtBase<"dextu", GPR64Opnd, uimm6>, EXT_FM<2>;
+def DEXTM : ExtBase<"dextm", GPR64Opnd, uimm5>, EXT_FM<1>;
+
+def DINS : InsBase<"dins", GPR64Opnd, uimm6, MipsIns>, EXT_FM<7>;
+def DINSU : InsBase<"dinsu", GPR64Opnd, uimm6>, EXT_FM<6>;
+def DINSM : InsBase<"dinsm", GPR64Opnd, uimm5>, EXT_FM<5>;
 
 let isCodeGenOnly = 1, rs = 0, shamt = 0 in {
   def DSLL64_32 : FR<0x00, 0x3c, (outs GPR64:$rd), (ins GPR32:$rt),
@@ -301,10 +300,6 @@ def : MipsPat<(i64 (sext_inreg GPR64:$src, i32)),
 
 // bswap MipsPattern
 def : MipsPat<(bswap GPR64:$rt), (DSHD (DSBH GPR64:$rt))>;
-
-// mflo/hi patterns.
-def : MipsPat<(i64 (ExtractLOHI ACC128:$ac, imm:$lohi_idx)),
-              (EXTRACT_SUBREG ACC128:$ac, imm:$lohi_idx)>;
 
 //===----------------------------------------------------------------------===//
 // Instruction aliases

@@ -105,6 +105,9 @@ private:
                          const MachineOperand &MO) const;
 
   unsigned getJumpTargetOpValue(const MachineInstr &MI, unsigned OpNo) const;
+  unsigned getJumpTargetOpValueMM(const MachineInstr &MI, unsigned OpNo) const;
+  unsigned getBranchTargetOpValueMM(const MachineInstr &MI,
+                                    unsigned OpNo) const;
 
   unsigned getBranchTargetOpValue(const MachineInstr &MI, unsigned OpNo) const;
   unsigned getMemEncoding(const MachineInstr &MI, unsigned OpNo) const;
@@ -184,6 +187,18 @@ unsigned MipsCodeEmitter::getJumpTargetOpValue(const MachineInstr &MI,
     emitMachineBasicBlock(MO.getMBB(), getRelocation(MI, MO));
   else
     llvm_unreachable("Unexpected jump target operand kind.");
+  return 0;
+}
+
+unsigned MipsCodeEmitter::getJumpTargetOpValueMM(const MachineInstr &MI,
+                                                 unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
+  return 0;
+}
+
+unsigned MipsCodeEmitter::getBranchTargetOpValueMM(const MachineInstr &MI,
+                                                   unsigned OpNo) const {
+  llvm_unreachable("Unimplemented function.");
   return 0;
 }
 
@@ -322,6 +337,14 @@ bool MipsCodeEmitter::expandPseudos(MachineBasicBlock::instr_iterator &MI,
   case Mips::NOP:
     BuildMI(MBB, &*MI, MI->getDebugLoc(), II->get(Mips::SLL), Mips::ZERO)
       .addReg(Mips::ZERO).addImm(0);
+    break;
+  case Mips::B:
+    BuildMI(MBB, &*MI, MI->getDebugLoc(), II->get(Mips::BEQ)).addReg(Mips::ZERO)
+      .addReg(Mips::ZERO).addOperand(MI->getOperand(0));
+    break;
+  case Mips::TRAP:
+    BuildMI(MBB, &*MI, MI->getDebugLoc(), II->get(Mips::BREAK)).addImm(0)
+      .addImm(0);
     break;
   case Mips::JALRPseudo:
     BuildMI(MBB, &*MI, MI->getDebugLoc(), II->get(Mips::JALR), Mips::RA)

@@ -84,11 +84,23 @@ public:
    unsigned getJumpTargetOpValue(const MCInst &MI, unsigned OpNo,
                                  SmallVectorImpl<MCFixup> &Fixups) const;
 
+  // getBranchJumpOpValueMM - Return binary encoding of the microMIPS jump
+  // target operand. If the machine operand requires relocation,
+  // record the relocation and return zero.
+  unsigned getJumpTargetOpValueMM(const MCInst &MI, unsigned OpNo,
+                                  SmallVectorImpl<MCFixup> &Fixups) const;
+
    // getBranchTargetOpValue - Return binary encoding of the branch
    // target operand. If the machine operand requires relocation,
    // record the relocation and return zero.
   unsigned getBranchTargetOpValue(const MCInst &MI, unsigned OpNo,
                                   SmallVectorImpl<MCFixup> &Fixups) const;
+
+  // getBranchTargetOpValue - Return binary encoding of the microMIPS branch
+  // target operand. If the machine operand requires relocation,
+  // record the relocation and return zero.
+  unsigned getBranchTargetOpValueMM(const MCInst &MI, unsigned OpNo,
+                                    SmallVectorImpl<MCFixup> &Fixups) const;
 
    // getMachineOpValue - Return binary encoding of operand. If the machin
    // operand requires relocation, record the relocation and return zero.
@@ -155,6 +167,9 @@ static void LowerLargeShift(MCInst& Inst) {
   case Mips::DSRA:
     Inst.setOpcode(Mips::DSRA32);
     return;
+  case Mips::DROTR:
+    Inst.setOpcode(Mips::DROTR32);
+    return;
   }
 }
 
@@ -206,6 +221,7 @@ EncodeInstruction(const MCInst &MI, raw_ostream &OS,
   case Mips::DSLL:
   case Mips::DSRL:
   case Mips::DSRA:
+  case Mips::DROTR:
     LowerLargeShift(TmpInst);
     break;
     // Double extract instruction is chosen by pos and size operands
@@ -266,6 +282,28 @@ getBranchTargetOpValue(const MCInst &MI, unsigned OpNo,
   return 0;
 }
 
+/// getBranchTargetOpValue - Return binary encoding of the microMIPS branch
+/// target operand. If the machine operand requires relocation,
+/// record the relocation and return zero.
+unsigned MipsMCCodeEmitter::
+getBranchTargetOpValueMM(const MCInst &MI, unsigned OpNo,
+                         SmallVectorImpl<MCFixup> &Fixups) const {
+
+  const MCOperand &MO = MI.getOperand(OpNo);
+
+  // If the destination is an immediate, divide by 2.
+  if (MO.isImm()) return MO.getImm() >> 1;
+
+  assert(MO.isExpr() &&
+         "getBranchTargetOpValueMM expects only expressions or immediates");
+
+  const MCExpr *Expr = MO.getExpr();
+  Fixups.push_back(MCFixup::Create(0, Expr,
+                   MCFixupKind(Mips::
+                               fixup_MICROMIPS_PC16_S1)));
+  return 0;
+}
+
 /// getJumpTargetOpValue - Return binary encoding of the jump
 /// target operand. If the machine operand requires relocation,
 /// record the relocation and return zero.
@@ -283,6 +321,23 @@ getJumpTargetOpValue(const MCInst &MI, unsigned OpNo,
   const MCExpr *Expr = MO.getExpr();
   Fixups.push_back(MCFixup::Create(0, Expr,
                                    MCFixupKind(Mips::fixup_Mips_26)));
+  return 0;
+}
+
+unsigned MipsMCCodeEmitter::
+getJumpTargetOpValueMM(const MCInst &MI, unsigned OpNo,
+                       SmallVectorImpl<MCFixup> &Fixups) const {
+
+  const MCOperand &MO = MI.getOperand(OpNo);
+  // If the destination is an immediate, divide by 2.
+  if (MO.isImm()) return MO.getImm() >> 1;
+
+  assert(MO.isExpr() &&
+         "getJumpTargetOpValueMM expects only expressions or an immediate");
+
+  const MCExpr *Expr = MO.getExpr();
+  Fixups.push_back(MCFixup::Create(0, Expr,
+                                   MCFixupKind(Mips::fixup_MICROMIPS_26_S1)));
   return 0;
 }
 
@@ -316,31 +371,39 @@ getExprOpValue(const MCExpr *Expr,SmallVectorImpl<MCFixup> &Fixups) const {
     FixupKind = Mips::fixup_Mips_GPOFF_LO;
     break;
   case MCSymbolRefExpr::VK_Mips_GOT_PAGE :
-    FixupKind = Mips::fixup_Mips_GOT_PAGE;
+    FixupKind = IsMicroMips ? Mips::fixup_MICROMIPS_GOT_PAGE
+                            : Mips::fixup_Mips_GOT_PAGE;
     break;
   case MCSymbolRefExpr::VK_Mips_GOT_OFST :
-    FixupKind = Mips::fixup_Mips_GOT_OFST;
+    FixupKind = IsMicroMips ? Mips::fixup_MICROMIPS_GOT_OFST
+                            : Mips::fixup_Mips_GOT_OFST;
     break;
   case MCSymbolRefExpr::VK_Mips_GOT_DISP :
-    FixupKind = Mips::fixup_Mips_GOT_DISP;
+    FixupKind = IsMicroMips ? Mips::fixup_MICROMIPS_GOT_DISP
+                            : Mips::fixup_Mips_GOT_DISP;
     break;
   case MCSymbolRefExpr::VK_Mips_GPREL:
     FixupKind = Mips::fixup_Mips_GPREL16;
     break;
   case MCSymbolRefExpr::VK_Mips_GOT_CALL:
-    FixupKind = Mips::fixup_Mips_CALL16;
+    FixupKind = IsMicroMips ? Mips::fixup_MICROMIPS_CALL16
+                            : Mips::fixup_Mips_CALL16;
     break;
   case MCSymbolRefExpr::VK_Mips_GOT16:
-    FixupKind = Mips::fixup_Mips_GOT_Global;
+    FixupKind = IsMicroMips ? Mips::fixup_MICROMIPS_GOT16
+                            : Mips::fixup_Mips_GOT_Global;
     break;
   case MCSymbolRefExpr::VK_Mips_GOT:
-    FixupKind = Mips::fixup_Mips_GOT_Local;
+    FixupKind = IsMicroMips ? Mips::fixup_MICROMIPS_GOT16
+                            : Mips::fixup_Mips_GOT_Local;
     break;
   case MCSymbolRefExpr::VK_Mips_ABS_HI:
-    FixupKind = Mips::fixup_Mips_HI16;
+    FixupKind = IsMicroMips ? Mips::fixup_MICROMIPS_HI16
+                            : Mips::fixup_Mips_HI16;
     break;
   case MCSymbolRefExpr::VK_Mips_ABS_LO:
-    FixupKind = Mips::fixup_Mips_LO16;
+    FixupKind = IsMicroMips ? Mips::fixup_MICROMIPS_LO16
+                            : Mips::fixup_Mips_LO16;
     break;
   case MCSymbolRefExpr::VK_Mips_TLSGD:
     FixupKind = Mips::fixup_Mips_TLSGD;
@@ -349,19 +412,23 @@ getExprOpValue(const MCExpr *Expr,SmallVectorImpl<MCFixup> &Fixups) const {
     FixupKind = Mips::fixup_Mips_TLSLDM;
     break;
   case MCSymbolRefExpr::VK_Mips_DTPREL_HI:
-    FixupKind = Mips::fixup_Mips_DTPREL_HI;
+    FixupKind = IsMicroMips ? Mips::fixup_MICROMIPS_TLS_DTPREL_HI16
+                            : Mips::fixup_Mips_DTPREL_HI;
     break;
   case MCSymbolRefExpr::VK_Mips_DTPREL_LO:
-    FixupKind = Mips::fixup_Mips_DTPREL_LO;
+    FixupKind = IsMicroMips ? Mips::fixup_MICROMIPS_TLS_DTPREL_LO16
+                            : Mips::fixup_Mips_DTPREL_LO;
     break;
   case MCSymbolRefExpr::VK_Mips_GOTTPREL:
     FixupKind = Mips::fixup_Mips_GOTTPREL;
     break;
   case MCSymbolRefExpr::VK_Mips_TPREL_HI:
-    FixupKind = Mips::fixup_Mips_TPREL_HI;
+    FixupKind = IsMicroMips ? Mips::fixup_MICROMIPS_TLS_TPREL_HI16
+                            : Mips::fixup_Mips_TPREL_HI;
     break;
   case MCSymbolRefExpr::VK_Mips_TPREL_LO:
-    FixupKind = Mips::fixup_Mips_TPREL_LO;
+    FixupKind = IsMicroMips ? Mips::fixup_MICROMIPS_TLS_TPREL_LO16
+                            : Mips::fixup_Mips_TPREL_LO;
     break;
   case MCSymbolRefExpr::VK_Mips_HIGHER:
     FixupKind = Mips::fixup_Mips_HIGHER;

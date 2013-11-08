@@ -15,7 +15,7 @@
 
 #define DEBUG_TYPE "lli"
 #include "llvm/IR/LLVMContext.h"
-#include "RecordingMemoryManager.h"
+#include "RemoteMemoryManager.h"
 #include "RemoteTarget.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Bitcode/ReaderWriter.h"
@@ -27,8 +27,10 @@
 #include "llvm/ExecutionEngine/JITMemoryManager.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
+#include "llvm/IR/TypeBuilder.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -41,6 +43,7 @@
 #include "llvm/Support/PluginLoader.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Process.h"
+#include "llvm/Support/Program.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
@@ -83,6 +86,18 @@ namespace {
     cl::desc("Execute MCJIT'ed code in a separate process."),
     cl::init(false));
 
+  // Manually specify the child process for remote execution. This overrides
+  // the simulated remote execution that allocates address space for child
+  // execution. The child process will be executed and will communicate with
+  // lli via stdin/stdout pipes.
+  cl::opt<std::string>
+  MCJITRemoteProcess("mcjit-remote-process",
+            cl::desc("Specify the filename of the process to launch "
+                     "for remote MCJIT execution.  If none is specified,"
+                     "\n\tremote execution will be simulated in-process."),
+            cl::value_desc("filename"),
+            cl::init(""));
+
   // Determine optimization level.
   cl::opt<char>
   OptLevel("O",
@@ -117,6 +132,11 @@ namespace {
                      "of the executable"),
             cl::value_desc("function"),
             cl::init("main"));
+
+  cl::list<std::string>
+  ExtraModules("extra-module",
+         cl::desc("Extra modules to be loaded"),
+         cl::value_desc("input bitcode"));
 
   cl::opt<std::string>
   FakeArgv0("fake-argv0",
@@ -209,81 +229,45 @@ static void do_shutdown() {
 #endif
 }
 
-void layoutRemoteTargetMemory(RemoteTarget *T, RecordingMemoryManager *JMM) {
-  // Lay out our sections in order, with all the code sections first, then
-  // all the data sections.
-  uint64_t CurOffset = 0;
-  unsigned MaxAlign = T->getPageAlignment();
-  SmallVector<std::pair<const void*, uint64_t>, 16> Offsets;
-  SmallVector<unsigned, 16> Sizes;
-  for (RecordingMemoryManager::const_code_iterator I = JMM->code_begin(),
-                                                   E = JMM->code_end();
-       I != E; ++I) {
-    DEBUG(dbgs() << "code region: size " << I->first.size()
-                 << ", alignment " << I->second << "\n");
-    // Align the current offset up to whatever is needed for the next
-    // section.
-    unsigned Align = I->second;
-    CurOffset = (CurOffset + Align - 1) / Align * Align;
-    // Save off the address of the new section and allocate its space.
-    Offsets.push_back(std::pair<const void*,uint64_t>(I->first.base(), CurOffset));
-    Sizes.push_back(I->first.size());
-    CurOffset += I->first.size();
+// On Mingw and Cygwin, an external symbol named '__main' is called from the
+// generated 'main' function to allow static intialization.  To avoid linking
+// problems with remote targets (because lli's remote target support does not
+// currently handle external linking) we add a secondary module which defines
+// an empty '__main' function.
+static void addCygMingExtraModule(ExecutionEngine *EE,
+                                  LLVMContext &Context,
+                                  StringRef TargetTripleStr) {
+  IRBuilder<> Builder(Context);
+  Triple TargetTriple(TargetTripleStr);
+
+  // Create a new module.
+  Module *M = new Module("CygMingHelper", Context);
+  M->setTargetTriple(TargetTripleStr);
+
+  // Create an empty function named "__main".
+  Function *Result;
+  if (TargetTriple.isArch64Bit()) {
+    Result = Function::Create(
+      TypeBuilder<int64_t(void), false>::get(Context),
+      GlobalValue::ExternalLinkage, "__main", M);
+  } else {
+    Result = Function::Create(
+      TypeBuilder<int32_t(void), false>::get(Context),
+      GlobalValue::ExternalLinkage, "__main", M);
   }
-  // Adjust to keep code and data aligned on seperate pages.
-  CurOffset = (CurOffset + MaxAlign - 1) / MaxAlign * MaxAlign;
-  unsigned FirstDataIndex = Offsets.size();
-  for (RecordingMemoryManager::const_data_iterator I = JMM->data_begin(),
-                                                   E = JMM->data_end();
-       I != E; ++I) {
-    DEBUG(dbgs() << "data region: size " << I->first.size()
-                 << ", alignment " << I->second << "\n");
-    // Align the current offset up to whatever is needed for the next
-    // section.
-    unsigned Align = I->second;
-    CurOffset = (CurOffset + Align - 1) / Align * Align;
-    // Save off the address of the new section and allocate its space.
-    Offsets.push_back(std::pair<const void*,uint64_t>(I->first.base(), CurOffset));
-    Sizes.push_back(I->first.size());
-    CurOffset += I->first.size();
-  }
+  BasicBlock *BB = BasicBlock::Create(Context, "__main", Result);
+  Builder.SetInsertPoint(BB);
+  Value *ReturnVal;
+  if (TargetTriple.isArch64Bit())
+    ReturnVal = ConstantInt::get(Context, APInt(64, 0));
+  else
+    ReturnVal = ConstantInt::get(Context, APInt(32, 0));
+  Builder.CreateRet(ReturnVal);
 
-  // Allocate space in the remote target.
-  uint64_t RemoteAddr;
-  if (T->allocateSpace(CurOffset, MaxAlign, RemoteAddr))
-    report_fatal_error(T->getErrorMsg());
-  // Map the section addresses so relocations will get updated in the local
-  // copies of the sections.
-  for (unsigned i = 0, e = Offsets.size(); i != e; ++i) {
-    uint64_t Addr = RemoteAddr + Offsets[i].second;
-    EE->mapSectionAddress(const_cast<void*>(Offsets[i].first), Addr);
-
-    DEBUG(dbgs() << "  Mapping local: " << Offsets[i].first
-                 << " to remote: 0x" << format("%llx", Addr) << "\n");
-
-  }
-
-  // Trigger application of relocations
-  EE->finalizeObject();
-
-  // Now load it all to the target.
-  for (unsigned i = 0, e = Offsets.size(); i != e; ++i) {
-    uint64_t Addr = RemoteAddr + Offsets[i].second;
-
-    if (i < FirstDataIndex) {
-      T->loadCode(Addr, Offsets[i].first, Sizes[i]);
-
-      DEBUG(dbgs() << "  loading code: " << Offsets[i].first
-            << " to remote: 0x" << format("%llx", Addr) << "\n");
-    } else {
-      T->loadData(Addr, Offsets[i].first, Sizes[i]);
-
-      DEBUG(dbgs() << "  loading data: " << Offsets[i].first
-            << " to remote: 0x" << format("%llx", Addr) << "\n");
-    }
-
-  }
+  // Add this new module to the ExecutionEngine.
+  EE->addModule(M);
 }
+
 
 //===----------------------------------------------------------------------===//
 // main Driver function
@@ -357,7 +341,7 @@ int main(int argc, char **argv, char * const *envp) {
   if (UseMCJIT && !ForceInterpreter) {
     builder.setUseMCJIT(true);
     if (RemoteMCJIT)
-      RTDyldMM = new RecordingMemoryManager();
+      RTDyldMM = new RemoteMemoryManager();
     else
       RTDyldMM = new SectionMemoryManager();
     builder.setMCJITMemoryManager(RTDyldMM);
@@ -407,6 +391,22 @@ int main(int argc, char **argv, char * const *envp) {
     exit(1);
   }
 
+  // Load any additional modules specified on the command line.
+  for (unsigned i = 0, e = ExtraModules.size(); i != e; ++i) {
+    Module *XMod = ParseIRFile(ExtraModules[i], Err, Context);
+    if (!XMod) {
+      Err.print(argv[0], errs());
+      return 1;
+    }
+    EE->addModule(XMod);
+  }
+
+  // If the target is Cygwin/MingW and we are generating remote code, we
+  // need an extra module to help out with linking.
+  if (RemoteMCJIT && Triple(Mod->getTargetTriple()).isOSCygMing()) {
+    addCygMingExtraModule(EE, Context, Mod->getTargetTriple());
+  }
+
   // The following functions have no effect if their respective profiling
   // support wasn't enabled in the build configuration.
   EE->RegisterJITEventListener(
@@ -445,68 +445,33 @@ int main(int argc, char **argv, char * const *envp) {
     return -1;
   }
 
-  // If the program doesn't explicitly call exit, we will need the Exit
-  // function later on to make an explicit call, so get the function now.
-  Constant *Exit = Mod->getOrInsertFunction("exit", Type::getVoidTy(Context),
-                                                    Type::getInt32Ty(Context),
-                                                    NULL);
-
   // Reset errno to zero on entry to main.
   errno = 0;
 
-  // Remote target MCJIT doesn't (yet) support static constructors. No reason
-  // it couldn't. This is a limitation of the LLI implemantation, not the
-  // MCJIT itself. FIXME.
-  //
-  // Run static constructors.
-  if (!RemoteMCJIT) {
-      if (UseMCJIT && !ForceInterpreter) {
-        // Give MCJIT a chance to apply relocations and set page permissions.
-        EE->finalizeObject();
-      }
-      EE->runStaticConstructorsDestructors(false);
-  }
-
-  if (NoLazyCompilation) {
-    for (Module::iterator I = Mod->begin(), E = Mod->end(); I != E; ++I) {
-      Function *Fn = &*I;
-      if (Fn != EntryFn && !Fn->isDeclaration())
-        EE->getPointerToFunction(Fn);
-    }
-  }
-
   int Result;
-  if (RemoteMCJIT) {
-    RecordingMemoryManager *MM = static_cast<RecordingMemoryManager*>(RTDyldMM);
-    // Everything is prepared now, so lay out our program for the target
-    // address space, assign the section addresses to resolve any relocations,
-    // and send it to the target.
-    RemoteTarget Target;
-    Target.create();
 
-    // Ask for a pointer to the entry function. This triggers the actual
-    // compilation.
-    (void)EE->getPointerToFunction(EntryFn);
+  if (!RemoteMCJIT) {
+    // If the program doesn't explicitly call exit, we will need the Exit
+    // function later on to make an explicit call, so get the function now.
+    Constant *Exit = Mod->getOrInsertFunction("exit", Type::getVoidTy(Context),
+                                                      Type::getInt32Ty(Context),
+                                                      NULL);
 
-    // Enough has been compiled to execute the entry function now, so
-    // layout the target memory.
-    layoutRemoteTargetMemory(&Target, MM);
+    // Run static constructors.
+    if (UseMCJIT && !ForceInterpreter) {
+      // Give MCJIT a chance to apply relocations and set page permissions.
+      EE->finalizeObject();
+    }
+    EE->runStaticConstructorsDestructors(false);
 
-    // Since we're executing in a (at least simulated) remote address space,
-    // we can't use the ExecutionEngine::runFunctionAsMain(). We have to
-    // grab the function address directly here and tell the remote target
-    // to execute the function.
-    // FIXME: argv and envp handling.
-    uint64_t Entry = (uint64_t)EE->getPointerToFunction(EntryFn);
+    if (!UseMCJIT && NoLazyCompilation) {
+      for (Module::iterator I = Mod->begin(), E = Mod->end(); I != E; ++I) {
+        Function *Fn = &*I;
+        if (Fn != EntryFn && !Fn->isDeclaration())
+          EE->getPointerToFunction(Fn);
+      }
+    }
 
-    DEBUG(dbgs() << "Executing '" << EntryFn->getName() << "' at 0x"
-                 << format("%llx", Entry) << "\n");
-
-    if (Target.executeCode(Entry, Result))
-      errs() << "ERROR: " << Target.getErrorMsg() << "\n";
-
-    Target.stop();
-  } else {
     // Trigger compilation separately so code regions that need to be 
     // invalidated will be known.
     (void)EE->getPointerToFunction(EntryFn);
@@ -516,11 +481,7 @@ int main(int argc, char **argv, char * const *envp) {
 
     // Run main.
     Result = EE->runFunctionAsMain(EntryFn, InputArgv, envp);
-  }
 
-  // Like static constructors, the remote target MCJIT support doesn't handle
-  // this yet. It could. FIXME.
-  if (!RemoteMCJIT) {
     // Run static destructors.
     EE->runStaticConstructorsDestructors(true);
 
@@ -538,6 +499,67 @@ int main(int argc, char **argv, char * const *envp) {
       errs() << "ERROR: exit defined with wrong prototype!\n";
       abort();
     }
+  } else {
+    // else == "if (RemoteMCJIT)"
+
+    // Remote target MCJIT doesn't (yet) support static constructors. No reason
+    // it couldn't. This is a limitation of the LLI implemantation, not the
+    // MCJIT itself. FIXME.
+    //
+    RemoteMemoryManager *MM = static_cast<RemoteMemoryManager*>(RTDyldMM);
+    // Everything is prepared now, so lay out our program for the target
+    // address space, assign the section addresses to resolve any relocations,
+    // and send it to the target.
+
+    OwningPtr<RemoteTarget> Target;
+    if (!MCJITRemoteProcess.empty()) { // Remote execution on a child process
+      if (!RemoteTarget::hostSupportsExternalRemoteTarget()) {
+        errs() << "Warning: host does not support external remote targets.\n"
+               << "  Defaulting to simulated remote execution\n";
+        Target.reset(RemoteTarget::createRemoteTarget());
+      } else {
+        std::string ChildEXE = sys::FindProgramByName(MCJITRemoteProcess);
+        if (ChildEXE == "") {
+          errs() << "Unable to find child target: '\''" << MCJITRemoteProcess << "\'\n";
+          return -1;
+        }
+        Target.reset(RemoteTarget::createExternalRemoteTarget(ChildEXE));
+      }
+    } else {
+      // No child process name provided, use simulated remote execution.
+      Target.reset(RemoteTarget::createRemoteTarget());
+    }
+
+    // Give the memory manager a pointer to our remote target interface object.
+    MM->setRemoteTarget(Target.get());
+
+    // Create the remote target.
+    Target->create();
+
+    // Since we're executing in a (at least simulated) remote address space,
+    // we can't use the ExecutionEngine::runFunctionAsMain(). We have to
+    // grab the function address directly here and tell the remote target
+    // to execute the function.
+    //
+    // Our memory manager will map generated code into the remote address
+    // space as it is loaded and copy the bits over during the finalizeMemory
+    // operation.
+    //
+    // FIXME: argv and envp handling.
+    uint64_t Entry = EE->getFunctionAddress(EntryFn->getName().str());
+
+    DEBUG(dbgs() << "Executing '" << EntryFn->getName() << "' at 0x"
+                 << format("%llx", Entry) << "\n");
+
+    if (Target->executeCode(Entry, Result))
+      errs() << "ERROR: " << Target->getErrorMsg() << "\n";
+
+    // Like static constructors, the remote target MCJIT support doesn't handle
+    // this yet. It could. FIXME.
+
+    // Stop the remote target
+    Target->stop();
   }
+
   return Result;
 }

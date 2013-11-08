@@ -153,14 +153,10 @@ def : Pat<(xor i64:$a, (not i64:$b)), (XNORrr $a, $b)>;
 def : Pat<(add i64:$a, i64:$b), (ADDrr $a, $b)>;
 def : Pat<(sub i64:$a, i64:$b), (SUBrr $a, $b)>;
 
-// Add/sub with carry were renamed to addc/subc in SPARC v9.
-def : Pat<(adde i64:$a, i64:$b), (ADDXrr $a, $b)>;
-def : Pat<(sube i64:$a, i64:$b), (SUBXrr $a, $b)>;
-
-def : Pat<(addc i64:$a, i64:$b), (ADDCCrr $a, $b)>;
-def : Pat<(subc i64:$a, i64:$b), (SUBCCrr $a, $b)>;
-
 def : Pat<(SPcmpicc i64:$a, i64:$b), (CMPrr $a, $b)>;
+
+def : Pat<(tlsadd i64:$a, i64:$b, tglobaltlsaddr:$sym),
+          (TLS_ADDrr $a, $b, $sym)>;
 
 // Register-immediate instructions.
 
@@ -172,6 +168,8 @@ def : Pat<(add i64:$a, (i64 simm13:$b)), (ADDri $a, (as_i32imm $b))>;
 def : Pat<(sub i64:$a, (i64 simm13:$b)), (SUBri $a, (as_i32imm $b))>;
 
 def : Pat<(SPcmpicc i64:$a, (i64 simm13:$b)), (CMPri $a, (as_i32imm $b))>;
+
+def : Pat<(ctpop i64:$src), (POPCrr $src)>;
 
 } // Predicates = [Is64Bit]
 
@@ -237,6 +235,12 @@ def LDXri  : F3_2<3, 0b001011,
                   (outs I64Regs:$dst), (ins MEMri:$addr),
                   "ldx [$addr], $dst",
                   [(set i64:$dst, (load ADDRri:$addr))]>;
+let mayLoad = 1 in
+  def TLS_LDXrr : F3_1<3, 0b001011,
+                       (outs IntRegs:$dst), (ins MEMrr:$addr, TLSSym:$sym),
+                       "ldx [$addr], $dst, $sym",
+                       [(set i64:$dst,
+                           (tlsld ADDRrr:$addr, tglobaltlsaddr:$sym))]>;
 
 // Extending loads to i64.
 def : Pat<(i64 (zextloadi1 ADDRrr:$addr)), (LDUBrr ADDRrr:$addr)>;
@@ -312,9 +316,9 @@ def : Pat<(store (i64 0), ADDRri:$dst), (STXri ADDRri:$dst, (i64 G0))>;
 let Predicates = [Is64Bit] in {
 
 let Uses = [ICC] in
-def BPXCC : BranchSP<0, (ins brtarget:$dst, CCOp:$cc),
-                     "b$cc %xcc, $dst",
-                     [(SPbrxcc bb:$dst, imm:$cc)]>;
+def BPXCC : BranchSP<(ins brtarget:$imm22, CCOp:$cond),
+                     "b$cond %xcc, $imm22",
+                     [(SPbrxcc bb:$imm22, imm:$cond)]>;
 
 // Conditional moves on %xcc.
 let Uses = [ICC], Constraints = "$f = $rd" in {
@@ -339,6 +343,42 @@ def FMOVD_XCC : Pseudo<(outs DFPRegs:$rd),
                       [(set f64:$rd,
                        (SPselectxcc f64:$rs2, f64:$f, imm:$cond))]>;
 } // Uses, Constraints
+
+//===----------------------------------------------------------------------===//
+// 64-bit Floating Point Conversions.
+//===----------------------------------------------------------------------===//
+
+let Predicates = [Is64Bit] in {
+
+def FXTOS : F3_3u<2, 0b110100, 0b010000100,
+                 (outs FPRegs:$dst), (ins DFPRegs:$src),
+                 "fxtos $src, $dst",
+                 [(set FPRegs:$dst, (SPxtof DFPRegs:$src))]>;
+def FXTOD : F3_3u<2, 0b110100, 0b010001000,
+                 (outs DFPRegs:$dst), (ins DFPRegs:$src),
+                 "fxtod $src, $dst",
+                 [(set DFPRegs:$dst, (SPxtof DFPRegs:$src))]>;
+def FXTOQ : F3_3u<2, 0b110100, 0b010001100,
+                 (outs QFPRegs:$dst), (ins DFPRegs:$src),
+                 "fxtoq $src, $dst",
+                 [(set QFPRegs:$dst, (SPxtof DFPRegs:$src))]>,
+                 Requires<[HasHardQuad]>;
+
+def FSTOX : F3_3u<2, 0b110100, 0b010000001,
+                 (outs DFPRegs:$dst), (ins FPRegs:$src),
+                 "fstox $src, $dst",
+                 [(set DFPRegs:$dst, (SPftox FPRegs:$src))]>;
+def FDTOX : F3_3u<2, 0b110100, 0b010000010,
+                 (outs DFPRegs:$dst), (ins DFPRegs:$src),
+                 "fdtox $src, $dst",
+                 [(set DFPRegs:$dst, (SPftox DFPRegs:$src))]>;
+def FQTOX : F3_3u<2, 0b110100, 0b010000011,
+                 (outs DFPRegs:$dst), (ins QFPRegs:$src),
+                 "fqtox $src, $dst",
+                 [(set DFPRegs:$dst, (SPftox QFPRegs:$src))]>,
+                 Requires<[HasHardQuad]>;
+
+} // Predicates = [Is64Bit]
 
 def : Pat<(SPselectxcc i64:$t, i64:$f, imm:$cond),
           (MOVXCCrr $t, $f, imm:$cond)>;

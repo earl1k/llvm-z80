@@ -192,7 +192,7 @@ public:
     ST_Other
   };
 
-  enum Flags {
+  enum Flags LLVM_ENUM_INT_TYPE(unsigned) {
     SF_None            = 0,
     SF_Undefined       = 1U << 0,  // Symbol is defined in another object file
     SF_Global          = 1U << 1,  // Global symbol
@@ -220,10 +220,6 @@ public:
   error_code getAlignment(uint32_t &Result) const;
   error_code getSize(uint64_t &Result) const;
   error_code getType(SymbolRef::Type &Result) const;
-
-  /// Returns the ascii char that should be displayed in a symbol table dump via
-  /// nm for this symbol.
-  error_code getNMTypeChar(char &Result) const;
 
   /// Get symbol flags (bitwise OR of SymbolRef::Flags)
   error_code getFlags(uint32_t &Result) const;
@@ -296,7 +292,6 @@ protected:
   virtual error_code getSymbolSize(DataRefImpl Symb, uint64_t &Res) const = 0;
   virtual error_code getSymbolType(DataRefImpl Symb,
                                    SymbolRef::Type &Res) const = 0;
-  virtual error_code getSymbolNMTypeChar(DataRefImpl Symb, char &Res) const = 0;
   virtual error_code getSymbolFlags(DataRefImpl Symb,
                                     uint32_t &Res) const = 0;
   virtual error_code getSymbolSection(DataRefImpl Symb,
@@ -322,8 +317,8 @@ protected:
   virtual error_code isSectionReadOnlyData(DataRefImpl Sec, bool &Res) const =0;
   virtual error_code sectionContainsSymbol(DataRefImpl Sec, DataRefImpl Symb,
                                            bool &Result) const = 0;
-  virtual relocation_iterator getSectionRelBegin(DataRefImpl Sec) const = 0;
-  virtual relocation_iterator getSectionRelEnd(DataRefImpl Sec) const = 0;
+  virtual relocation_iterator section_rel_begin(DataRefImpl Sec) const = 0;
+  virtual relocation_iterator section_rel_end(DataRefImpl Sec) const = 0;
   virtual section_iterator getRelocatedSection(DataRefImpl Sec) const;
 
   // Same as above for RelocationRef.
@@ -431,10 +426,6 @@ inline error_code SymbolRef::getSize(uint64_t &Result) const {
   return OwningObject->getSymbolSize(SymbolPimpl, Result);
 }
 
-inline error_code SymbolRef::getNMTypeChar(char &Result) const {
-  return OwningObject->getSymbolNMTypeChar(SymbolPimpl, Result);
-}
-
 inline error_code SymbolRef::getFlags(uint32_t &Result) const {
   return OwningObject->getSymbolFlags(SymbolPimpl, Result);
 }
@@ -528,11 +519,11 @@ inline error_code SectionRef::containsSymbol(SymbolRef S, bool &Result) const {
 }
 
 inline relocation_iterator SectionRef::begin_relocations() const {
-  return OwningObject->getSectionRelBegin(SectionPimpl);
+  return OwningObject->section_rel_begin(SectionPimpl);
 }
 
 inline relocation_iterator SectionRef::end_relocations() const {
-  return OwningObject->getSectionRelEnd(SectionPimpl);
+  return OwningObject->section_rel_end(SectionPimpl);
 }
 
 inline section_iterator SectionRef::getRelocatedSection() const {

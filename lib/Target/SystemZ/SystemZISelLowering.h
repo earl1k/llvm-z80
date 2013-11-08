@@ -38,15 +38,25 @@ namespace SystemZISD {
     // accesses (LARL).  Operand 0 is the address.
     PCREL_WRAPPER,
 
-    // Signed integer and floating-point comparisons.  The operands are the
-    // two values to compare.
-    CMP,
+    // Used in cases where an offset is applied to a TargetGlobalAddress.
+    // Operand 0 is the full TargetGlobalAddress and operand 1 is a
+    // PCREL_WRAPPER for an anchor point.  This is used so that we can
+    // cheaply refer to either the full address or the anchor point
+    // as a register base.
+    PCREL_OFFSET,
 
-    // Likewise unsigned integer comparison.
-    UCMP,
+    // Integer comparisons.  There are three operands: the two values
+    // to compare, and an integer of type SystemZICMP.
+    ICMP,
+
+    // Floating-point comparisons.  The two operands are the values to compare.
+    FCMP,
 
     // Test under mask.  The first operand is ANDed with the second operand
-    // and the condition codes are set on the result.
+    // and the condition codes are set on the result.  The third operand is
+    // a boolean that is true if the condition codes need to distinguish
+    // between CCMASK_TM_MIXED_MSB_0 and CCMASK_TM_MIXED_MSB_1 (which the
+    // register forms do but the memory forms don't).
     TM,
 
     // Branches if a condition is true.  Operand 0 is the chain operand;
@@ -92,6 +102,14 @@ namespace SystemZISD {
     // followed by straight-line code to handle the rest (if any).
     // The value of X is passed as an additional operand.
     MVC_LOOP,
+
+    // Similar to MVC and MVC_LOOP, but for logic operations (AND, OR, XOR).
+    NC,
+    NC_LOOP,
+    OC,
+    OC_LOOP,
+    XC,
+    XC_LOOP,
 
     // Use CLC to compare two blocks of memory, with the same comments
     // as for MVC and MVC_LOOP.
@@ -152,6 +170,21 @@ namespace SystemZISD {
     // a store prefetch.
     PREFETCH
   };
+
+  // Return true if OPCODE is some kind of PC-relative address.
+  inline bool isPCREL(unsigned Opcode) {
+    return Opcode == PCREL_WRAPPER || Opcode == PCREL_OFFSET;
+  }
+}
+
+namespace SystemZICMP {
+  // Describes whether an integer comparison needs to be signed or unsigned,
+  // or whether either type is OK.
+  enum {
+    Any,
+    UnsignedOnly,
+    SignedOnly
+  };
 }
 
 class SystemZSubtarget;
@@ -165,9 +198,7 @@ public:
   virtual MVT getScalarShiftAmountTy(EVT LHSTy) const LLVM_OVERRIDE {
     return MVT::i32;
   }
-  virtual EVT getSetCCResultType(LLVMContext &, EVT) const LLVM_OVERRIDE {
-    return MVT::i32;
-  }
+  virtual EVT getSetCCResultType(LLVMContext &, EVT) const LLVM_OVERRIDE;
   virtual bool isFMAFasterThanFMulAndFAdd(EVT VT) const LLVM_OVERRIDE;
   virtual bool isFPImmLegal(const APFloat &Imm, EVT VT) const LLVM_OVERRIDE;
   virtual bool isLegalAddressingMode(const AddrMode &AM, Type *Ty) const
@@ -219,6 +250,7 @@ private:
   const SystemZTargetMachine &TM;
 
   // Implement LowerOperation for individual opcodes.
+  SDValue lowerSETCC(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerGlobalAddress(GlobalAddressSDNode *Node,

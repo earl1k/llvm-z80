@@ -15,11 +15,11 @@
 #define DEBUG_TYPE "mips-asm-printer"
 #include "InstPrinter/MipsInstPrinter.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
-#include "MCTargetDesc/MipsELFStreamer.h"
 #include "Mips.h"
 #include "MipsAsmPrinter.h"
 #include "MipsInstrInfo.h"
 #include "MipsMCInstLower.h"
+#include "MipsTargetStreamer.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
@@ -33,8 +33,8 @@
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCELFStreamer.h"
 #include "llvm/MC/MCInst.h"
-#include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/ELF.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -45,12 +45,17 @@
 
 using namespace llvm;
 
+MipsTargetStreamer &MipsAsmPrinter::getTargetStreamer() {
+  return static_cast<MipsTargetStreamer &>(OutStreamer.getTargetStreamer());
+}
+
 bool MipsAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   // Initialize TargetLoweringObjectFile.
   if (Subtarget->allowMixed16_32())
     const_cast<TargetLoweringObjectFile&>(getObjFileLowering())
       .Initialize(OutContext, TM);
   MipsFI = MF.getInfo<MipsFunctionInfo>();
+  MCP = MF.getConstantPool();
   AsmPrinter::runOnMachineFunction(MF);
   return true;
 }
@@ -70,6 +75,39 @@ void MipsAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     PrintDebugValueComment(MI, OS);
     return;
   }
+
+  // If we just ended a constant pool, mark it as such.
+  if (InConstantPool && MI->getOpcode() != Mips::CONSTPOOL_ENTRY) {
+    OutStreamer.EmitDataRegion(MCDR_DataRegionEnd);
+    InConstantPool = false;
+  }
+  if (MI->getOpcode() == Mips::CONSTPOOL_ENTRY) {
+    // CONSTPOOL_ENTRY - This instruction represents a floating
+    //constant pool in the function.  The first operand is the ID#
+    // for this instruction, the second is the index into the
+    // MachineConstantPool that this is, the third is the size in
+    // bytes of this constant pool entry.
+    // The required alignment is specified on the basic block holding this MI.
+    //
+    unsigned LabelId = (unsigned)MI->getOperand(0).getImm();
+    unsigned CPIdx   = (unsigned)MI->getOperand(1).getIndex();
+
+    // If this is the first entry of the pool, mark it.
+    if (!InConstantPool) {
+      OutStreamer.EmitDataRegion(MCDR_DataRegion);
+      InConstantPool = true;
+    }
+
+    OutStreamer.EmitLabel(GetCPISymbol(LabelId));
+
+    const MachineConstantPoolEntry &MCPE = MCP->getConstants()[CPIdx];
+    if (MCPE.isMachineConstantPoolEntry())
+      EmitMachineConstantPoolValue(MCPE.Val.MachineCPVal);
+    else
+      EmitGlobalConstant(MCPE.Val.ConstVal);
+    return;
+  }
+
 
   MachineBasicBlock::const_instr_iterator I = MI;
   MachineBasicBlock::const_instr_iterator E = MI->getParent()->instr_end();
@@ -238,16 +276,15 @@ void MipsAsmPrinter::EmitFunctionEntryLabel() {
   }
 
   if (Subtarget->inMicroMipsMode())
-    if (MipsELFStreamer *MES = dyn_cast<MipsELFStreamer>(&OutStreamer))
-      MES->emitMipsSTOCG(*Subtarget, CurrentFnSym,
-      (unsigned)ELF::STO_MIPS_MICROMIPS);
+    getTargetStreamer().emitMipsHackSTOCG(CurrentFnSym,
+                                          (unsigned)ELF::STO_MIPS_MICROMIPS);
   OutStreamer.EmitLabel(CurrentFnSym);
 }
 
 /// EmitFunctionBodyStart - Targets can override this to emit stuff before
 /// the first basic block in the function.
 void MipsAsmPrinter::EmitFunctionBodyStart() {
-  MCInstLowering.Initialize(Mang, &MF->getContext());
+  MCInstLowering.Initialize(&MF->getContext());
 
   bool IsNakedFunction =
     MF->getFunction()->
@@ -284,6 +321,12 @@ void MipsAsmPrinter::EmitFunctionBodyEnd() {
     }
     OutStreamer.EmitRawText("\t.end\t" + Twine(CurrentFnSym->getName()));
   }
+  // Make sure to terminate any constant pools that were at the end
+  // of the function.
+  if (!InConstantPool)
+    return;
+  InConstantPool = false;
+  OutStreamer.EmitDataRegion(MCDR_DataRegionEnd);
 }
 
 /// isBlockOnlyReachableByFallthough - Return true if the basic block has
@@ -485,7 +528,7 @@ void MipsAsmPrinter::printOperand(const MachineInstr *MI, int opNum,
       return;
 
     case MachineOperand::MO_GlobalAddress:
-      O << *Mang->getSymbol(MO.getGlobal());
+      O << *getSymbol(MO.getGlobal());
       break;
 
     case MachineOperand::MO_BlockAddress: {
@@ -587,15 +630,54 @@ void MipsAsmPrinter::EmitStartOfAsmFile(Module &M) {
 
 }
 
+static void emitELFHeaderFlagsCG(MipsTargetStreamer &TargetStreamer,
+                                 const MipsSubtarget &Subtarget) {
+  // Update e_header flags
+  unsigned EFlags = 0;
+
+  // TODO: Need to add -mabicalls and -mno-abicalls flags.
+  // Currently we assume that -mabicalls is the default.
+  EFlags |= ELF::EF_MIPS_CPIC;
+
+  if (Subtarget.inMips16Mode())
+    EFlags |= ELF::EF_MIPS_ARCH_ASE_M16;
+  else
+    EFlags |= ELF::EF_MIPS_NOREORDER;
+
+  // Architecture
+  if (Subtarget.hasMips64r2())
+    EFlags |= ELF::EF_MIPS_ARCH_64R2;
+  else if (Subtarget.hasMips64())
+    EFlags |= ELF::EF_MIPS_ARCH_64;
+  else if (Subtarget.hasMips32r2())
+    EFlags |= ELF::EF_MIPS_ARCH_32R2;
+  else
+    EFlags |= ELF::EF_MIPS_ARCH_32;
+
+  if (Subtarget.inMicroMipsMode())
+    EFlags |= ELF::EF_MIPS_MICROMIPS;
+
+  // ABI
+  if (Subtarget.isABI_O32())
+    EFlags |= ELF::EF_MIPS_ABI_O32;
+
+  // Relocation Model
+  Reloc::Model RM = Subtarget.getRelocationModel();
+  if (RM == Reloc::PIC_ || RM == Reloc::Default)
+    EFlags |= ELF::EF_MIPS_PIC;
+  else if (RM == Reloc::Static)
+    ; // Do nothing for Reloc::Static
+  else
+    llvm_unreachable("Unsupported relocation model for e_flags");
+
+  TargetStreamer.emitMipsHackELFFlags(EFlags);
+}
+
 void MipsAsmPrinter::EmitEndOfAsmFile(Module &M) {
-
-  if (OutStreamer.hasRawTextSupport()) return;
-
   // Emit Mips ELF register info
   Subtarget->getMReginfo().emitMipsReginfoSectionCG(
              OutStreamer, getObjFileLowering(), *Subtarget);
-  if (MipsELFStreamer *MES = dyn_cast<MipsELFStreamer>(&OutStreamer))
-    MES->emitELFHeaderFlagsCG(*Subtarget);
+  emitELFHeaderFlagsCG(getTargetStreamer(), *Subtarget);
 }
 
 void MipsAsmPrinter::PrintDebugValueComment(const MachineInstr *MI,

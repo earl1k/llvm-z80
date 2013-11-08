@@ -120,6 +120,14 @@ class A64InstRdnm<dag outs, dag ins, string asmstr,
   let Inst{20-16} = Rm;
 }
 
+class A64InstRtnm<dag outs, dag ins, string asmstr,
+                  list<dag> patterns, InstrItinClass itin>
+  : A64InstRtn<outs, ins, asmstr, patterns, itin> {
+  bits<5> Rm;
+
+  let Inst{20-16} = Rm;
+}
+
 //===----------------------------------------------------------------------===//
 //
 // Actual A64 Instruction Formats
@@ -383,6 +391,8 @@ class A64I_extract<bit sf, bits<3> op, bit n,
   // Inherits Rd in 4-0
 }
 
+let Predicates = [HasFPARMv8] in {
+
 // Format for floating-point compare instructions.
 class A64I_fpcmp<bit m, bit s, bits<2> type, bits<2> op, bits<5> opcode2,
                 dag outs, dag ins, string asmstr,
@@ -560,6 +570,8 @@ class A64I_fpimm<bit m, bit s, bits<2> type, bits<5> imm5,
   let Inst{12-10} = 0b100;
   let Inst{9-5} = imm5;
   // Inherit Rd in 4-0
+}
+
 }
 
 // Format for load-register (literal) instructions.
@@ -971,21 +983,95 @@ class NeonInstAlias<string Asm, dag Result, bit Emit = 0b1>
   : InstAlias<Asm, Result, Emit> {
 }
 
+// Format AdvSIMD bitwise extract
+class NeonI_BitExtract<bit q, bits<2> op2,
+                       dag outs, dag ins, string asmstr,
+                       list<dag> patterns, InstrItinClass itin>
+  : A64InstRdnm<outs, ins, asmstr, patterns, itin> {
+  let Inst{31} = 0b0;
+  let Inst{30} = q;
+  let Inst{29-24} = 0b101110;
+  let Inst{23-22} = op2;
+  let Inst{21} = 0b0;
+  // Inherit Rm in 20-16
+  let Inst{15} = 0b0;
+  // imm4 in 14-11
+  let Inst{10} = 0b0;
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
+// Format AdvSIMD perm
+class NeonI_Perm<bit q, bits<2> size, bits<3> opcode,
+                 dag outs, dag ins, string asmstr,
+                 list<dag> patterns, InstrItinClass itin>
+  : A64InstRdnm<outs, ins, asmstr, patterns, itin> {
+  let Inst{31} = 0b0;
+  let Inst{30} = q;
+  let Inst{29-24} = 0b001110;
+  let Inst{23-22} = size;
+  let Inst{21} = 0b0;
+  // Inherit Rm in 20-16
+  let Inst{15} = 0b0;
+  let Inst{14-12} = opcode;
+  let Inst{11-10} = 0b10;
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
 // Format AdvSIMD 3 vector registers with same vector type
 class NeonI_3VSame<bit q, bit u, bits<2> size, bits<5> opcode,
                    dag outs, dag ins, string asmstr,
                    list<dag> patterns, InstrItinClass itin>
-  : A64InstRdnm<outs, ins, asmstr, patterns, itin>
-{
+  : A64InstRdnm<outs, ins, asmstr, patterns, itin> {
   let Inst{31} = 0b0;
   let Inst{30} = q;
   let Inst{29} = u;
   let Inst{28-24} = 0b01110;
   let Inst{23-22} = size;
   let Inst{21} = 0b1;
-   // Inherit Rm in 20-16
+  // Inherit Rm in 20-16
   let Inst{15-11} = opcode;
   let Inst{10} = 0b1;
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
+// Format AdvSIMD 3 vector registers with different vector type
+class NeonI_3VDiff<bit q, bit u, bits<2> size, bits<4> opcode,
+                   dag outs, dag ins, string asmstr,
+                   list<dag> patterns, InstrItinClass itin>
+  : A64InstRdnm<outs, ins, asmstr, patterns, itin> {
+  let Inst{31} = 0b0;
+  let Inst{30} = q;
+  let Inst{29} = u;
+  let Inst{28-24} = 0b01110;
+  let Inst{23-22} = size;
+  let Inst{21} = 0b1;
+  // Inherit Rm in 20-16
+  let Inst{15-12} = opcode;
+  let Inst{11} = 0b0;
+  let Inst{10} = 0b0;
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
+// Format AdvSIMD two registers and an element
+class NeonI_2VElem<bit q, bit u, bits<2> size, bits<4> opcode,
+                   dag outs, dag ins, string asmstr,
+                   list<dag> patterns, InstrItinClass itin>
+  : A64InstRdnm<outs, ins, asmstr, patterns, itin> {
+  let Inst{31} = 0b0;
+  let Inst{30} = q;
+  let Inst{29} = u;
+  let Inst{28-24} = 0b01111;
+  let Inst{23-22} = size;
+  // l in Inst{21}
+  // m in Inst{20}
+  // Inherit Rm in 19-16
+  let Inst{15-12} = opcode;
+  // h in Inst{11}
+  let Inst{10} = 0b0;
   // Inherit Rn in 9-5
   // Inherit Rd in 4-0
 }
@@ -994,8 +1080,7 @@ class NeonI_3VSame<bit q, bit u, bits<2> size, bits<5> opcode,
 class NeonI_1VModImm<bit q, bit op,
                      dag outs, dag ins, string asmstr,
                      list<dag> patterns, InstrItinClass itin>
-  : A64InstRd<outs,ins, asmstr, patterns, itin>
-{
+  : A64InstRd<outs,ins, asmstr, patterns, itin> {
   bits<8> Imm;
   bits<4> cmode;
   let Inst{31} = 0b0;
@@ -1015,15 +1100,14 @@ class NeonI_1VModImm<bit q, bit op,
 class NeonI_Scalar3Same<bit u, bits<2> size, bits<5> opcode,
                           dag outs, dag ins, string asmstr,
                           list<dag> patterns, InstrItinClass itin>
-  : A64InstRdnm<outs, ins, asmstr, patterns, itin>
-{
+  : A64InstRdnm<outs, ins, asmstr, patterns, itin> {
   let Inst{31} = 0b0;
   let Inst{30} = 0b1;
   let Inst{29} = u;
   let Inst{28-24} = 0b11110;
   let Inst{23-22} = size;
   let Inst{21} = 0b1;
-   // Inherit Rm in 20-16
+  // Inherit Rm in 20-16
   let Inst{15-11} = opcode;
   let Inst{10} = 0b1;
   // Inherit Rn in 9-5
@@ -1035,8 +1119,7 @@ class NeonI_Scalar3Same<bit u, bits<2> size, bits<5> opcode,
 class NeonI_2VMisc<bit q, bit u, bits<2> size, bits<5> opcode,
                    dag outs, dag ins, string asmstr,
                    list<dag> patterns, InstrItinClass itin>
-  : A64InstRdn<outs, ins, asmstr, patterns, itin>
-{
+  : A64InstRdn<outs, ins, asmstr, patterns, itin> {
   let Inst{31} = 0b0;
   let Inst{30} = q;
   let Inst{29} = u;
@@ -1054,8 +1137,7 @@ class NeonI_2VMisc<bit q, bit u, bits<2> size, bits<5> opcode,
 class NeonI_2VShiftImm<bit q, bit u, bits<5> opcode,
                        dag outs, dag ins, string asmstr,
                        list<dag> patterns, InstrItinClass itin>
-  : A64InstRdn<outs, ins, asmstr, patterns, itin>
-{
+  : A64InstRdn<outs, ins, asmstr, patterns, itin> {
   bits<7> Imm;
   let Inst{31} = 0b0;
   let Inst{30} = q;
@@ -1065,6 +1147,214 @@ class NeonI_2VShiftImm<bit q, bit u, bits<5> opcode,
   let Inst{15-11} = opcode;
   let Inst{10} = 0b1;
   
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
+// Format AdvSIMD duplicate and insert
+class NeonI_copy<bit q, bit op, bits<4> imm4,
+                 dag outs, dag ins, string asmstr,
+                 list<dag> patterns, InstrItinClass itin>
+  : A64InstRdn<outs, ins, asmstr, patterns, itin> {
+  bits<5> Imm5;
+  let Inst{31} = 0b0;
+  let Inst{30} = q;
+  let Inst{29} = op;
+  let Inst{28-21} = 0b01110000;
+  let Inst{20-16} = Imm5;
+  let Inst{15} = 0b0;
+  let Inst{14-11} = imm4;
+  let Inst{10} = 0b1;
+  
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+// Format AdvSIMD insert from element to vector
+class NeonI_insert<bit q, bit op,
+                  dag outs, dag ins, string asmstr,
+                  list<dag> patterns, InstrItinClass itin>
+  : A64InstRdn<outs, ins, asmstr, patterns, itin> {
+  bits<5> Imm5;
+  bits<4> Imm4;
+  let Inst{31} = 0b0;
+  let Inst{30} = q;
+  let Inst{29} = op;
+  let Inst{28-21} = 0b01110000;
+  let Inst{20-16} = Imm5;
+  let Inst{15} = 0b0;
+  let Inst{14-11} = Imm4;
+  let Inst{10} = 0b1;
+  
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
+// Format AdvSIMD scalar pairwise
+class NeonI_ScalarPair<bit u, bits<2> size, bits<5> opcode,
+                          dag outs, dag ins, string asmstr,
+                          list<dag> patterns, InstrItinClass itin>
+  : A64InstRdn<outs, ins, asmstr, patterns, itin> {
+  let Inst{31} = 0b0;
+  let Inst{30} = 0b1;
+  let Inst{29} = u;
+  let Inst{28-24} = 0b11110;
+  let Inst{23-22} = size;
+  let Inst{21-17} = 0b11000;
+  let Inst{16-12} = opcode;
+  let Inst{11-10} = 0b10;
+
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
+// Format AdvSIMD 2 vector across lanes
+class NeonI_2VAcross<bit q, bit u, bits<2> size, bits<5> opcode,
+                     dag outs, dag ins, string asmstr,
+                     list<dag> patterns, InstrItinClass itin>
+  : A64InstRdn<outs, ins, asmstr, patterns, itin>
+{
+  let Inst{31} = 0b0;
+  let Inst{30} = q;
+  let Inst{29} = u;
+  let Inst{28-24} = 0b01110;
+  let Inst{23-22} = size;
+  let Inst{21-17} = 0b11000;
+  let Inst{16-12} = opcode;
+  let Inst{11-10} = 0b10;
+
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
+// Format AdvSIMD scalar two registers miscellaneous
+class NeonI_Scalar2SameMisc<bit u, bits<2> size, bits<5> opcode, dag outs, dag ins,
+                            string asmstr, list<dag> patterns, InstrItinClass itin>
+  : A64InstRdn<outs, ins, asmstr, patterns, itin> {
+  let Inst{31} = 0b0;
+  let Inst{30} = 0b1;
+  let Inst{29} = u;
+  let Inst{28-24} = 0b11110;
+  let Inst{23-22} = size;
+  let Inst{21-17} = 0b10000;
+  let Inst{16-12} = opcode;
+  let Inst{11-10} = 0b10;
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
+// Format AdvSIMD vector load/store multiple N-element structure
+class NeonI_LdStMult<bit q, bit l, bits<4> opcode, bits<2> size,
+                    dag outs, dag ins, string asmstr,
+                    list<dag> patterns, InstrItinClass itin>
+  : A64InstRtn<outs, ins, asmstr, patterns, itin>
+{
+  let Inst{31} = 0b0;
+  let Inst{30} = q;
+  let Inst{29-23} = 0b0011000;
+  let Inst{22} = l;
+  let Inst{21-16} = 0b000000;
+  let Inst{15-12} = opcode;
+  let Inst{11-10} = size;
+  
+  // Inherit Rn in 9-5
+  // Inherit Rt in 4-0
+}
+
+// Format AdvSIMD vector load/store multiple N-element structure (post-index)
+class NeonI_LdStMult_Post<bit q, bit l, bits<4> opcode, bits<2> size,
+                         dag outs, dag ins, string asmstr,
+                         list<dag> patterns, InstrItinClass itin>
+  : A64InstRtnm<outs, ins, asmstr, patterns, itin>
+{
+  let Inst{31} = 0b0;
+  let Inst{30} = q;
+  let Inst{29-23} = 0b0011001;
+  let Inst{22} = l;
+  let Inst{21} = 0b0;
+  // Inherit Rm in 20-16
+  let Inst{15-12} = opcode;
+  let Inst{11-10} = size;
+  // Inherit Rn in 9-5
+  // Inherit Rt in 4-0
+}
+
+// Format AdvSIMD 3 scalar registers with different type
+
+class NeonI_Scalar3Diff<bit u, bits<2> size, bits<4> opcode,
+                          dag outs, dag ins, string asmstr,
+                          list<dag> patterns, InstrItinClass itin>
+  : A64InstRdnm<outs, ins, asmstr, patterns, itin> {
+  let Inst{31-30} = 0b01;
+  let Inst{29} = u;
+  let Inst{28-24} = 0b11110;
+  let Inst{23-22} = size;
+  let Inst{21} = 0b1;
+  // Inherit Rm in 20-16
+  let Inst{15-12} = opcode;
+  let Inst{11-10} = 0b00;
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
+// Format AdvSIMD scalar shift by immediate
+
+class NeonI_ScalarShiftImm<bit u, bits<5> opcode,
+                           dag outs, dag ins, string asmstr,
+                           list<dag> patterns, InstrItinClass itin>
+  : A64InstRdn<outs, ins, asmstr, patterns, itin> {
+  bits<4> Imm4;
+  bits<3> Imm3;
+  let Inst{31-30} = 0b01;
+  let Inst{29} = u;
+  let Inst{28-23} = 0b111110;
+  let Inst{22-19} = Imm4;
+  let Inst{18-16} = Imm3;
+  let Inst{15-11} = opcode;
+  let Inst{10} = 0b1;
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
+// Format AdvSIMD crypto AES
+class NeonI_Crypto_AES<bits<2> size, bits<5> opcode,
+                       dag outs, dag ins, string asmstr,
+                       list<dag> patterns, InstrItinClass itin>
+  : A64InstRdn<outs, ins, asmstr, patterns, itin> {
+  let Inst{31-24} = 0b01001110;
+  let Inst{23-22} = size;
+  let Inst{21-17} = 0b10100;
+  let Inst{16-12} = opcode;
+  let Inst{11-10} = 0b10;
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
+// Format AdvSIMD crypto SHA
+class NeonI_Crypto_SHA<bits<2> size, bits<5> opcode,
+                       dag outs, dag ins, string asmstr,
+                       list<dag> patterns, InstrItinClass itin>
+  : A64InstRdn<outs, ins, asmstr, patterns, itin> {
+  let Inst{31-24} = 0b01011110;
+  let Inst{23-22} = size;
+  let Inst{21-17} = 0b10100;
+  let Inst{16-12} = opcode;
+  let Inst{11-10} = 0b10;
+  // Inherit Rn in 9-5
+  // Inherit Rd in 4-0
+}
+
+// Format AdvSIMD crypto 3V SHA
+class NeonI_Crypto_3VSHA<bits<2> size, bits<3> opcode,
+                         dag outs, dag ins, string asmstr,
+                         list<dag> patterns, InstrItinClass itin>
+  : A64InstRdnm<outs, ins, asmstr, patterns, itin> {
+  let Inst{31-24} = 0b01011110;
+  let Inst{23-22} = size;
+  let Inst{21} = 0b0;
+  // Inherit Rm in 20-16
+  let Inst{15} = 0b0;
+  let Inst{14-12} = opcode;
+  let Inst{11-10} = 0b00;
   // Inherit Rn in 9-5
   // Inherit Rd in 4-0
 }
