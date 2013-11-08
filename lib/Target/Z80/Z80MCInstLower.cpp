@@ -79,7 +79,7 @@ MCSymbol *Z80MCInstLower::GetGlobalAddressSymbol(
 {
   if (MO.getTargetFlags() != 0)
     llvm_unreachable("Unknown target flag on GV operand");
-  return AsmPrinter.Mang->getSymbol(MO.getGlobal());
+  return AsmPrinter.getSymbol(MO.getGlobal());
 }
 
 MCSymbol *Z80MCInstLower::GetExternalSymbolSymbol(

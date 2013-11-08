@@ -66,7 +66,10 @@ namespace {
   }; // end class Z80AsmBackend
 } // end namespace
 
-MCAsmBackend *llvm::createZ80AsmBackend(const Target &T, StringRef TT, StringRef CPU)
+MCAsmBackend *llvm::createZ80AsmBackend(const Target &T,
+                                        const MCRegisterInfo &MRI,
+                                        StringRef TT,
+                                        StringRef CPU)
 {
   return new Z80AsmBackend(T, CPU);
 }
